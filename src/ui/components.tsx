@@ -12,6 +12,8 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
+import { router, usePathname } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, radii, shadows, sizes, spacing, typography } from './theme';
 
@@ -212,11 +214,13 @@ export function Screen({
   scroll = true,
   fixedHeader,
   stickyFooter,
+  stickyFooterStyle,
 }: {
   children: ReactNode;
   scroll?: boolean;
   fixedHeader?: ReactNode;
   stickyFooter?: ReactNode;
+  stickyFooterStyle?: ViewStyle;
 }) {
   const content = scroll ? (
     <ScrollView
@@ -235,8 +239,100 @@ export function Screen({
       ) : null}
       {content}
       {stickyFooter ? (
-        <View style={styles.stickyFooter}>{stickyFooter}</View>
+        <View style={[styles.stickyFooter, stickyFooterStyle]}>
+          {stickyFooter}
+        </View>
       ) : null}
+    </View>
+  );
+}
+
+const NAV_ITEMS = [
+  { href: '/' as const, label: 'Accueil' },
+  { href: '/treatments' as const, label: 'Traitements' },
+  { href: '/inventory' as const, label: 'Stock' },
+  { href: '/more' as const, label: 'Plus' },
+];
+
+export function BottomNavigation() {
+  const pathname = usePathname();
+  const visible =
+    NAV_ITEMS.some(({ href }) => pathname === href) ||
+    pathname === '/preparations/new' ||
+    pathname === '/inventory/new';
+  if (!visible) return null;
+  return (
+    <SafeAreaView edges={['bottom']} style={styles.navigationSafeArea}>
+      <View accessibilityRole="tablist" style={styles.bottomNavigation}>
+        {NAV_ITEMS.map((item) => {
+          const selected = pathname === item.href;
+          return (
+            <Pressable
+              key={item.href}
+              accessibilityLabel={item.label}
+              accessibilityRole="tab"
+              accessibilityState={{ selected }}
+              onPress={() => router.navigate(item.href)}
+              style={({ pressed }) => [
+                styles.navItem,
+                pressed && styles.navItemPressed,
+              ]}
+            >
+              <View accessibilityElementsHidden style={styles.navIconArea}>
+                <NavigationIcon
+                  kind={item.href}
+                  color={selected ? colors.brand : colors.textMuted}
+                />
+              </View>
+              <Text
+                adjustsFontSizeToFit
+                maxFontSizeMultiplier={1.2}
+                minimumFontScale={0.8}
+                numberOfLines={1}
+                style={[styles.navLabel, selected && styles.navTextSelected]}
+              >
+                {item.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function NavigationIcon({
+  kind,
+  color,
+}: {
+  kind: (typeof NAV_ITEMS)[number]['href'];
+  color: string;
+}) {
+  if (kind === '/') {
+    return (
+      <View style={styles.homeIcon}>
+        <View style={[styles.homeRoof, { borderColor: color }]} />
+        <View style={[styles.homeBody, { borderColor: color }]} />
+      </View>
+    );
+  }
+  if (kind === '/treatments')
+    return (
+      <View style={[styles.pillIcon, { borderColor: color }]}>
+        <View style={[styles.pillDivider, { backgroundColor: color }]} />
+      </View>
+    );
+  if (kind === '/inventory')
+    return (
+      <View style={[styles.stockIcon, { borderColor: color }]}>
+        <View style={[styles.stockLine, { backgroundColor: color }]} />
+      </View>
+    );
+  return (
+    <View style={styles.moreIcon}>
+      {[0, 1, 2].map((dot) => (
+        <View key={dot} style={[styles.moreDot, { backgroundColor: color }]} />
+      ))}
     </View>
   );
 }
@@ -454,4 +550,84 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
   },
+  navigationSafeArea: {
+    backgroundColor: colors.surface,
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+  },
+  bottomNavigation: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    height: 60,
+    maxWidth: sizes.screenMaxWidth,
+    paddingHorizontal: spacing.sm,
+    width: '100%',
+  },
+  navItem: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: sizes.touch,
+    minWidth: 0,
+    overflow: 'hidden',
+    paddingHorizontal: spacing.xs,
+    width: '25%',
+  },
+  navItemPressed: { opacity: 0.72 },
+  navIconArea: { alignItems: 'center', height: 25, justifyContent: 'center' },
+  navLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    maxWidth: '100%',
+    textAlign: 'center',
+  },
+  navTextSelected: { color: colors.brand },
+  homeIcon: { height: 20, width: 22 },
+  homeRoof: {
+    borderLeftWidth: 2,
+    borderTopWidth: 2,
+    height: 15,
+    left: 4,
+    position: 'absolute',
+    top: 0,
+    transform: [{ rotate: '45deg' }],
+    width: 15,
+  },
+  homeBody: {
+    borderBottomWidth: 2,
+    borderLeftWidth: 2,
+    borderRightWidth: 2,
+    bottom: 0,
+    height: 12,
+    left: 3,
+    position: 'absolute',
+    width: 16,
+  },
+  pillIcon: {
+    borderRadius: 9,
+    borderWidth: 2,
+    height: 16,
+    transform: [{ rotate: '-48deg' }],
+    width: 25,
+  },
+  pillDivider: {
+    height: 2,
+    left: 10,
+    position: 'absolute',
+    top: 5,
+    transform: [{ rotate: '90deg' }],
+    width: 12,
+  },
+  stockIcon: { borderRadius: 3, borderWidth: 2, height: 20, width: 20 },
+  stockLine: {
+    height: 2,
+    left: 2,
+    position: 'absolute',
+    top: 7,
+    transform: [{ rotate: '28deg' }],
+    width: 15,
+  },
+  moreIcon: { flexDirection: 'row', gap: 4 },
+  moreDot: { borderRadius: 3, height: 4, width: 4 },
 });

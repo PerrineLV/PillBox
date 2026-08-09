@@ -7,6 +7,10 @@ import type {
   IntakeRecord,
   IntakeStatus,
 } from '@/domain/intakes/intake-tracking';
+import {
+  formatFrenchDateTime,
+  formatLongFrenchCivilDate,
+} from '@/components/treatments/civil-date';
 import { localCivilDate } from '@/domain/reminders/intake-reminder';
 import {
   formatHalfUnits,
@@ -159,7 +163,8 @@ export default function IntakeHistoryScreen() {
         <Card key={record.key}>
           <Text style={typography.label}>{record.specialtyName}</Text>
           <Text style={typography.caption}>
-            {formatCivilDate(record.date)} · {SLOT_LABELS[record.slot]}
+            {formatLongFrenchCivilDate(record.date)} ·{' '}
+            {SLOT_LABELS[record.slot]}
           </Text>
           <Text style={typography.body}>
             {formatHalfUnits(record.quantityHalfUnits)} unité(s)
@@ -178,7 +183,7 @@ export default function IntakeHistoryScreen() {
           {reports[`${record.date}:${record.slot}`] ? (
             <Text style={typography.caption}>
               Reporté au{' '}
-              {formatDateTime(reports[`${record.date}:${record.slot}`])}
+              {formatFrenchDateTime(reports[`${record.date}:${record.slot}`])}
             </Text>
           ) : null}
           <View style={styles.actions}>
@@ -233,17 +238,6 @@ function dateDaysAgo(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() - days);
   return localCivilDate(date);
-}
-function formatCivilDate(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(
-    new Date(`${value}T12:00:00`),
-  );
-}
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }
 const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },

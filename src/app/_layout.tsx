@@ -1,12 +1,13 @@
 import * as Notifications from 'expo-notifications';
-import { router, Stack } from 'expo-router';
+import { router, Stack, usePathname } from 'expo-router';
 import { useEffect } from 'react';
-import { AppState } from 'react-native';
+import { AppState, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { DatabaseProvider } from '@/infrastructure/database/database-provider';
 import { AppLockGate } from '@/components/privacy/app-lock-gate';
-import { colors, typography } from '@/ui';
+import { BottomNavigation, colors, typography } from '@/ui';
 import {
   isPreparationReminder,
   intakeReminderDate,
@@ -28,25 +29,41 @@ Notifications.setNotificationHandler({
 
 export default function RootLayout() {
   usePreparationNotificationNavigation();
+  const pathname = usePathname();
+  const rootScreen = ['/', '/treatments', '/inventory', '/more'].includes(
+    pathname,
+  );
   return (
     <DatabaseProvider>
       <ReminderCoordinator />
       <AppLockGate>
-        <Stack
-          screenOptions={{
-            contentStyle: { backgroundColor: colors.background },
-            headerBackButtonDisplayMode: 'minimal',
-            headerShadowVisible: false,
-            headerStyle: { backgroundColor: colors.surface },
-            headerTintColor: colors.brand,
-            headerTitleStyle: typography.heading,
-            headerShown: false,
-          }}
-        />
+        <View style={{ flex: 1 }}>
+          <SafeAreaView
+            edges={rootScreen ? ['top'] : []}
+            style={styles.navigationContent}
+          >
+            <Stack
+              screenOptions={{
+                contentStyle: { backgroundColor: colors.background },
+                headerBackButtonDisplayMode: 'minimal',
+                headerShadowVisible: false,
+                headerStyle: { backgroundColor: colors.background },
+                headerTintColor: colors.brand,
+                headerTitleStyle: typography.heading,
+                headerShown: false,
+              }}
+            />
+          </SafeAreaView>
+          <BottomNavigation />
+        </View>
       </AppLockGate>
     </DatabaseProvider>
   );
 }
+
+const styles = {
+  navigationContent: { flex: 1 },
+} as const;
 
 function ReminderCoordinator() {
   const database = useSQLiteContext();

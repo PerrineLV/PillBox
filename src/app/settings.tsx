@@ -119,6 +119,7 @@ export default function SettingsScreen() {
   const [enabled, setEnabled] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [dayPickerOpen, setDayPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -561,7 +562,7 @@ export default function SettingsScreen() {
         <View style={styles.switchLabel}>
           <Text style={styles.label}>Rappels de prise</Text>
           <Text style={styles.help}>
-            S’applique automatiquement à tous les traitements non archivés.
+            S’applique à tous les traitements non archivés.
           </Text>
         </View>
         <Switch
@@ -576,46 +577,48 @@ export default function SettingsScreen() {
         Les médicaments prévus ensemble sont regroupés dans une seule
         notification.
       </Text>
-      {INTAKE_SLOTS.map((slot) => {
-        const time = slotTimes[slot];
-        const value = slotTimePickerDate(time);
-        return (
-          <View key={slot} style={styles.slotTimeField}>
-            <Text style={styles.label}>{SLOT_LABELS[slot]}</Text>
-            <Pressable
-              accessibilityLabel={`${SLOT_LABELS[slot]}, ${formatReminderTime(time.hour, time.minute)}`}
-              accessibilityHint="Ouvre le sélecteur d’heure"
-              accessibilityRole="button"
-              onPress={() => setActiveIntakeSlot(slot)}
-              style={styles.timeButton}
-            >
-              <Text style={styles.timeText}>
-                {formatReminderTime(time.hour, time.minute)}
-              </Text>
-            </Pressable>
-            {activeIntakeSlot === slot ? (
-              <>
-                <DateTimePicker
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  is24Hour
-                  mode="time"
-                  onChange={(event, date) =>
-                    chooseIntakeSlotTime(slot, event, date)
-                  }
-                  value={value}
-                />
-                {Platform.OS === 'ios' ? (
-                  <AppButton
-                    label="Valider cette heure"
-                    variant="secondary"
-                    onPress={() => setActiveIntakeSlot(null)}
+      <View style={styles.slotGrid}>
+        {INTAKE_SLOTS.map((slot) => {
+          const time = slotTimes[slot];
+          const value = slotTimePickerDate(time);
+          return (
+            <View key={slot} style={styles.slotTimeField}>
+              <Text style={styles.label}>{SLOT_LABELS[slot]}</Text>
+              <Pressable
+                accessibilityLabel={`${SLOT_LABELS[slot]}, ${formatReminderTime(time.hour, time.minute)}`}
+                accessibilityHint="Ouvre le sélecteur d’heure"
+                accessibilityRole="button"
+                onPress={() => setActiveIntakeSlot(slot)}
+                style={styles.timeButton}
+              >
+                <Text style={styles.timeText}>
+                  {formatReminderTime(time.hour, time.minute)}
+                </Text>
+              </Pressable>
+              {activeIntakeSlot === slot ? (
+                <>
+                  <DateTimePicker
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    is24Hour
+                    mode="time"
+                    onChange={(event, date) =>
+                      chooseIntakeSlotTime(slot, event, date)
+                    }
+                    value={value}
                   />
-                ) : null}
-              </>
-            ) : null}
-          </View>
-        );
-      })}
+                  {Platform.OS === 'ios' ? (
+                    <AppButton
+                      label="Valider cette heure"
+                      variant="secondary"
+                      onPress={() => setActiveIntakeSlot(null)}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
       {slotTimesDirty ? (
         <AppButton
           label="Enregistrer les heures de prise"
@@ -642,26 +645,47 @@ export default function SettingsScreen() {
       </View>
 
       <Text style={styles.label}>Jour</Text>
-      <View style={styles.days}>
-        {WEEKDAYS.map((weekday) => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: schedule.weekday === weekday }}
-            key={weekday}
-            onPress={() => chooseDay(weekday)}
-            style={[
-              styles.day,
-              schedule.weekday === weekday && styles.daySelected,
-            ]}
-          >
-            <Text
-              style={schedule.weekday === weekday && styles.dayTextSelected}
-            >
-              {DAY_LABELS[weekday]}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <Pressable
+        accessibilityLabel={`Jour de préparation, ${DAY_LABELS[schedule.weekday]}`}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: dayPickerOpen }}
+        onPress={() => setDayPickerOpen((open) => !open)}
+        style={styles.selectButton}
+      >
+        <Text style={styles.selectText}>{DAY_LABELS[schedule.weekday]}</Text>
+        <Text accessibilityElementsHidden style={styles.selectChevron}>
+          {dayPickerOpen ? '⌃' : '⌄'}
+        </Text>
+      </Pressable>
+      {dayPickerOpen ? (
+        <Card style={styles.dayMenu}>
+          {WEEKDAYS.map((weekday) => {
+            const selected = schedule.weekday === weekday;
+            return (
+              <Pressable
+                accessibilityRole="menuitem"
+                accessibilityState={{ selected }}
+                key={weekday}
+                onPress={() => {
+                  chooseDay(weekday);
+                  setDayPickerOpen(false);
+                }}
+                style={[styles.dayOption, selected && styles.dayOptionSelected]}
+              >
+                <Text
+                  style={[
+                    styles.dayOptionText,
+                    selected && styles.dayOptionTextSelected,
+                  ]}
+                >
+                  {DAY_LABELS[weekday]}
+                </Text>
+                {selected ? <Text style={styles.check}>✓</Text> : null}
+              </Pressable>
+            );
+          })}
+        </Card>
+      ) : null}
 
       <Text style={styles.label}>Heure</Text>
       <Pressable
@@ -819,46 +843,45 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     padding: spacing.lg,
   },
-  slotTimeField: { gap: spacing.sm },
-  dangerButton: {
-    alignItems: 'center',
-    backgroundColor: '#9E2A2B',
-    borderRadius: 8,
-    marginTop: 8,
-    padding: 14,
+  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  slotTimeField: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    gap: spacing.sm,
+    minWidth: 140,
+    padding: spacing.md,
+    width: '48%',
   },
-  divider: { backgroundColor: '#D8E0DE', height: 1, marginVertical: 8 },
-  day: {
+  selectButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
     borderColor: colors.borderStrong,
     borderRadius: radii.md,
     borderWidth: 1,
-    justifyContent: 'center',
+    flexDirection: 'row',
     minHeight: sizes.touch,
-    padding: 10,
+    paddingHorizontal: spacing.lg,
   },
-  daySelected: { backgroundColor: '#0F6F70', borderColor: '#0F6F70' },
-  dayTextSelected: { color: '#FFFFFF', fontWeight: '700' },
-  days: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  selectText: { ...typography.body, flex: 1, fontWeight: '700' },
+  selectChevron: { color: colors.brand, fontSize: 22 },
+  dayMenu: { gap: 0, padding: spacing.xs },
+  dayOption: {
+    alignItems: 'center',
+    borderRadius: radii.md,
+    flexDirection: 'row',
+    minHeight: sizes.touch,
+    paddingHorizontal: spacing.md,
+  },
+  dayOptionSelected: { backgroundColor: colors.brandSoft },
+  dayOptionText: { ...typography.body, flex: 1 },
+  dayOptionTextSelected: { color: colors.brand, fontWeight: '700' },
+  check: { color: colors.success, fontSize: 18, fontWeight: '800' },
   help: { ...typography.caption, marginTop: 4 },
   label: typography.label,
   linkText: { color: '#0F6F70', fontWeight: '600', paddingVertical: 8 },
-  message: { backgroundColor: '#EAF4F1', borderRadius: 8, padding: 12 },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#0F6F70',
-    borderRadius: 8,
-    padding: 14,
-  },
-  primaryButtonText: { color: '#FFFFFF', fontWeight: '700' },
   restoreSummary: { backgroundColor: colors.surface },
-  secondaryButton: {
-    alignItems: 'center',
-    borderColor: '#0F6F70',
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 14,
-  },
-  secondaryButtonText: { color: '#0F6F70', fontWeight: '700' },
   switchLabel: { flex: 1 },
   switchRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   timeButton: {
@@ -869,5 +892,4 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   timeText: { fontSize: 20, fontVariant: ['tabular-nums'] },
-  title: { fontSize: 26, fontWeight: '700' },
 });

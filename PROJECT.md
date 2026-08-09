@@ -55,7 +55,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 
 # Hors scope MVP
 
-Rappels de prise, conseils médicaux, interactions, diagnostic, lecture automatique d'ordonnance, professionnels de santé, profils multiples, synchronisation cloud, IA médicale, Mon espace santé.
+Conseils médicaux, interactions, diagnostic, lecture automatique d'ordonnance, professionnels de santé, profils multiples, synchronisation cloud, IA médicale, Mon espace santé.
 
 # Definition of Done MVP
 

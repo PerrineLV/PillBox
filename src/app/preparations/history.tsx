@@ -5,6 +5,10 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { formatHalfUnits } from '@/domain/treatments/treatment';
 import {
+  formatFrenchDateTime,
+  formatLongFrenchCivilDate,
+} from '@/components/treatments/civil-date';
+import {
   listPreparationHistory,
   type PreparationHistoryEntry,
 } from '@/infrastructure/preparations/preparation-repository';
@@ -64,9 +68,12 @@ export default function PreparationHistoryScreen() {
       {history.map((preparation) => (
         <Card key={preparation.id} style={styles.card}>
           <Text style={styles.title}>
-            Du {preparation.startDate} au {preparation.endDate}
+            Du {formatLongFrenchCivilDate(preparation.startDate)} au{' '}
+            {formatLongFrenchCivilDate(preparation.endDate)}
           </Text>
-          <Text style={styles.muted}>Validée le {preparation.completedAt}</Text>
+          <Text style={styles.muted}>
+            Validée le {formatFrenchDateTime(preparation.completedAt)}
+          </Text>
           {preparation.medications.map((medication) => (
             <View key={medication.specialtyCis} style={styles.medication}>
               <Text style={styles.name}>{medication.specialtyName}</Text>
@@ -74,7 +81,10 @@ export default function PreparationHistoryScreen() {
                 Quantité : {formatHalfUnits(medication.quantityHalfUnits)}
               </Text>
               <Text>Lot : {medication.lot ?? 'non renseigné'}</Text>
-              <Text>Péremption : {medication.expirationDate}</Text>
+              <Text>
+                Péremption :{' '}
+                {formatLongFrenchCivilDate(medication.expirationDate)}
+              </Text>
               <Text>
                 Présentation : {medication.presentationLabel} (
                 {medication.presentationCip13})
@@ -100,7 +110,6 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     padding: spacing.lg,
   },
-  error: { color: '#b91c1c', fontWeight: '700' },
   medication: {
     borderTopColor: '#e5e7eb',
     borderTopWidth: 1,

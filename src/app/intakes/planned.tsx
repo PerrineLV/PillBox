@@ -11,6 +11,10 @@ import type {
   IntakeStatus,
 } from '@/domain/intakes/intake-tracking';
 import {
+  formatFrenchDateTime,
+  formatFullFrenchCivilDate,
+} from '@/components/treatments/civil-date';
+import {
   formatHalfUnits,
   isIntakeSlot,
   type IntakeSlot,
@@ -257,7 +261,8 @@ export default function PlannedIntakeScreen() {
         return (
           <View key={groupKey(group)} style={styles.group}>
             <SectionTitle>
-              {SLOT_LABELS[group.slot]} · {formatCivilDate(group.date)}
+              {SLOT_LABELS[group.slot]} ·{' '}
+              {formatFullFrenchCivilDate(group.date)}
             </SectionTitle>
             {items.length > 0 ? (
               <AppButton
@@ -320,7 +325,7 @@ export default function PlannedIntakeScreen() {
             ))}
             {report ? (
               <Message tone="success">
-                Report programmé le {formatDateTime(report.scheduledAt)}.
+                Report programmé le {formatFrenchDateTime(report.scheduledAt)}.
               </Message>
             ) : null}
             <AppButton
@@ -419,17 +424,6 @@ function resolveGroups(params: {
 }
 function groupKey(group: { date: string; slot: IntakeSlot }): string {
   return `${group.date}:${group.slot}`;
-}
-function formatCivilDate(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'full' }).format(
-    new Date(`${value}T12:00:00`),
-  );
-}
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('fr-FR', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(value));
 }
 const styles = StyleSheet.create({
   group: { gap: spacing.md },

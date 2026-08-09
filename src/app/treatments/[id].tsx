@@ -85,7 +85,7 @@ export default function EditTreatmentScreen() {
       {treatment && treatment.archivedAt === null ? (
         <TreatmentForm
           initialValue={treatment}
-          submitLabel="Enregistrer"
+          submitLabel="Enregistrer les modifications"
           onSubmit={async (draft) => {
             await updateTreatment(database, {
               ...draft,
@@ -152,48 +152,5 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     gap: spacing.lg,
     padding: spacing.lg,
-  },
-  error: { color: '#b91c1c' },
-  archiveAction: {
-    borderColor: '#92400e',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 20,
-    padding: 14,
-  },
-  archiveActionText: {
-    color: '#92400e',
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  deleteAction: {
-    borderColor: '#b91c1c',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 20,
-    padding: 14,
-  },
-  deleteActionText: {
-    color: '#b91c1c',
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  archivedNotice: {
-    backgroundColor: '#fef3c7',
-    color: '#78350f',
-    marginTop: 12,
-    padding: 12,
-  },
-  secondaryAction: {
-    borderColor: '#2563eb',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 20,
-    padding: 14,
-  },
-  secondaryActionText: {
-    color: '#2563eb',
-    fontWeight: '700',
-    textAlign: 'center',
   },
 });
