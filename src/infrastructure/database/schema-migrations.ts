@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 9;
+export const LATEST_SCHEMA_VERSION = 10;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -337,6 +337,20 @@ export const SCHEMA_MIGRATIONS = [
       await transaction.execute(`
         ALTER TABLE treatments ADD COLUMN archived_at TEXT;
         CREATE INDEX treatments_archived_at_idx ON treatments(archived_at);
+      `);
+    },
+  },
+  {
+    version: 10,
+    name: 'ajout du suivi des sauvegardes locales',
+    async up(transaction) {
+      await transaction.execute(`
+        CREATE TABLE backup_settings (
+          singleton_id INTEGER PRIMARY KEY NOT NULL DEFAULT 1 CHECK (singleton_id = 1),
+          last_successful_backup_at TEXT
+        );
+
+        INSERT INTO backup_settings (singleton_id) VALUES (1);
       `);
     },
   },

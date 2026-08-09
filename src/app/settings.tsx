@@ -6,6 +6,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   Platform,
   Pressable,
@@ -15,6 +16,8 @@ import {
   Text,
   View,
 } from 'react-native';
+
+import type { PillBoxBackup, BackupSummary } from '@/domain/backup/backup';
 
 import {
   formatReminderTime,
@@ -31,6 +34,20 @@ import {
   getPreparationReminderSettings,
   savePreparationReminderSettings,
 } from '@/infrastructure/reminders/preparation-reminder-repository';
+import {
+  createBackup,
+  getLastSuccessfulBackupAt,
+  parseAndValidateBackup,
+  recordSuccessfulBackup,
+  restoreBackup,
+} from '@/infrastructure/backup/backup-repository';
+import { validateBackupCanRestore } from '@/infrastructure/backup/backup-validator';
+import {
+  chooseBackupFile,
+  sha256,
+  shareBackup,
+  writeSafetyBackup,
+} from '@/infrastructure/backup/backup-files';
 
 const DAY_LABELS: Record<Weekday, string> = {
   monday: 'Lundi',
@@ -58,14 +75,21 @@ export default function SettingsScreen() {
   const [saving, setSaving] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<{
+    backup: PillBoxBackup;
+    summary: BackupSummary;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
     void Promise.all([
       getPreparationReminderSettings(database),
       getLocalNotificationPermission(),
+      getLastSuccessfulBackupAt(database),
     ])
-      .then(async ([settings, permission]) => {
+      .then(async ([settings, permission, backupAt]) => {
         if (!active) return;
         const loaded = {
           weekday: settings.weekday,
@@ -74,6 +98,7 @@ export default function SettingsScreen() {
         };
         setSchedule(loaded);
         setPermissionDenied(permission === 'denied');
+        setLastBackupAt(backupAt);
         if (settings.enabled && permission === 'denied') {
           await cancelPreparationReminders();
           await savePreparationReminderSettings(database, loaded, null);
@@ -174,6 +199,135 @@ export default function SettingsScreen() {
       minute: date.getMinutes(),
     }));
     setDirty(true);
+  }
+
+  async function exportData(): Promise<void> {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setMessage(null);
+    try {
+      const createdAt = new Date().toISOString();
+      const backup = await createBackup(database, createdAt, sha256);
+      await shareBackup(backup);
+      await recordSuccessfulBackup(database, createdAt);
+      setLastBackupAt(createdAt);
+      setMessage(
+        'Sauvegarde exportée avec succès. Conservez ce fichier dans un emplacement sûr.',
+      );
+    } catch (reason: unknown) {
+      setMessage(
+        backupErrorMessage('La sauvegarde n’a pas pu être exportée', reason),
+      );
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function selectBackup(): Promise<void> {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setMessage(null);
+    setPendingRestore(null);
+    try {
+      const serialized = await chooseBackupFile();
+      if (serialized === null) return;
+      const candidate = await parseAndValidateBackup(serialized, sha256);
+      await validateBackupCanRestore(candidate.backup);
+      setPendingRestore(candidate);
+    } catch (reason: unknown) {
+      setMessage(backupErrorMessage('La sauvegarde a été refusée', reason));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  function confirmRestore(): void {
+    if (pendingRestore === null || backupBusy) return;
+    Alert.alert(
+      'Remplacer les données actuelles ?',
+      'Une sauvegarde de sécurité sera créée automatiquement sur ce téléphone. Cette action remplacera ensuite toutes les données personnelles actuelles.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Restaurer et remplacer',
+          style: 'destructive',
+          onPress: () => void performRestore(),
+        },
+      ],
+    );
+  }
+
+  async function performRestore(): Promise<void> {
+    if (pendingRestore === null || backupBusy) return;
+    setBackupBusy(true);
+    setMessage(null);
+    try {
+      const safety = await createBackup(
+        database,
+        new Date().toISOString(),
+        sha256,
+      );
+      await restoreBackup(database, pendingRestore.backup, async () => {
+        writeSafetyBackup(safety);
+      });
+      setLastBackupAt(await getLastSuccessfulBackupAt(database));
+      setPendingRestore(null);
+      try {
+        const restoredSettings = await getPreparationReminderSettings(database);
+        const restoredSchedule = {
+          weekday: restoredSettings.weekday,
+          hour: restoredSettings.hour,
+          minute: restoredSettings.minute,
+        };
+        setSchedule(restoredSchedule);
+        setDirty(false);
+        await cancelPreparationReminders();
+        if (restoredSettings.enabled) {
+          const identifier = await replacePreparationReminder(restoredSchedule);
+          await savePreparationReminderSettings(
+            database,
+            restoredSchedule,
+            identifier,
+          );
+          setEnabled(true);
+        } else {
+          setEnabled(false);
+        }
+        setMessage(
+          'Sauvegarde restaurée intégralement. Une copie de sécurité de l’ancien état est conservée sur ce téléphone.',
+        );
+      } catch (reason: unknown) {
+        try {
+          await cancelPreparationReminders();
+          const restoredSettings =
+            await getPreparationReminderSettings(database);
+          await savePreparationReminderSettings(
+            database,
+            restoredSettings,
+            null,
+          );
+        } catch {
+          // Les données restaurées restent valides ; le prochain chargement
+          // réconciliera à nouveau le rappel natif avec le réglage local.
+        }
+        setEnabled(false);
+        setMessage(
+          backupErrorMessage(
+            'Les données ont bien été restaurées, mais le rappel local doit être reconfiguré',
+            reason,
+          ),
+        );
+      }
+    } catch (reason: unknown) {
+      setMessage(
+        backupErrorMessage(
+          'La restauration a échoué ; les données précédentes ont été conservées',
+          reason,
+        ),
+      );
+    } finally {
+      setBackupBusy(false);
+    }
   }
 
   if (loading)
@@ -278,6 +432,64 @@ export default function SettingsScreen() {
           <Text style={styles.linkText}>Ouvrir les réglages Android</Text>
         </Pressable>
       ) : null}
+
+      <View style={styles.divider} />
+      <Text style={styles.title}>Sauvegarde des données</Text>
+      <Text style={styles.help}>
+        Le fichier contient vos traitements et d’autres données personnelles
+        sensibles. Il n’est pas chiffré : conservez-le dans un emplacement sûr
+        et ne le partagez qu’avec une personne de confiance.
+      </Text>
+      <Text style={styles.help}>
+        Dernière sauvegarde réussie :{' '}
+        {lastBackupAt === null ? 'aucune' : formatBackupDate(lastBackupAt)}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        disabled={backupBusy}
+        onPress={() => void exportData()}
+        style={styles.primaryButton}
+      >
+        <Text style={styles.primaryButtonText}>Exporter mes données</Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        disabled={backupBusy}
+        onPress={() => void selectBackup()}
+        style={styles.secondaryButton}
+      >
+        <Text style={styles.secondaryButtonText}>Restaurer une sauvegarde</Text>
+      </Pressable>
+      {backupBusy ? <ActivityIndicator /> : null}
+      {pendingRestore ? (
+        <View style={styles.restoreSummary}>
+          <Text style={styles.label}>Sauvegarde vérifiée</Text>
+          <Text>
+            Créée le {formatBackupDate(pendingRestore.summary.createdAt)}
+          </Text>
+          <Text>
+            Schéma PillBox : version {pendingRestore.summary.schemaVersion}
+          </Text>
+          <Text>
+            {pendingRestore.summary.treatments} traitement(s),{' '}
+            {pendingRestore.summary.boxes} boîte(s)
+          </Text>
+          <Text>
+            {pendingRestore.summary.stockMovements} mouvement(s) de stock,{' '}
+            {pendingRestore.summary.preparations} préparation(s)
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={backupBusy}
+            onPress={confirmRestore}
+            style={styles.dangerButton}
+          >
+            <Text style={styles.primaryButtonText}>
+              Confirmer le remplacement
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
     </ScrollView>
   );
 }
@@ -288,6 +500,19 @@ function errorMessage(reason: unknown): string {
     : 'Le rappel n’a pas pu être programmé.';
 }
 
+function backupErrorMessage(prefix: string, reason: unknown): string {
+  return reason instanceof Error
+    ? `${prefix} : ${reason.message}`
+    : `${prefix}.`;
+}
+
+function formatBackupDate(value: string): string {
+  return new Intl.DateTimeFormat('fr-FR', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
+
 const styles = StyleSheet.create({
   centered: {
     alignItems: 'center',
@@ -296,6 +521,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   container: { gap: 16, padding: 24 },
+  dangerButton: {
+    alignItems: 'center',
+    backgroundColor: '#9E2A2B',
+    borderRadius: 8,
+    marginTop: 8,
+    padding: 14,
+  },
+  divider: { backgroundColor: '#D8E0DE', height: 1, marginVertical: 8 },
   day: { borderColor: '#AAB8B4', borderRadius: 8, borderWidth: 1, padding: 10 },
   daySelected: { backgroundColor: '#0F6F70', borderColor: '#0F6F70' },
   dayTextSelected: { color: '#FFFFFF', fontWeight: '700' },
@@ -311,6 +544,20 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   primaryButtonText: { color: '#FFFFFF', fontWeight: '700' },
+  restoreSummary: {
+    backgroundColor: '#F4F7F6',
+    borderRadius: 8,
+    gap: 6,
+    padding: 14,
+  },
+  secondaryButton: {
+    alignItems: 'center',
+    borderColor: '#0F6F70',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 14,
+  },
+  secondaryButtonText: { color: '#0F6F70', fontWeight: '700' },
   switchLabel: { flex: 1 },
   switchRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   timeButton: {
