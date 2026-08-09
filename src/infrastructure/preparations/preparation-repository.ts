@@ -15,6 +15,24 @@ export type SavedPreparation = Readonly<{
   progress: readonly SavedPreparationProgress[];
 }>;
 
+export type PreparationHistoryEntry = Readonly<{
+  id: number;
+  startDate: string;
+  endDate: string;
+  completedAt: string;
+  medications: readonly Readonly<{
+    specialtyCis: string;
+    specialtyName: string;
+    quantityHalfUnits: number;
+    boxId: number;
+    presentationCip13: string;
+    presentationLabel: string;
+    lot: string | null;
+    serialNumber: string | null;
+    expirationDate: string;
+  }>[];
+}>;
+
 /** Persiste uniquement un nouveau snapshot ; aucune mise à jour de son contenu n'est exposée. */
 export async function createPreparation(
   database: SQLiteDatabase,
@@ -168,4 +186,186 @@ export async function savePreparationProgress(
     progress.scanRaw,
     progress.nonFefoAcknowledged ? 1 : 0,
   );
+}
+
+/**
+ * Valide et consomme une préparation en une transaction exclusive. Toutes les
+ * données de lot utiles à l'historique sont copiées au moment de la validation.
+ */
+export async function completePreparation(
+  database: SQLiteDatabase,
+  preparationId: number,
+  completionDate: string,
+): Promise<void> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)) {
+    throw new Error('La date de validation est invalide.');
+  }
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const preparation = await transaction.getFirstAsync<{ status: string }>(
+      'SELECT status FROM preparations WHERE id = ?',
+      preparationId,
+    );
+    if (preparation === null) throw new Error('Préparation introuvable.');
+    if (preparation.status !== 'DRAFT') {
+      throw new Error('Cette préparation est déjà terminée.');
+    }
+
+    const usages = await transaction.getAllAsync<{
+      specialty_cis: string;
+      specialty_name: string;
+      required_half_units: number;
+      box_id: number | null;
+      box_specialty_cis: string | null;
+      presentation_cip13: string | null;
+      presentation_label: string | null;
+      lot: string | null;
+      serial_number: string | null;
+      expiration_date: string | null;
+      remaining_quantity: number | null;
+    }>(
+      `SELECT requirement.specialty_cis, requirement.specialty_name,
+        requirement.required_half_units, progress.box_id,
+        box.specialty_cis AS box_specialty_cis,
+        box.presentation_cip13, box.presentation_label, box.lot,
+        box.serial_number, box.expiration_date, box.remaining_quantity
+       FROM preparation_requirements requirement
+       LEFT JOIN preparation_progress progress
+         ON progress.preparation_id = requirement.preparation_id
+        AND progress.specialty_cis = requirement.specialty_cis
+       LEFT JOIN medication_boxes box ON box.id = progress.box_id
+       WHERE requirement.preparation_id = ?
+       ORDER BY requirement.specialty_name`,
+      preparationId,
+    );
+
+    for (const usage of usages) {
+      if (
+        usage.box_id === null ||
+        usage.box_specialty_cis === null ||
+        usage.presentation_cip13 === null ||
+        usage.presentation_label === null ||
+        usage.expiration_date === null ||
+        usage.remaining_quantity === null
+      ) {
+        throw new Error(
+          'Tous les médicaments doivent être vérifiés avant la validation finale.',
+        );
+      }
+      if (usage.box_specialty_cis !== usage.specialty_cis) {
+        throw new Error(
+          'Une boîte vérifiée ne correspond plus au médicament attendu.',
+        );
+      }
+      if (usage.expiration_date < completionDate) {
+        throw new Error(`Le lot ${usage.lot ?? 'sans numéro'} est périmé.`);
+      }
+      const consumedQuantity = usage.required_half_units / 2;
+      const quantityAfter = usage.remaining_quantity - consumedQuantity;
+      if (quantityAfter < 0) {
+        throw new Error(`Stock insuffisant pour ${usage.specialty_name}.`);
+      }
+      const update = await transaction.runAsync(
+        `UPDATE medication_boxes
+         SET remaining_quantity = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND remaining_quantity = ?`,
+        quantityAfter,
+        usage.box_id,
+        usage.remaining_quantity,
+      );
+      if (update.changes !== 1) {
+        throw new Error(
+          'Le stock a changé. Rechargez la préparation puis réessayez.',
+        );
+      }
+      await transaction.runAsync(
+        `INSERT INTO stock_movements
+          (box_id, preparation_id, type, quantity_delta, quantity_after, explanation)
+         VALUES (?, ?, 'PILLBOX_PREPARATION', ?, ?, ?)`,
+        usage.box_id,
+        preparationId,
+        -consumedQuantity,
+        quantityAfter,
+        `Préparation du pilulier du ${completionDate}`,
+      );
+      await transaction.runAsync(
+        `INSERT INTO preparation_box_usages
+          (preparation_id, specialty_cis, specialty_name, box_id,
+           presentation_cip13, presentation_label, lot, serial_number,
+           expiration_date, quantity_half_units)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        preparationId,
+        usage.specialty_cis,
+        usage.specialty_name,
+        usage.box_id,
+        usage.presentation_cip13,
+        usage.presentation_label,
+        usage.lot,
+        usage.serial_number,
+        usage.expiration_date,
+        usage.required_half_units,
+      );
+    }
+
+    const completed = await transaction.runAsync(
+      `UPDATE preparations
+       SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND status = 'DRAFT'`,
+      preparationId,
+    );
+    if (completed.changes !== 1) {
+      throw new Error('Cette préparation est déjà terminée.');
+    }
+  });
+}
+
+export async function listPreparationHistory(
+  database: SQLiteDatabase,
+): Promise<PreparationHistoryEntry[]> {
+  const preparations = await database.getAllAsync<{
+    id: number;
+    start_date: string;
+    end_date: string;
+    completed_at: string;
+  }>(
+    `SELECT id, start_date, end_date, completed_at FROM preparations
+     WHERE status = 'COMPLETED' ORDER BY completed_at DESC, id DESC`,
+  );
+  const result: PreparationHistoryEntry[] = [];
+  for (const preparation of preparations) {
+    const medications = await database.getAllAsync<{
+      specialty_cis: string;
+      specialty_name: string;
+      quantity_half_units: number;
+      box_id: number;
+      presentation_cip13: string;
+      presentation_label: string;
+      lot: string | null;
+      serial_number: string | null;
+      expiration_date: string;
+    }>(
+      `SELECT specialty_cis, specialty_name, quantity_half_units, box_id,
+        presentation_cip13, presentation_label, lot, serial_number, expiration_date
+       FROM preparation_box_usages WHERE preparation_id = ?
+       ORDER BY specialty_name`,
+      preparation.id,
+    );
+    result.push({
+      id: preparation.id,
+      startDate: preparation.start_date,
+      endDate: preparation.end_date,
+      completedAt: preparation.completed_at,
+      medications: medications.map((item) => ({
+        specialtyCis: item.specialty_cis,
+        specialtyName: item.specialty_name,
+        quantityHalfUnits: item.quantity_half_units,
+        boxId: item.box_id,
+        presentationCip13: item.presentation_cip13,
+        presentationLabel: item.presentation_label,
+        lot: item.lot,
+        serialNumber: item.serial_number,
+        expirationDate: item.expiration_date,
+      })),
+    });
+  }
+  return result;
 }

@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 6;
+export const LATEST_SCHEMA_VERSION = 7;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -191,6 +191,121 @@ export const SCHEMA_MIGRATIONS = [
 
         CREATE INDEX preparation_progress_preparation_idx
           ON preparation_progress(preparation_id);
+      `);
+    },
+  },
+  {
+    version: 7,
+    name: 'validation finale et historique des préparations',
+    async up(transaction) {
+      await transaction.execute(`
+        ALTER TABLE preparation_progress RENAME TO preparation_progress_v6;
+        ALTER TABLE preparation_requirements RENAME TO preparation_requirements_v6;
+        ALTER TABLE preparation_items RENAME TO preparation_items_v6;
+        ALTER TABLE preparations RENAME TO preparations_v6;
+
+        CREATE TABLE preparations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          start_date TEXT NOT NULL,
+          end_date TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'COMPLETED')),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          completed_at TEXT,
+          CHECK (end_date >= start_date),
+          CHECK ((status = 'DRAFT' AND completed_at IS NULL) OR
+                 (status = 'COMPLETED' AND completed_at IS NOT NULL))
+        );
+
+        CREATE TABLE preparation_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE RESTRICT,
+          source_treatment_id INTEGER NOT NULL,
+          specialty_cis TEXT NOT NULL,
+          specialty_name TEXT NOT NULL,
+          pharmaceutical_form TEXT,
+          intake_date TEXT NOT NULL,
+          slot TEXT NOT NULL CHECK (slot IN ('morning', 'noon', 'evening', 'bedtime')),
+          quantity_half_units INTEGER NOT NULL CHECK (quantity_half_units > 0)
+        );
+
+        CREATE TABLE preparation_requirements (
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE RESTRICT,
+          specialty_cis TEXT NOT NULL,
+          specialty_name TEXT NOT NULL,
+          required_half_units INTEGER NOT NULL CHECK (required_half_units > 0),
+          usable_stock_half_units INTEGER NOT NULL CHECK (usable_stock_half_units >= 0),
+          missing_half_units INTEGER NOT NULL CHECK (missing_half_units >= 0),
+          PRIMARY KEY (preparation_id, specialty_cis)
+        );
+
+        CREATE TABLE preparation_progress (
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE RESTRICT,
+          specialty_cis TEXT NOT NULL,
+          box_id INTEGER NOT NULL REFERENCES medication_boxes(id) ON DELETE RESTRICT,
+          scan_raw TEXT NOT NULL,
+          non_fefo_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK (non_fefo_acknowledged IN (0, 1)),
+          completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (preparation_id, specialty_cis),
+          FOREIGN KEY (preparation_id, specialty_cis)
+            REFERENCES preparation_requirements(preparation_id, specialty_cis)
+            ON DELETE RESTRICT
+        );
+
+        INSERT INTO preparations (id, start_date, end_date, status, created_at)
+        SELECT id, start_date, end_date, status, created_at FROM preparations_v6;
+        INSERT INTO preparation_items SELECT * FROM preparation_items_v6;
+        INSERT INTO preparation_requirements SELECT * FROM preparation_requirements_v6;
+        INSERT INTO preparation_progress SELECT * FROM preparation_progress_v6;
+
+        DROP TABLE preparation_progress_v6;
+        DROP TABLE preparation_requirements_v6;
+        DROP TABLE preparation_items_v6;
+        DROP TABLE preparations_v6;
+
+        DROP INDEX stock_movements_box_idx;
+        ALTER TABLE stock_movements RENAME TO stock_movements_v6;
+        CREATE TABLE stock_movements (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          box_id INTEGER NOT NULL REFERENCES medication_boxes(id) ON DELETE RESTRICT,
+          preparation_id INTEGER REFERENCES preparations(id) ON DELETE RESTRICT,
+          type TEXT NOT NULL CHECK (type IN ('BOX_ADDED', 'MANUAL_ADJUSTMENT', 'CORRECTION', 'PILLBOX_PREPARATION')),
+          quantity_delta REAL NOT NULL,
+          quantity_after REAL NOT NULL CHECK (quantity_after >= 0),
+          explanation TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK ((type = 'PILLBOX_PREPARATION' AND preparation_id IS NOT NULL) OR
+                 (type <> 'PILLBOX_PREPARATION' AND preparation_id IS NULL))
+        );
+        INSERT INTO stock_movements
+          (id, box_id, type, quantity_delta, quantity_after, explanation, created_at)
+        SELECT id, box_id, type, quantity_delta, quantity_after, explanation, created_at
+        FROM stock_movements_v6;
+        DROP TABLE stock_movements_v6;
+
+        CREATE TABLE preparation_box_usages (
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE RESTRICT,
+          specialty_cis TEXT NOT NULL,
+          specialty_name TEXT NOT NULL,
+          box_id INTEGER NOT NULL REFERENCES medication_boxes(id) ON DELETE RESTRICT,
+          presentation_cip13 TEXT NOT NULL,
+          presentation_label TEXT NOT NULL,
+          lot TEXT,
+          serial_number TEXT,
+          expiration_date TEXT NOT NULL,
+          quantity_half_units INTEGER NOT NULL CHECK (quantity_half_units > 0),
+          PRIMARY KEY (preparation_id, specialty_cis)
+        );
+
+        CREATE INDEX preparation_items_preparation_idx
+          ON preparation_items(preparation_id, intake_date, slot);
+        CREATE INDEX preparation_progress_preparation_idx
+          ON preparation_progress(preparation_id);
+        CREATE INDEX stock_movements_box_idx
+          ON stock_movements(box_id, created_at);
+        CREATE INDEX stock_movements_preparation_idx
+          ON stock_movements(preparation_id);
+        CREATE INDEX preparation_box_usages_preparation_idx
+          ON preparation_box_usages(preparation_id);
       `);
     },
   },

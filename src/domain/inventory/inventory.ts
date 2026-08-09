@@ -2,6 +2,7 @@ export const STOCK_MOVEMENT_TYPES = [
   'BOX_ADDED',
   'MANUAL_ADJUSTMENT',
   'CORRECTION',
+  'PILLBOX_PREPARATION',
 ] as const;
 
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];

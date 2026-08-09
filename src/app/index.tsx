@@ -8,6 +8,9 @@ export default function HomeScreen() {
       <Link href="/preparations/new" style={styles.primaryLink}>
         Préparer mon pilulier
       </Link>
+      <Link href="/preparations/history" style={styles.link}>
+        Historique des préparations
+      </Link>
       <Link href="/treatments" style={styles.link}>
         Mes traitements
       </Link>

@@ -35,6 +35,7 @@ import {
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
   createPreparation,
+  completePreparation,
   getLatestDraftPreparation,
   savePreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
@@ -63,6 +64,7 @@ export default function NewPreparationScreen() {
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [finalized, setFinalized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scanLocked = useRef(false);
 
@@ -224,6 +226,21 @@ export default function NewPreparationScreen() {
     }
   }
 
+  async function validateFinalPreparation(): Promise<void> {
+    if (preparationId === null || saving || finalized) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await completePreparation(database, preparationId, todayIso());
+      setFinalized(true);
+      setBoxes(await listMedicationBoxes(database));
+    } catch (reason: unknown) {
+      setError(message(reason, 'Validation finale impossible.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading)
     return (
       <Centered text="Chargement de la préparation…">
@@ -330,18 +347,63 @@ export default function NewPreparationScreen() {
           onValidate={validateMedication}
         />
       ) : null}
-      {snapshot && snapshot.requirements.length > 0 && current === null ? (
+      {snapshot && current === null && !finalized ? (
         <View style={styles.success}>
-          <Text style={styles.successTitle}>
-            Tous les médicaments sont préparés
-          </Text>
+          <Text style={styles.successTitle}>Contrôle final jour par jour</Text>
           <Text>
-            La progression est enregistrée. Le stock n’a pas été décrémenté ; la
-            validation finale sera réalisée séparément.
+            Vérifiez le contenu attendu de chaque case avant de décrémenter le
+            stock.
+          </Text>
+          <DailyFinalCheck snapshot={snapshot} />
+          <Button
+            disabled={saving}
+            title={
+              saving ? 'Validation…' : 'Valider définitivement la préparation'
+            }
+            onPress={() => void validateFinalPreparation()}
+          />
+        </View>
+      ) : null}
+      {finalized ? (
+        <View style={styles.success}>
+          <Text style={styles.successTitle}>Préparation validée</Text>
+          <Text>
+            Le stock et les lots utilisés ont été enregistrés dans l’historique.
           </Text>
         </View>
       ) : null}
     </ScrollView>
+  );
+}
+
+function DailyFinalCheck({ snapshot }: { snapshot: PreparationSnapshot }) {
+  const dates = Array.from({ length: 7 }, (_, offset) => {
+    const date = new Date(`${snapshot.startDate}T00:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() + offset);
+    return date.toISOString().slice(0, 10);
+  });
+  return (
+    <View style={styles.finalCheck}>
+      {dates.map((date) => (
+        <View key={date} style={styles.day}>
+          <Text style={styles.dayTitle}>{date}</Text>
+          {snapshot.items
+            .filter((item) => item.date === date)
+            .map((item, index) => (
+              <Text
+                key={`${item.slot}-${item.specialtyCis}-${index}`}
+                style={styles.case}
+              >
+                • {SLOT_LABELS[item.slot]} · {item.specialtyName} :{' '}
+                {formatHalfUnits(item.quantityHalfUnits)}
+              </Text>
+            ))}
+          {snapshot.items.every((item) => item.date !== date) ? (
+            <Text style={styles.case}>Aucune prise</Text>
+          ) : null}
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -461,6 +523,9 @@ const styles = StyleSheet.create({
   },
   container: { backgroundColor: '#fff', flexGrow: 1, padding: 16 },
   error: { color: '#b91c1c', fontWeight: '700', marginVertical: 12 },
+  finalCheck: { gap: 12, marginVertical: 12 },
+  day: { borderTopColor: '#d1d5db', borderTopWidth: 1, paddingTop: 8 },
+  dayTitle: { fontSize: 16, fontWeight: '800' },
   guide: {
     borderColor: '#fff',
     borderWidth: 2,
