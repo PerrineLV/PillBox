@@ -4,14 +4,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { Stack } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Button,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import { normalizeScannedGtinToCip13 } from '@/domain/medications/normalize-scanned-identifier';
@@ -19,6 +12,7 @@ import {
   findMedicationPresentationByCip13,
   type IdentifiedMedicationPresentation,
 } from '@/infrastructure/medications/medication-reference';
+import { AppButton, LoadingState, colors, spacing, typography } from '@/ui';
 
 export default function DataMatrixScannerScreen() {
   return (
@@ -110,7 +104,10 @@ function DataMatrixScanner() {
         <Text style={styles.permissionText}>
           La caméra est nécessaire pour lire un DataMatrix sur une boîte.
         </Text>
-        <Button title="Autoriser la caméra" onPress={requestPermission} />
+        <AppButton
+          label="Autoriser la caméra"
+          onPress={() => void requestPermission()}
+        />
       </View>
     );
   }
@@ -159,7 +156,7 @@ function DataMatrixScanner() {
           <Text style={styles.note}>
             Le GTIN et le RAW sont conservés tels quels.
           </Text>
-          <Button title="Scanner à nouveau" onPress={scanAgain} />
+          <AppButton label="Scanner à nouveau" onPress={scanAgain} />
         </ScrollView>
       )}
     </View>
@@ -172,7 +169,7 @@ function IdentificationResult({
   identification: IdentificationState;
 }) {
   if (identification.status === 'loading') {
-    return <ActivityIndicator accessibilityLabel="Identification en cours" />;
+    return <LoadingState label="Identification en cours…" />;
   }
 
   if (identification.status !== 'identified') {
@@ -217,7 +214,7 @@ function Result({
 
 const styles = StyleSheet.create({
   camera: { flex: 1 },
-  container: { backgroundColor: '#ffffff', flex: 1 },
+  container: { backgroundColor: colors.background, flex: 1 },
   guide: {
     alignItems: 'center',
     borderColor: '#ffffff',
@@ -229,8 +226,8 @@ const styles = StyleSheet.create({
     top: '35%',
   },
   guideText: { backgroundColor: '#00000099', color: '#ffffff', padding: 6 },
-  label: { fontSize: 14, fontWeight: '700', marginBottom: 4 },
-  note: { color: '#4b5563', fontSize: 14, marginBottom: 20 },
+  label: typography.label,
+  note: typography.caption,
   permissionContainer: {
     alignItems: 'center',
     flex: 1,
@@ -239,7 +236,7 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   permissionText: { textAlign: 'center' },
-  result: { padding: 20 },
+  result: { gap: spacing.md, padding: spacing.lg },
   resultBlock: { marginBottom: 16 },
   value: { backgroundColor: '#f3f4f6', fontFamily: 'monospace', padding: 10 },
 });

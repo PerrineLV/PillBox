@@ -2,19 +2,21 @@ import medicationReferenceAsset from '../../../assets/medications/medications.db
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { Link, Stack } from 'expo-router';
 import { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 
 import {
   searchMedicationReference,
   type MedicationSearchResult,
 } from '@/infrastructure/medications/medication-reference';
+import {
+  AppField,
+  Card,
+  EmptyState,
+  LoadingState,
+  colors,
+  spacing,
+  typography,
+} from '@/ui';
 
 export default function MedicationSearchScreen() {
   return (
@@ -70,24 +72,30 @@ function MedicationSearch() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: true, title: 'Médicaments' }} />
-      <TextInput
-        accessibilityLabel="Rechercher un médicament"
+      <AppField
+        label="Rechercher un médicament"
         autoCapitalize="none"
         autoCorrect={false}
         onChangeText={setQuery}
         placeholder="Nom, dosage ou forme"
-        style={styles.searchInput}
         value={query}
       />
-      {isSearching ? <ActivityIndicator /> : null}
-      {error === null ? null : <Text style={styles.error}>{error}</Text>}
+      {isSearching ? <LoadingState label="Recherche en cours…" /> : null}
+      {error === null ? null : (
+        <Text accessibilityRole="alert" style={styles.error}>
+          {error}
+        </Text>
+      )}
       <FlatList
         data={results}
         keyExtractor={(item) => item.cis}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           query.trim().length > 0 && !isSearching && error === null ? (
-            <Text style={styles.empty}>Aucun médicament trouvé.</Text>
+            <EmptyState
+              title="Aucun médicament trouvé"
+              description="Vérifiez l’orthographe, le dosage ou la forme. PillBox ne propose aucune correspondance incertaine."
+            />
           ) : null
         }
         renderItem={({ item }) => <MedicationResult result={item} />}
@@ -98,7 +106,7 @@ function MedicationSearch() {
 
 function MedicationResult({ result }: { result: MedicationSearchResult }) {
   return (
-    <View style={styles.result}>
+    <Card style={styles.result}>
       <Text style={styles.name}>{result.name}</Text>
       <Text>CIS {result.cis}</Text>
       {result.pharmaceuticalForm === null ? null : (
@@ -123,27 +131,37 @@ function MedicationResult({ result }: { result: MedicationSearchResult }) {
           <Text>{presentation.label}</Text>
         </View>
       ))}
-    </View>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#ffffff', flex: 1, padding: 16 },
-  createTreatment: { color: '#1d4ed8', fontWeight: '700', marginTop: 8 },
+  container: {
+    backgroundColor: colors.background,
+    flex: 1,
+    padding: spacing.lg,
+  },
+  createTreatment: {
+    backgroundColor: colors.brand,
+    borderRadius: 12,
+    color: colors.surface,
+    fontWeight: '700',
+    marginTop: 8,
+    minHeight: 48,
+    overflow: 'hidden',
+    padding: 13,
+    textAlign: 'center',
+  },
   empty: { color: '#4b5563', paddingTop: 24, textAlign: 'center' },
   error: { color: '#b91c1c', marginBottom: 12 },
-  name: { fontSize: 16, fontWeight: '700' },
+  name: typography.heading,
   presentation: {
     borderLeftColor: '#d1d5db',
     borderLeftWidth: 2,
     marginTop: 8,
     paddingLeft: 8,
   },
-  result: {
-    borderBottomColor: '#e5e7eb',
-    borderBottomWidth: 1,
-    paddingVertical: 14,
-  },
+  result: { marginBottom: spacing.md },
   searchInput: {
     borderColor: '#9ca3af',
     borderRadius: 8,

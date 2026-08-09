@@ -6,7 +6,6 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Platform,
   Pressable,
@@ -48,6 +47,19 @@ import {
   shareBackup,
   writeSafetyBackup,
 } from '@/infrastructure/backup/backup-files';
+import {
+  AppButton,
+  AppModal,
+  Card,
+  Divider,
+  Message,
+  SectionTitle,
+  colors,
+  radii,
+  sizes,
+  spacing,
+  typography,
+} from '@/ui';
 
 const DAY_LABELS: Record<Weekday, string> = {
   monday: 'Lundi',
@@ -81,6 +93,8 @@ export default function SettingsScreen() {
     backup: PillBoxBackup;
     summary: BackupSummary;
   } | null>(null);
+  const [restoreConfirmationVisible, setRestoreConfirmationVisible] =
+    useState(false);
 
   useEffect(() => {
     let active = true;
@@ -243,18 +257,7 @@ export default function SettingsScreen() {
 
   function confirmRestore(): void {
     if (pendingRestore === null || backupBusy) return;
-    Alert.alert(
-      'Remplacer les données actuelles ?',
-      'Une sauvegarde de sécurité sera créée automatiquement sur ce téléphone. Cette action remplacera ensuite toutes les données personnelles actuelles.',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Restaurer et remplacer',
-          style: 'destructive',
-          onPress: () => void performRestore(),
-        },
-      ],
-    );
+    setRestoreConfirmationVisible(true);
   }
 
   async function performRestore(): Promise<void> {
@@ -272,6 +275,7 @@ export default function SettingsScreen() {
       });
       setLastBackupAt(await getLastSuccessfulBackupAt(database));
       setPendingRestore(null);
+      setRestoreConfirmationVisible(false);
       try {
         const restoredSettings = await getPreparationReminderSettings(database);
         const restoredSchedule = {
@@ -344,7 +348,7 @@ export default function SettingsScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Stack.Screen options={{ headerShown: true, title: 'Réglages' }} />
-      <Text style={styles.title}>Rappel de préparation</Text>
+      <SectionTitle>Rappel de préparation</SectionTitle>
       <View style={styles.switchRow}>
         <View style={styles.switchLabel}>
           <Text style={styles.label}>Rappel hebdomadaire</Text>
@@ -410,31 +414,22 @@ export default function SettingsScreen() {
       ) : null}
 
       {enabled && dirty ? (
-        <Pressable
-          accessibilityRole="button"
-          disabled={saving}
+        <AppButton
+          label="Enregistrer le nouveau rappel"
+          loading={saving}
           onPress={() => void saveSchedule()}
-          style={styles.primaryButton}
-        >
-          <Text style={styles.primaryButtonText}>
-            Enregistrer le nouveau rappel
-          </Text>
-        </Pressable>
+        />
       ) : null}
       {saving ? <ActivityIndicator /> : null}
-      {message ? (
-        <Text accessibilityRole="alert" style={styles.message}>
-          {message}
-        </Text>
-      ) : null}
+      {message ? <Message>{message}</Message> : null}
       {permissionDenied ? (
         <Pressable onPress={() => void Linking.openSettings()}>
           <Text style={styles.linkText}>Ouvrir les réglages Android</Text>
         </Pressable>
       ) : null}
 
-      <View style={styles.divider} />
-      <Text style={styles.title}>Sauvegarde des données</Text>
+      <Divider />
+      <SectionTitle>Sauvegarde des données</SectionTitle>
       <Text style={styles.help}>
         Le fichier contient vos traitements et d’autres données personnelles
         sensibles. Il n’est pas chiffré : conservez-le dans un emplacement sûr
@@ -444,25 +439,20 @@ export default function SettingsScreen() {
         Dernière sauvegarde réussie :{' '}
         {lastBackupAt === null ? 'aucune' : formatBackupDate(lastBackupAt)}
       </Text>
-      <Pressable
-        accessibilityRole="button"
-        disabled={backupBusy}
+      <AppButton
+        label="Exporter mes données"
+        loading={backupBusy}
         onPress={() => void exportData()}
-        style={styles.primaryButton}
-      >
-        <Text style={styles.primaryButtonText}>Exporter mes données</Text>
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
+      />
+      <AppButton
+        label="Choisir une sauvegarde à restaurer"
+        variant="secondary"
         disabled={backupBusy}
         onPress={() => void selectBackup()}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonText}>Restaurer une sauvegarde</Text>
-      </Pressable>
+      />
       {backupBusy ? <ActivityIndicator /> : null}
       {pendingRestore ? (
-        <View style={styles.restoreSummary}>
+        <Card style={styles.restoreSummary}>
           <Text style={styles.label}>Sauvegarde vérifiée</Text>
           <Text>
             Créée le {formatBackupDate(pendingRestore.summary.createdAt)}
@@ -478,18 +468,29 @@ export default function SettingsScreen() {
             {pendingRestore.summary.stockMovements} mouvement(s) de stock,{' '}
             {pendingRestore.summary.preparations} préparation(s)
           </Text>
-          <Pressable
-            accessibilityRole="button"
+          <AppButton
+            label="Restaurer cette sauvegarde"
+            variant="danger"
             disabled={backupBusy}
             onPress={confirmRestore}
-            style={styles.dangerButton}
-          >
-            <Text style={styles.primaryButtonText}>
-              Confirmer le remplacement
-            </Text>
-          </Pressable>
-        </View>
+          />
+        </Card>
       ) : null}
+      <AppModal
+        visible={restoreConfirmationVisible}
+        title="Remplacer les données actuelles ?"
+        primaryLabel="Restaurer et remplacer"
+        destructive
+        busy={backupBusy}
+        onCancel={() => setRestoreConfirmationVisible(false)}
+        onPrimary={() => void performRestore()}
+      >
+        <Text style={styles.help}>
+          Une sauvegarde de sécurité sera créée automatiquement sur ce
+          téléphone. Toutes les données actuelles seront ensuite remplacées par
+          le contenu vérifié du fichier.
+        </Text>
+      </AppModal>
     </ScrollView>
   );
 }
@@ -520,7 +521,11 @@ const styles = StyleSheet.create({
     gap: 12,
     justifyContent: 'center',
   },
-  container: { gap: 16, padding: 24 },
+  container: {
+    backgroundColor: colors.background,
+    gap: spacing.lg,
+    padding: spacing.lg,
+  },
   dangerButton: {
     alignItems: 'center',
     backgroundColor: '#9E2A2B',
@@ -529,12 +534,19 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   divider: { backgroundColor: '#D8E0DE', height: 1, marginVertical: 8 },
-  day: { borderColor: '#AAB8B4', borderRadius: 8, borderWidth: 1, padding: 10 },
+  day: {
+    borderColor: colors.borderStrong,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: sizes.touch,
+    padding: 10,
+  },
   daySelected: { backgroundColor: '#0F6F70', borderColor: '#0F6F70' },
   dayTextSelected: { color: '#FFFFFF', fontWeight: '700' },
   days: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  help: { color: '#52605C', marginTop: 4 },
-  label: { fontSize: 17, fontWeight: '600' },
+  help: { ...typography.caption, marginTop: 4 },
+  label: typography.label,
   linkText: { color: '#0F6F70', fontWeight: '600', paddingVertical: 8 },
   message: { backgroundColor: '#EAF4F1', borderRadius: 8, padding: 12 },
   primaryButton: {
@@ -544,12 +556,7 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   primaryButtonText: { color: '#FFFFFF', fontWeight: '700' },
-  restoreSummary: {
-    backgroundColor: '#F4F7F6',
-    borderRadius: 8,
-    gap: 6,
-    padding: 14,
-  },
+  restoreSummary: { backgroundColor: colors.surface },
   secondaryButton: {
     alignItems: 'center',
     borderColor: '#0F6F70',

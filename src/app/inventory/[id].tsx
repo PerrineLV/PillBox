@@ -1,14 +1,7 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
-import {
-  Button,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   isExpired,
@@ -21,6 +14,15 @@ import {
   getMedicationBox,
   listStockMovements,
 } from '@/infrastructure/inventory/inventory-repository';
+import {
+  AppButton,
+  AppField,
+  Card,
+  Message,
+  colors,
+  spacing,
+  typography,
+} from '@/ui';
 
 export default function BoxDetailScreen() {
   const database = useSQLiteContext();
@@ -94,40 +96,42 @@ export default function BoxDetailScreen() {
         Quantité restante : {box.remainingQuantity}
       </Text>
       {expired ? (
-        <Text style={styles.expired}>PÉRIMÉE — stock utilisable : 0</Text>
+        <Message tone="error" title="Boîte périmée">
+          Stock utilisable : 0. Cette boîte ne pourra pas être sélectionnée
+          pendant une préparation.
+        </Message>
       ) : null}
 
       <Text style={styles.section}>Ajuster le stock physique</Text>
-      <TextInput
-        accessibilityLabel="Nouvelle quantité restante"
+      <AppField
+        label="Nouvelle quantité restante"
         keyboardType="number-pad"
         onChangeText={setQuantity}
-        style={styles.input}
         value={quantity}
       />
-      <TextInput
-        accessibilityLabel="Explication de l’ajustement"
+      <AppField
+        label="Explication de l’ajustement"
         multiline
         onChangeText={setExplanation}
         placeholder="Pourquoi le stock diffère-t-il ?"
-        style={styles.input}
         value={explanation}
       />
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Button
-        title="Enregistrer un ajustement manuel"
-        onPress={() => adjust('MANUAL_ADJUSTMENT')}
+      {error ? <Message tone="error">{error}</Message> : null}
+      <AppButton
+        label="Enregistrer l’ajustement"
+        onPress={() => void adjust('MANUAL_ADJUSTMENT')}
       />
       <View style={styles.correction}>
-        <Button
-          title="Enregistrer une correction"
-          onPress={() => adjust('CORRECTION')}
+        <AppButton
+          label="Enregistrer comme correction"
+          variant="secondary"
+          onPress={() => void adjust('CORRECTION')}
         />
       </View>
 
       <Text style={styles.section}>Mouvements</Text>
       {movements.map((movement) => (
-        <View key={movement.id} style={styles.movement}>
+        <Card key={movement.id} style={styles.movement}>
           <Text style={styles.movementType}>{movement.type}</Text>
           <Text>
             {movement.quantityDelta >= 0 ? '+' : ''}
@@ -135,7 +139,7 @@ export default function BoxDetailScreen() {
           </Text>
           <Text>{movement.explanation}</Text>
           <Text style={styles.date}>{movement.createdAt}</Text>
-        </View>
+        </Card>
       ))}
     </ScrollView>
   );
@@ -143,7 +147,12 @@ export default function BoxDetailScreen() {
 
 const styles = StyleSheet.create({
   center: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  container: { backgroundColor: '#fff', flexGrow: 1, padding: 18 },
+  container: {
+    backgroundColor: colors.background,
+    flexGrow: 1,
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
   correction: { marginTop: 10 },
   date: { color: '#4b5563', fontSize: 12 },
   error: { color: '#b91c1c', marginBottom: 10 },
@@ -167,7 +176,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   movementType: { fontWeight: '800' },
-  remaining: { fontSize: 17, fontWeight: '800', marginTop: 8 },
-  section: { fontSize: 18, fontWeight: '800', marginBottom: 10, marginTop: 24 },
-  title: { fontSize: 21, fontWeight: '800', marginBottom: 8 },
+  remaining: { ...typography.heading, marginTop: 8 },
+  section: { ...typography.heading, marginBottom: 10, marginTop: 24 },
+  title: typography.title,
 });

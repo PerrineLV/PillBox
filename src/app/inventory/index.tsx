@@ -1,13 +1,7 @@
 import { Link, Stack, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   isExpired,
@@ -16,6 +10,17 @@ import {
   type MedicationBox,
 } from '@/domain/inventory/inventory';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
+import {
+  Badge,
+  Card,
+  EmptyState,
+  LoadingState,
+  Message,
+  colors,
+  radii,
+  spacing,
+  typography,
+} from '@/ui';
 
 export default function InventoryScreen() {
   const database = useSQLiteContext();
@@ -60,10 +65,17 @@ export default function InventoryScreen() {
       <Link href="/inventory/new" style={styles.add}>
         Scanner une boîte
       </Link>
-      {loading ? <ActivityIndicator /> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {loading ? <LoadingState label="Chargement du stock…" /> : null}
+      {error ? (
+        <Message tone="error" title="Stock indisponible">
+          {error}
+        </Message>
+      ) : null}
       {!loading && !error && groups.length === 0 ? (
-        <Text style={styles.empty}>Aucune boîte enregistrée.</Text>
+        <EmptyState
+          title="Aucune boîte enregistrée"
+          description="Scannez le DataMatrix d’une boîte pour suivre son lot, sa péremption et sa quantité."
+        />
       ) : null}
       {groups.map((medication) => (
         <View key={medication.cis} style={styles.medication}>
@@ -74,7 +86,7 @@ export default function InventoryScreen() {
               0,
             );
             return (
-              <View key={lot.key} style={styles.lot}>
+              <Card key={lot.key} style={styles.lot}>
                 <Text style={styles.lotTitle}>Lot {lot.label}</Text>
                 <Text style={styles.usable}>Stock utilisable : {usable}</Text>
                 {lot.boxes.map((box) => {
@@ -98,18 +110,16 @@ export default function InventoryScreen() {
                           <Text>Numéro de série : {box.serialNumber}</Text>
                         ) : null}
                         {expired ? (
-                          <Text
-                            accessibilityRole="alert"
-                            style={styles.expired}
-                          >
-                            PÉRIMÉE — exclue du stock utilisable
-                          </Text>
+                          <Badge
+                            label="Périmée — stock inutilisable"
+                            tone="danger"
+                          />
                         ) : null}
                       </View>
                     </Link>
                   );
                 })}
-              </View>
+              </Card>
             );
           })}
         </View>
@@ -145,8 +155,8 @@ function groupBoxes(boxes: readonly MedicationBox[]): MedicationGroup[] {
 
 const styles = StyleSheet.create({
   add: {
-    backgroundColor: '#0F6F70',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: radii.md,
     color: '#fff',
     fontWeight: '700',
     marginBottom: 16,
@@ -156,7 +166,11 @@ const styles = StyleSheet.create({
   },
   box: { borderTopColor: '#d1d5db', borderTopWidth: 1, paddingVertical: 12 },
   boxTitle: { fontWeight: '700' },
-  container: { backgroundColor: '#fff', flexGrow: 1, padding: 16 },
+  container: {
+    backgroundColor: colors.background,
+    flexGrow: 1,
+    padding: spacing.lg,
+  },
   empty: { color: '#4b5563', paddingTop: 30, textAlign: 'center' },
   error: { color: '#b91c1c' },
   expired: { color: '#b91c1c', fontWeight: '800', marginTop: 5 },
@@ -170,6 +184,6 @@ const styles = StyleSheet.create({
   },
   lotTitle: { fontSize: 16, fontWeight: '700' },
   medication: { marginBottom: 24 },
-  medicationName: { fontSize: 19, fontWeight: '800' },
-  usable: { color: '#0F6F70', fontWeight: '700', marginBottom: 4 },
+  medicationName: typography.heading,
+  usable: { color: colors.brand, fontWeight: '700', marginBottom: 4 },
 });

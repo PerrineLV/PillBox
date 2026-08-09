@@ -24,6 +24,16 @@ import {
   type TreatmentPhase,
   type Weekday,
 } from '@/domain/treatments/treatment';
+import {
+  AppButton,
+  AppField,
+  Message,
+  colors,
+  radii,
+  sizes,
+  spacing,
+  typography,
+} from '@/ui';
 
 import {
   civilDateToPickerDate,
@@ -94,10 +104,10 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
       {initialValue.pharmaceuticalForm ? (
         <Text>{initialValue.pharmaceuticalForm}</Text>
       ) : null}
-      <Text style={styles.warning}>
+      <Message tone="warning" title="Posologie à vérifier">
         La posologie est saisie par vous. Elle n’est jamais déduite du
         médicament.
-      </Text>
+      </Message>
       <Text style={styles.heading}>Phases de traitement</Text>
       {[...phases]
         .map((phase, originalIndex) => ({ phase, originalIndex }))
@@ -143,13 +153,11 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
             />
           ),
         )}
-      <Pressable
-        accessibilityRole="button"
+      <AppButton
+        label="Ajouter une phase"
+        variant="secondary"
         onPress={() => setPhases([...phases, emptyPhase()])}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonText}>Ajouter une phase</Text>
-      </Pressable>
+      />
       <Toggle label="Traitement actif" value={active} onChange={setActive} />
       <Toggle
         label="Inclure dans le pilulier"
@@ -157,20 +165,15 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
         onChange={setIncluded}
       />
       {error ? (
-        <Text accessibilityRole="alert" style={styles.error}>
+        <Message tone="error" title="Traitement non enregistré">
           {error}
-        </Text>
+        </Message>
       ) : null}
-      <Pressable
-        accessibilityRole="button"
-        disabled={saving}
-        onPress={submit}
-        style={styles.submit}
-      >
-        <Text style={styles.submitText}>
-          {saving ? 'Enregistrement…' : submitLabel}
-        </Text>
-      </Pressable>
+      <AppButton
+        label={submitLabel}
+        loading={saving}
+        onPress={() => void submit()}
+      />
     </View>
   );
 }
@@ -240,11 +243,10 @@ function PhaseEditor({
             }
           />
           <View style={styles.fieldRow}>
-            <Text style={styles.fieldLabel}>Nombre de jours</Text>
-            <TextInput
-              accessibilityLabel="Nombre de jours entre les prises"
+            <AppField
+              label="Nombre de jours entre les prises"
               inputMode="numeric"
-              style={styles.input}
+              style={styles.compactInput}
               value={String(frequency.everyNDays)}
               onChangeText={(value) =>
                 onChange({
@@ -278,12 +280,12 @@ function PhaseEditor({
         const item = phase.dosage.find((dosage) => dosage.slot === slot);
         return (
           <View key={slot} style={styles.fieldRow}>
-            <Text style={styles.fieldLabel}>{SLOT_LABELS[slot]}</Text>
-            <TextInput
+            <AppField
+              label={`Quantité ${SLOT_LABELS[slot]}`}
               accessibilityLabel={`Quantité ${SLOT_LABELS[slot]} phase ${number}`}
               inputMode="decimal"
               placeholder="0"
-              style={styles.input}
+              style={styles.compactInput}
               value={
                 item ? String(item.quantityHalfUnits / 2).replace('.', ',') : ''
               }
@@ -439,13 +441,11 @@ function Choice({
 }
 function RemoveButton({ onPress }: { onPress: () => void }) {
   return (
-    <Pressable
-      accessibilityRole="button"
+    <AppButton
+      label="Supprimer cette phase"
+      variant="quiet"
       onPress={onPress}
-      style={styles.remove}
-    >
-      <Text style={styles.removeText}>Supprimer cette phase</Text>
-    </Pressable>
+    />
   );
 }
 function Toggle({
@@ -471,9 +471,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     paddingHorizontal: 8,
+    minHeight: sizes.touch,
     paddingVertical: 10,
   },
-  choiceSelected: { backgroundColor: '#bfdbfe', borderColor: '#2563eb' },
+  choiceSelected: {
+    backgroundColor: colors.brandSoft,
+    borderColor: colors.brand,
+    borderWidth: 2,
+  },
   clearDate: { paddingHorizontal: 8, paddingVertical: 12 },
   clearDateText: { color: '#b91c1c' },
   closePicker: { alignItems: 'center', padding: 10 },
@@ -493,12 +498,12 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   datePlaceholder: { color: '#6b7280' },
-  error: { color: '#b91c1c' },
+  compactInput: { width: 100 },
   fieldLabel: { flex: 1 },
   fieldRow: { alignItems: 'center', flexDirection: 'row', marginTop: 8 },
-  form: { gap: 8 },
-  heading: { fontSize: 17, fontWeight: '700', marginTop: 12 },
-  hint: { color: '#4b5563' },
+  form: { gap: spacing.md },
+  heading: { ...typography.heading, marginTop: 12 },
+  hint: typography.caption,
   input: {
     borderColor: '#9ca3af',
     borderRadius: 8,
@@ -507,10 +512,10 @@ const styles = StyleSheet.create({
     width: 100,
   },
   label: { fontWeight: '600', marginTop: 8 },
-  name: { fontSize: 19, fontWeight: '700' },
+  name: typography.title,
   phase: {
     borderColor: '#d1d5db',
-    borderRadius: 10,
+    borderRadius: radii.lg,
     borderWidth: 1,
     gap: 6,
     marginTop: 8,
@@ -546,5 +551,4 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 8,
   },
-  warning: { backgroundColor: '#fef3c7', marginTop: 10, padding: 10 },
 });

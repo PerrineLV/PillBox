@@ -5,9 +5,8 @@ jest.mock('expo-sqlite', () => ({ useSQLiteContext: jest.fn() }));
 describe('HomeScreen', () => {
   it('affiche le titre de l’application', () => {
     const screen = HomeContent({ alerts: null, loading: false, error: null });
-    const [title] = screen.props.children;
-
-    expect(title.props.children).toBe('PillBox');
+    expect(JSON.stringify(screen)).toContain('PillBox');
+    expect(JSON.stringify(screen)).toContain('Préparer mon pilulier');
   });
 
   it('affiche les alertes de stock et de péremption', () => {
@@ -38,15 +37,9 @@ describe('HomeScreen', () => {
         ],
       },
     });
-    const alerts = screen.props.children[4];
-    expect(alerts.props.children[0].props.children).toBe(
-      'À vérifier avant le prochain pilulier',
-    );
-    expect(
-      alerts.props.children[2][0].props.children[1].props.children[0],
-    ).toBe('Stock insuffisant');
-    expect(
-      alerts.props.children[3][0].props.children[1].props.children,
-    ).toContain('LOT-B');
+    const rendered = JSON.stringify(screen);
+    expect(rendered).toContain('À vérifier avant le prochain pilulier');
+    expect(rendered).toContain('Stock insuffisant');
+    expect(rendered).toContain('LOT-B');
   });
 });

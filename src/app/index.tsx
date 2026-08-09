@@ -1,13 +1,7 @@
-import { Link, useFocusEffect } from 'expo-router';
+import { Link, router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   buildInventoryAlerts,
@@ -19,6 +13,19 @@ import { formatHalfUnits } from '@/domain/treatments/treatment';
 import { todayIso } from '@/domain/inventory/inventory';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
+import {
+  AppButton,
+  Badge,
+  Card,
+  LoadingState,
+  Message,
+  Screen,
+  SectionTitle,
+  colors,
+  radii,
+  spacing,
+  typography,
+} from '@/ui';
 
 export default function HomeScreen() {
   const database = useSQLiteContext();
@@ -66,36 +73,52 @@ export function HomeContent({
   error: string | null;
 }>) {
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>PillBox</Text>
-      <Link href="/preparations/new" style={styles.primaryLink}>
-        Préparer mon pilulier
-      </Link>
-      {loading ? (
-        <ActivityIndicator accessibilityLabel="Chargement des alertes" />
-      ) : null}
+    <Screen>
+      <View style={styles.hero}>
+        <View style={styles.mark} accessibilityElementsHidden>
+          <View style={styles.markTop} />
+          <View style={styles.markBottom} />
+        </View>
+        <View style={styles.heroText}>
+          <Text accessibilityRole="header" style={styles.title}>
+            PillBox
+          </Text>
+          <Text style={styles.subtitle}>
+            Votre pilulier, simplement et sûrement.
+          </Text>
+        </View>
+      </View>
+      <AppButton
+        label="Préparer mon pilulier"
+        onPress={() => router.push('/preparations/new')}
+        accessibilityHint="Commence ou reprend la préparation de la semaine"
+      />
+      {loading ? <LoadingState label="Chargement de votre situation…" /> : null}
       {error ? (
-        <Text accessibilityRole="alert" style={styles.error}>
+        <Message tone="error" title="Alertes indisponibles">
           {error}
-        </Text>
+        </Message>
       ) : null}
       {alerts && (alerts.stock.length > 0 || alerts.expirations.length > 0) ? (
-        <View style={styles.alerts}>
-          <Text style={styles.alertsTitle}>
-            À vérifier avant le prochain pilulier
-          </Text>
+        <Card style={styles.alerts}>
+          <SectionTitle>À vérifier avant le prochain pilulier</SectionTitle>
           <Text style={styles.period}>
             Besoin calculé du {alerts.startDate} au {alerts.endDate}
           </Text>
           {alerts.stock.map((alert) => (
             <View key={alert.specialtyCis} style={styles.alertItem}>
               <Text style={styles.alertName}>{alert.specialtyName}</Text>
+              <Badge
+                label={
+                  alert.status === 'INSUFFICIENT'
+                    ? 'Stock insuffisant'
+                    : 'Stock à surveiller'
+                }
+                tone={alert.status === 'INSUFFICIENT' ? 'danger' : 'warning'}
+              />
               <Text>
-                {alert.status === 'INSUFFICIENT'
-                  ? 'Stock insuffisant'
-                  : 'Stock proche du besoin'}{' '}
-                : {formatHalfUnits(alert.usableStockHalfUnits)} disponible(s)
-                pour {formatHalfUnits(alert.requiredHalfUnits)} nécessaire(s).
+                {formatHalfUnits(alert.usableStockHalfUnits)} disponible(s) pour{' '}
+                {formatHalfUnits(alert.requiredHalfUnits)} nécessaire(s).
               </Text>
             </View>
           ))}
@@ -120,66 +143,120 @@ export function HomeContent({
             besoin. Péremption proche : dans les {EXPIRATION_WARNING_DAYS}{' '}
             jours. Les boîtes périmées sont exclues.
           </Text>
-        </View>
+        </Card>
+      ) : !loading && !error ? (
+        <Message tone="success" title="Tout est prêt">
+          Aucune alerte de stock ou de péremption pour le prochain pilulier.
+        </Message>
       ) : null}
-      <Link href="/preparations/history" style={styles.link}>
-        Historique des préparations
-      </Link>
-      <Link href="/treatments" style={styles.link}>
-        Mes traitements
-      </Link>
-      <Link href="/inventory" style={styles.link}>
-        Mon stock de boîtes
-      </Link>
-      <Link href="/medications/search" style={styles.link}>
-        Rechercher un médicament
-      </Link>
-      <Link href="/settings" style={styles.link}>
-        Réglages
-      </Link>
-      <Link href="/developer/datamatrix-scanner" style={styles.link}>
-        Ouvrir le scanner DataMatrix (développeur)
-      </Link>
-    </ScrollView>
+      <SectionTitle>Gérer</SectionTitle>
+      <View style={styles.actions}>
+        <HomeLink
+          href="/treatments"
+          title="Mes traitements"
+          detail="Posologies et inclusion dans le pilulier"
+        />
+        <HomeLink
+          href="/inventory"
+          title="Mon stock"
+          detail="Boîtes, lots, péremptions et quantités"
+        />
+        <HomeLink
+          href="/preparations/history"
+          title="Historique"
+          detail="Préparations validées et lots utilisés"
+        />
+        <HomeLink
+          href="/settings"
+          title="Réglages"
+          detail="Rappel, sauvegarde et restauration"
+        />
+      </View>
+    </Screen>
+  );
+}
+
+function HomeLink({
+  href,
+  title,
+  detail,
+}: {
+  href: '/treatments' | '/inventory' | '/preparations/history' | '/settings';
+  title: string;
+  detail: string;
+}) {
+  return (
+    <Link href={href} asChild>
+      <Pressable
+        accessibilityRole="button"
+        style={({ pressed }) => [
+          styles.homeLink,
+          pressed && styles.homeLinkPressed,
+        ]}
+      >
+        <View style={styles.homeLinkText}>
+          <Text style={styles.homeLinkTitle}>{title}</Text>
+          <Text style={styles.subtitle}>{detail}</Text>
+        </View>
+        <Text accessibilityElementsHidden style={styles.chevron}>
+          ›
+        </Text>
+      </Pressable>
+    </Link>
   );
 }
 
 const styles = StyleSheet.create({
   alertItem: {
-    backgroundColor: '#fff7ed',
-    borderRadius: 6,
+    backgroundColor: colors.warningSoft,
+    borderRadius: radii.md,
+    gap: spacing.sm,
     marginTop: 8,
     padding: 10,
   },
   alertName: { fontWeight: '700' },
   alerts: {
     alignSelf: 'stretch',
-    backgroundColor: '#fffbeb',
-    borderColor: '#d97706',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 20,
-    padding: 12,
+    borderColor: colors.warning,
   },
   alertsTitle: { color: '#92400e', fontSize: 17, fontWeight: '800' },
-  container: {
+  actions: { gap: spacing.sm },
+  chevron: { color: colors.brand, fontSize: 30 },
+  hero: {
     alignItems: 'center',
-    backgroundColor: '#fff',
-    flexGrow: 1,
-    padding: 20,
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginBottom: spacing.sm,
   },
-  error: { color: '#b91c1c', marginTop: 12 },
-  link: { marginTop: 24 },
-  period: { color: '#4b5563', marginTop: 4 },
-  primaryLink: {
-    backgroundColor: '#0F6F70',
-    borderRadius: 8,
-    color: '#fff',
-    fontWeight: '700',
-    marginTop: 24,
-    overflow: 'hidden',
-    padding: 14,
+  heroText: { flex: 1 },
+  homeLink: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 72,
+    padding: spacing.md,
   },
-  rule: { color: '#6b7280', fontSize: 12, marginTop: 10 },
-  title: { fontSize: 32, fontWeight: '600' },
+  homeLinkPressed: { backgroundColor: colors.brandSoft },
+  homeLinkText: { flex: 1, gap: 2 },
+  homeLinkTitle: typography.label,
+  mark: { height: 48, width: 30 },
+  markTop: {
+    backgroundColor: colors.accent,
+    borderTopLeftRadius: 15,
+    borderTopRightRadius: 15,
+    height: 24,
+  },
+  markBottom: {
+    backgroundColor: colors.brand,
+    borderBottomLeftRadius: 15,
+    borderBottomRightRadius: 15,
+    height: 24,
+  },
+  period: typography.caption,
+  rule: typography.caption,
+  subtitle: typography.caption,
+  title: typography.display,
 });

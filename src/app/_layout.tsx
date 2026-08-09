@@ -3,6 +3,7 @@ import { router, Stack } from 'expo-router';
 import { useEffect } from 'react';
 
 import { DatabaseProvider } from '@/infrastructure/database/database-provider';
+import { colors, typography } from '@/ui';
 import {
   isPreparationReminder,
   PREPARATION_ROUTE,
@@ -21,7 +22,17 @@ export default function RootLayout() {
   usePreparationNotificationNavigation();
   return (
     <DatabaseProvider>
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack
+        screenOptions={{
+          contentStyle: { backgroundColor: colors.background },
+          headerBackButtonDisplayMode: 'minimal',
+          headerShadowVisible: false,
+          headerStyle: { backgroundColor: colors.surface },
+          headerTintColor: colors.brand,
+          headerTitleStyle: typography.heading,
+          headerShown: false,
+        }}
+      />
     </DatabaseProvider>
   );
 }
