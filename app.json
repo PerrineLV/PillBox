@@ -6,7 +6,15 @@
     "orientation": "portrait",
     "scheme": "pillbox",
     "userInterfaceStyle": "automatic",
-    "plugins": ["expo-router", "expo-sqlite"],
+    "android": {
+      "package": "com.perrinelv.pillbox",
+      "versionCode": 1
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "./plugins/withAndroidReleaseSigning"
+    ],
     "experiments": {
       "typedRoutes": true
     }
