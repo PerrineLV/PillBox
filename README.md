@@ -106,6 +106,7 @@ Générer une clé dédiée dans un emplacement privé, hors du dépôt :
 ```bash
 keytool -genkeypair -v \
   -keystore pillbox-release.jks \
+  -storetype PKCS12 \
   -alias pillbox \
   -keyalg RSA \
   -keysize 4096 \
@@ -126,8 +127,13 @@ Dans `Settings` → `Secrets and variables` → `Actions`, créer ces secrets Gi
 
 * `ANDROID_KEYSTORE_BASE64` : résultat Base64 complet ;
 * `ANDROID_KEYSTORE_PASSWORD` : mot de passe du keystore ;
-* `ANDROID_KEY_ALIAS` : alias choisi, par exemple `pillbox` ;
-* `ANDROID_KEY_PASSWORD` : mot de passe de la clé.
+* `ANDROID_KEY_ALIAS` : alias choisi, par exemple `pillbox`.
+
+Le keystore PKCS#12 utilise le même mot de passe pour le conteneur et sa clé privée.
+Le workflow applique donc `ANDROID_KEYSTORE_PASSWORD` aux deux et vérifie le fichier,
+le mot de passe et l’alias avant de lancer Gradle. Le secret
+`ANDROID_KEY_PASSWORD`, s’il avait déjà été créé, n’est plus utilisé et peut être
+supprimé.
 
 Le workflow échoue explicitement si un de ces secrets est absent. Le fichier `.jks`,
 les mots de passe et leur représentation Base64 ne doivent jamais être commités.
@@ -168,9 +174,9 @@ Conserver au moins deux sauvegardes chiffrées et indépendantes de
 secrets. Une copie doit être située hors du poste de développement.
 
 Si le poste est perdu, restaurer le même fichier `.jks`, vérifier son empreinte avec
-`keytool -list -v -keystore pillbox-release.jks`, puis recréer les quatre secrets
-GitHub. Une nouvelle clé, même avec le même alias, ne permet pas de mettre à jour les
-installations existantes.
+`keytool -list -v -storetype PKCS12 -keystore pillbox-release.jks`, puis recréer les
+trois secrets GitHub. Une nouvelle clé, même avec le même alias, ne permet pas de
+mettre à jour les installations existantes.
 
 ## Documentation
 
