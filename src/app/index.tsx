@@ -73,26 +73,31 @@ export function HomeContent({
   error: string | null;
 }>) {
   return (
-    <Screen>
-      <View style={styles.hero}>
-        <View style={styles.mark} accessibilityElementsHidden>
-          <View style={styles.markTop} />
-          <View style={styles.markBottom} />
-        </View>
-        <View style={styles.heroText}>
-          <Text accessibilityRole="header" style={styles.title}>
-            PillBox
-          </Text>
-          <Text style={styles.subtitle}>
-            Votre pilulier, simplement et sûrement.
-          </Text>
-        </View>
-      </View>
-      <AppButton
-        label="Préparer mon pilulier"
-        onPress={() => router.push('/preparations/new')}
-        accessibilityHint="Commence ou reprend la préparation de la semaine"
-      />
+    <Screen
+      fixedHeader={
+        <>
+          <View style={styles.hero}>
+            <View style={styles.mark} accessibilityElementsHidden>
+              <View style={styles.markTop} />
+              <View style={styles.markBottom} />
+            </View>
+            <View style={styles.heroText}>
+              <Text accessibilityRole="header" style={styles.title}>
+                PillBox
+              </Text>
+              <Text style={styles.subtitle}>
+                Votre pilulier, simplement et sûrement.
+              </Text>
+            </View>
+          </View>
+          <AppButton
+            label="Préparer mon pilulier"
+            onPress={() => router.push('/preparations/new')}
+            accessibilityHint="Commence ou reprend la préparation de la semaine"
+          />
+        </>
+      }
+    >
       {loading ? <LoadingState label="Chargement de votre situation…" /> : null}
       {error ? (
         <Message tone="error" title="Alertes indisponibles">

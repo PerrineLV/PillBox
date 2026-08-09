@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 11;
+export const LATEST_SCHEMA_VERSION = 13;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -366,6 +366,63 @@ export const SCHEMA_MIGRATIONS = [
         );
 
         INSERT INTO privacy_settings (singleton_id) VALUES (1);
+      `);
+    },
+  },
+  {
+    version: 12,
+    name: 'ajout des rappels locaux de prise',
+    async up(transaction) {
+      await transaction.execute(`
+        CREATE TABLE treatment_reminder_settings (
+          treatment_id INTEGER PRIMARY KEY REFERENCES treatments(id) ON DELETE CASCADE,
+          enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+          morning_hour INTEGER, morning_minute INTEGER,
+          noon_hour INTEGER, noon_minute INTEGER,
+          evening_hour INTEGER, evening_minute INTEGER,
+          bedtime_hour INTEGER, bedtime_minute INTEGER,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK ((morning_hour IS NULL) = (morning_minute IS NULL)),
+          CHECK ((noon_hour IS NULL) = (noon_minute IS NULL)),
+          CHECK ((evening_hour IS NULL) = (evening_minute IS NULL)),
+          CHECK ((bedtime_hour IS NULL) = (bedtime_minute IS NULL)),
+          CHECK (morning_hour IS NULL OR (morning_hour BETWEEN 0 AND 23 AND morning_minute BETWEEN 0 AND 59)),
+          CHECK (noon_hour IS NULL OR (noon_hour BETWEEN 0 AND 23 AND noon_minute BETWEEN 0 AND 59)),
+          CHECK (evening_hour IS NULL OR (evening_hour BETWEEN 0 AND 23 AND evening_minute BETWEEN 0 AND 59)),
+          CHECK (bedtime_hour IS NULL OR (bedtime_hour BETWEEN 0 AND 23 AND bedtime_minute BETWEEN 0 AND 59))
+        );
+
+        CREATE TABLE scheduled_intake_reminders (
+          notification_id TEXT PRIMARY KEY NOT NULL,
+          scheduled_at TEXT NOT NULL UNIQUE
+        );
+        CREATE TABLE scheduled_intake_reminder_treatments (
+          notification_id TEXT NOT NULL REFERENCES scheduled_intake_reminders(notification_id) ON DELETE CASCADE,
+          treatment_id INTEGER NOT NULL REFERENCES treatments(id) ON DELETE CASCADE,
+          PRIMARY KEY (notification_id, treatment_id)
+        );
+      `);
+    },
+  },
+  {
+    version: 13,
+    name: 'configuration globale des heures de prise',
+    async up(transaction) {
+      await transaction.execute(`
+        CREATE TABLE intake_reminder_slot_settings (
+          singleton_id INTEGER PRIMARY KEY NOT NULL DEFAULT 1 CHECK (singleton_id = 1),
+          morning_hour INTEGER NOT NULL DEFAULT 8 CHECK (morning_hour BETWEEN 0 AND 23),
+          morning_minute INTEGER NOT NULL DEFAULT 0 CHECK (morning_minute BETWEEN 0 AND 59),
+          noon_hour INTEGER NOT NULL DEFAULT 12 CHECK (noon_hour BETWEEN 0 AND 23),
+          noon_minute INTEGER NOT NULL DEFAULT 0 CHECK (noon_minute BETWEEN 0 AND 59),
+          evening_hour INTEGER NOT NULL DEFAULT 19 CHECK (evening_hour BETWEEN 0 AND 23),
+          evening_minute INTEGER NOT NULL DEFAULT 0 CHECK (evening_minute BETWEEN 0 AND 59),
+          bedtime_hour INTEGER NOT NULL DEFAULT 22 CHECK (bedtime_hour BETWEEN 0 AND 23),
+          bedtime_minute INTEGER NOT NULL DEFAULT 0 CHECK (bedtime_minute BETWEEN 0 AND 59),
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO intake_reminder_slot_settings (singleton_id) VALUES (1);
+        UPDATE treatment_reminder_settings SET enabled = 0;
       `);
     },
   },

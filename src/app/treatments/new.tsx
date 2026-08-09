@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet, Text } from 'react-native';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
 import type { TreatmentDraft } from '@/domain/treatments/treatment';
 import { createTreatment } from '@/infrastructure/treatments/treatment-repository';
+import { synchronizeTreatmentIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
 
 export default function NewTreatmentScreen() {
   const params = useLocalSearchParams<{
@@ -37,7 +38,8 @@ export default function NewTreatmentScreen() {
         initialValue={initialValue}
         submitLabel="Créer le traitement"
         onSubmit={async (draft) => {
-          await createTreatment(database, draft);
+          const treatmentId = await createTreatment(database, draft);
+          await synchronizeTreatmentIntakeReminders(database, treatmentId);
           router.replace('/treatments');
         }}
       />

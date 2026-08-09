@@ -22,6 +22,7 @@ export function generateIntakes(
   treatments: readonly Treatment[],
   startDate: string,
   endDate: string,
+  options: { includeTreatmentsOutsidePillbox?: boolean } = {},
 ): GeneratedIntake[] {
   const startDay = civilDay(startDate);
   const endDay = civilDay(endDate);
@@ -32,7 +33,13 @@ export function generateIntakes(
   for (let day = startDay; day <= endDay; day += 1) {
     const date = formatCivilDay(day);
     for (const treatment of treatments) {
-      if (!treatment.active || !treatment.includedInPillbox) continue;
+      if (
+        !treatment.active ||
+        treatment.archivedAt !== null ||
+        (!options.includeTreatmentsOutsidePillbox &&
+          !treatment.includedInPillbox)
+      )
+        continue;
       for (const phase of treatment.phases) {
         if (!phaseApplies(phase, date, day)) continue;
         const dosage = dosageForDay(phase, day);

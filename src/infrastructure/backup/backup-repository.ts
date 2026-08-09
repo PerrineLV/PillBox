@@ -168,10 +168,52 @@ const TABLES = [
     name: 'privacy_settings',
     columns: ['singleton_id', 'app_lock_enabled', 'updated_at'],
   },
+  {
+    name: 'treatment_reminder_settings',
+    columns: [
+      'treatment_id',
+      'enabled',
+      'morning_hour',
+      'morning_minute',
+      'noon_hour',
+      'noon_minute',
+      'evening_hour',
+      'evening_minute',
+      'bedtime_hour',
+      'bedtime_minute',
+      'updated_at',
+    ],
+  },
+  {
+    name: 'intake_reminder_slot_settings',
+    columns: [
+      'singleton_id',
+      'morning_hour',
+      'morning_minute',
+      'noon_hour',
+      'noon_minute',
+      'evening_hour',
+      'evening_minute',
+      'bedtime_hour',
+      'bedtime_minute',
+      'updated_at',
+    ],
+  },
 ] as const satisfies readonly TableDefinition[];
 
 const SCHEMA_10_TABLES = TABLES.filter(
-  (table) => table.name !== 'privacy_settings',
+  (table) =>
+    table.name !== 'privacy_settings' &&
+    table.name !== 'treatment_reminder_settings' &&
+    table.name !== 'intake_reminder_slot_settings',
+);
+const SCHEMA_11_TABLES = TABLES.filter(
+  (table) =>
+    table.name !== 'treatment_reminder_settings' &&
+    table.name !== 'intake_reminder_slot_settings',
+);
+const SCHEMA_12_TABLES = TABLES.filter(
+  (table) => table.name !== 'intake_reminder_slot_settings',
 );
 const SCHEMA_9_TABLES = SCHEMA_10_TABLES.filter(
   (table) => table.name !== 'backup_settings',
@@ -180,6 +222,8 @@ const SCHEMA_9_TABLES = SCHEMA_10_TABLES.filter(
 function tableDefinitions(schemaVersion: number): readonly TableDefinition[] {
   if (schemaVersion === 9) return SCHEMA_9_TABLES;
   if (schemaVersion === 10) return SCHEMA_10_TABLES;
+  if (schemaVersion === 11) return SCHEMA_11_TABLES;
+  if (schemaVersion === 12) return SCHEMA_12_TABLES;
   return TABLES;
 }
 
@@ -310,6 +354,11 @@ export async function restoreBackup(
     if (backup.metadata.schemaVersion <= 10) {
       await transaction.runAsync(
         'INSERT INTO privacy_settings (singleton_id) VALUES (1)',
+      );
+    }
+    if (backup.metadata.schemaVersion <= 12) {
+      await transaction.runAsync(
+        'INSERT INTO intake_reminder_slot_settings (singleton_id) VALUES (1)',
       );
     }
   });

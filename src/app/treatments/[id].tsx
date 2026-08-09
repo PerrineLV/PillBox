@@ -15,6 +15,11 @@ import {
   type TreatmentRemovalAction,
   updateTreatment,
 } from '@/infrastructure/treatments/treatment-repository';
+import { synchronizeTreatmentIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
+import {
+  getTreatmentReminderSettings,
+  saveTreatmentReminderSettings,
+} from '@/infrastructure/reminders/intake-reminder-repository';
 import { AppButton, LoadingState, Message, colors, spacing } from '@/ui';
 
 export default function EditTreatmentScreen() {
@@ -56,6 +61,7 @@ export default function EditTreatmentScreen() {
     setError(null);
     try {
       await action();
+      await synchronizeTreatmentIntakeReminders(database, numericId);
       router.replace({ pathname: '/treatments', params: { notice } });
     } catch (reason: unknown) {
       setError(
@@ -78,18 +84,31 @@ export default function EditTreatmentScreen() {
         <LoadingState label="Chargement du traitement…" />
       ) : null}
       {treatment && treatment.archivedAt === null ? (
-        <TreatmentForm
-          initialValue={treatment}
-          submitLabel="Enregistrer"
-          onSubmit={async (draft) => {
-            await updateTreatment(database, {
-              ...draft,
-              id: treatment.id,
-              archivedAt: treatment.archivedAt,
-            });
-            router.replace('/treatments');
-          }}
-        />
+        <>
+          <TreatmentForm
+            initialValue={treatment}
+            submitLabel="Enregistrer"
+            onSubmit={async (draft) => {
+              await updateTreatment(database, {
+                ...draft,
+                id: treatment.id,
+                archivedAt: treatment.archivedAt,
+              });
+              await synchronizeTreatmentIntakeReminders(database, treatment.id);
+              router.replace('/treatments');
+            }}
+          />
+          <AppButton
+            label="Configurer les rappels de prise"
+            variant="secondary"
+            onPress={() =>
+              router.push({
+                pathname: '/treatments/[id]/reminders',
+                params: { id: String(treatment.id) },
+              })
+            }
+          />
+        </>
       ) : null}
       {treatment?.archivedAt ? (
         <Message tone="warning" title="Traitement archivé">
@@ -128,10 +147,21 @@ export default function EditTreatmentScreen() {
             loading={processing}
             onPress={() =>
               confirmPermanentTreatmentDeletion(treatment.specialtyName, () => {
-                void runAction(
-                  () => deleteUnusedTreatment(database, treatment.id),
-                  `Le traitement « ${treatment.specialtyName} » a été supprimé.`,
-                );
+                void runAction(async () => {
+                  const reminderSettings = await getTreatmentReminderSettings(
+                    database,
+                    treatment.id,
+                  );
+                  await saveTreatmentReminderSettings(database, {
+                    ...reminderSettings,
+                    enabled: false,
+                  });
+                  await synchronizeTreatmentIntakeReminders(
+                    database,
+                    treatment.id,
+                  );
+                  await deleteUnusedTreatment(database, treatment.id);
+                }, `Le traitement « ${treatment.specialtyName} » a été supprimé.`);
               })
             }
           />

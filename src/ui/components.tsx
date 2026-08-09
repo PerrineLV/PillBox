@@ -210,10 +210,12 @@ export function SectionTitle({ children }: { children: ReactNode }) {
 export function Screen({
   children,
   scroll = true,
+  fixedHeader,
   stickyFooter,
 }: {
   children: ReactNode;
   scroll?: boolean;
+  fixedHeader?: ReactNode;
   stickyFooter?: ReactNode;
 }) {
   const content = scroll ? (
@@ -228,6 +230,9 @@ export function Screen({
   );
   return (
     <View style={styles.screen}>
+      {fixedHeader ? (
+        <View style={styles.fixedHeader}>{fixedHeader}</View>
+      ) : null}
       {content}
       {stickyFooter ? (
         <View style={styles.stickyFooter}>{stickyFooter}</View>
@@ -329,6 +334,15 @@ const messageStyles = {
 
 const styles = StyleSheet.create({
   screen: { backgroundColor: colors.background, flex: 1 },
+  fixedHeader: {
+    alignSelf: 'center',
+    backgroundColor: colors.background,
+    gap: spacing.lg,
+    maxWidth: sizes.screenMaxWidth,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    width: '100%',
+  },
   screenContent: {
     alignSelf: 'center',
     flexGrow: 1,
