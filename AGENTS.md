@@ -29,3 +29,9 @@ Fournir ensuite un compte rendu court : fichiers importants modifiés, comportem
 # Sécurité produit
 
 En cas de conflit entre automatisation et fiabilité, choisir la fiabilité. **Si l'application ne sait pas, elle ne devine pas.**
+
+## Git
+
+- Ne jamais créer de commit, pousser une branche ou ouvrir une pull request.
+- Laisser toutes les modifications non commitées afin que je puisse les relire.
+- Je réalise moi-même les commits et les pushs, même lorsque la tâche semble terminée.

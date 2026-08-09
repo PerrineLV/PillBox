@@ -1,4 +1,4 @@
-# Pillbox
+# PillBox
 
 Application mobile personnelle pour faciliter la préparation hebdomadaire d’un pilulier.
 
