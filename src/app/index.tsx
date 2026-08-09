@@ -20,6 +20,9 @@ export default function HomeScreen() {
       <Link href="/medications/search" style={styles.link}>
         Rechercher un médicament
       </Link>
+      <Link href="/settings" style={styles.link}>
+        Réglages
+      </Link>
       <Link href="/developer/datamatrix-scanner" style={styles.link}>
         Ouvrir le scanner DataMatrix (développeur)
       </Link>

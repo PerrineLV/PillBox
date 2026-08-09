@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 7;
+export const LATEST_SCHEMA_VERSION = 8;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -306,6 +306,27 @@ export const SCHEMA_MIGRATIONS = [
           ON stock_movements(preparation_id);
         CREATE INDEX preparation_box_usages_preparation_idx
           ON preparation_box_usages(preparation_id);
+      `);
+    },
+  },
+  {
+    version: 8,
+    name: 'création du réglage du rappel de préparation',
+    async up(transaction) {
+      await transaction.execute(`
+        CREATE TABLE preparation_reminder_settings (
+          singleton_id INTEGER PRIMARY KEY NOT NULL DEFAULT 1 CHECK (singleton_id = 1),
+          enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+          weekday TEXT NOT NULL DEFAULT 'sunday' CHECK (weekday IN ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday')),
+          hour INTEGER NOT NULL DEFAULT 18 CHECK (hour BETWEEN 0 AND 23),
+          minute INTEGER NOT NULL DEFAULT 0 CHECK (minute BETWEEN 0 AND 59),
+          notification_id TEXT,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK ((enabled = 1 AND notification_id IS NOT NULL) OR
+                 (enabled = 0 AND notification_id IS NULL))
+        );
+
+        INSERT INTO preparation_reminder_settings (singleton_id) VALUES (1);
       `);
     },
   },

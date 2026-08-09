@@ -176,7 +176,8 @@ describe('validation transactionnelle d’une préparation', () => {
     raw.exec(`
       CREATE TRIGGER fail_second_preparation_movement
       BEFORE INSERT ON stock_movements
-      WHEN NEW.type = 'PILLBOX_PREPARATION' AND NEW.box_id = 2
+      WHEN NEW.type = 'PILLBOX_PREPARATION'
+        AND NEW.box_id = (SELECT MAX(id) FROM medication_boxes)
       BEGIN SELECT RAISE(ABORT, 'échec injecté'); END;
     `);
 

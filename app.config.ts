@@ -10,9 +10,33 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     ...config.android,
     package: 'com.perrinelv.pillbox',
+    permissions: appendValue(
+      config.android?.permissions,
+      'android.permission.SCHEDULE_EXACT_ALARM',
+    ),
     versionCode: resolveAndroidVersionCode(process.env.ANDROID_VERSION_CODE),
   },
+  plugins: appendPlugin(config.plugins, 'expo-notifications'),
 });
+
+function appendValue(
+  values: readonly string[] | undefined,
+  value: string,
+): string[] {
+  return values?.includes(value) ? [...values] : [...(values ?? []), value];
+}
+
+function appendPlugin(
+  plugins: ExpoConfig['plugins'],
+  plugin: string,
+): NonNullable<ExpoConfig['plugins']> {
+  const configured = plugins ?? [];
+  return configured.some((entry) =>
+    typeof entry === 'string' ? entry === plugin : entry[0] === plugin,
+  )
+    ? configured
+    : [...configured, plugin];
+}
 
 export function resolveAndroidVersionCode(value: string | undefined): number {
   if (value === undefined) {
