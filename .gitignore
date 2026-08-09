@@ -88,6 +88,7 @@ temp/
 # Local databases / user data
 
 *.db
+!assets/medications/medications.db
 *.db-journal
 *.sqlite
 *.sqlite3

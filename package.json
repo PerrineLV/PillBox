@@ -17,6 +17,7 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
+    "medications:import": "tsx scripts/medications/import-bdpm-cli.ts",
     "build:android:check": "expo export --platform android --clear --output-dir dist",
     "android:release:validate-signing": "node ./scripts/android-signing.mjs --validate",
     "android:release:prebuild": "expo prebuild --platform android --no-install --clean",
@@ -39,13 +40,16 @@
     "react-native-screens": "~4.16.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/jest": "^29.5.14",
     "@types/react": "~19.1.0",
+    "better-sqlite3": "^11.10.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "jest": "^29.7.0",
     "jest-expo": "~54.0.17",
     "prettier": "3.9.6",
+    "tsx": "^4.20.5",
     "typescript": "~5.9.2"
   },
   "jest": {

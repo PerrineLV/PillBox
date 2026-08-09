@@ -5,6 +5,9 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Pilulier</Text>
+      <Link href="/medications/search" style={styles.link}>
+        Rechercher un médicament
+      </Link>
       <Link href="/developer/datamatrix-scanner" style={styles.link}>
         Ouvrir le scanner DataMatrix (développeur)
       </Link>
