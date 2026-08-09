@@ -23,6 +23,10 @@ import {
   spacing,
   typography,
 } from '@/ui';
+import {
+  formatFrenchDateTime,
+  formatLongFrenchCivilDate,
+} from '@/components/treatments/civil-date';
 
 export default function BoxDetailScreen() {
   const database = useSQLiteContext();
@@ -90,7 +94,7 @@ export default function BoxDetailScreen() {
       <Text style={styles.title}>{box.specialtyName}</Text>
       <Text>{box.presentationLabel}</Text>
       <Text>Lot : {box.lot ?? 'non renseigné'}</Text>
-      <Text>Péremption : {box.expirationDate}</Text>
+      <Text>Péremption : {formatLongFrenchCivilDate(box.expirationDate)}</Text>
       <Text>Quantité initiale : {box.initialQuantity}</Text>
       <Text style={styles.remaining}>
         Quantité restante : {box.remainingQuantity}
@@ -138,7 +142,9 @@ export default function BoxDetailScreen() {
             {movement.quantityDelta} → reste {movement.quantityAfter}
           </Text>
           <Text>{movement.explanation}</Text>
-          <Text style={styles.date}>{movement.createdAt}</Text>
+          <Text style={styles.date}>
+            {formatFrenchDateTime(movement.createdAt)}
+          </Text>
         </Card>
       ))}
     </ScrollView>
@@ -155,21 +161,6 @@ const styles = StyleSheet.create({
   },
   correction: { marginTop: 10 },
   date: { color: '#4b5563', fontSize: 12 },
-  error: { color: '#b91c1c', marginBottom: 10 },
-  expired: {
-    backgroundColor: '#fff1f2',
-    color: '#b91c1c',
-    fontWeight: '800',
-    marginTop: 10,
-    padding: 10,
-  },
-  input: {
-    borderColor: '#9ca3af',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 10,
-    padding: 12,
-  },
   movement: {
     borderBottomColor: '#d1d5db',
     borderBottomWidth: 1,

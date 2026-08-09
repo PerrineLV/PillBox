@@ -5,6 +5,39 @@ export function formatFrenchCivilDate(value: string): string {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
+/** Affiche une date civile sans conversion UTC, par exemple « 9 août 2026 ». */
+export function formatLongFrenchCivilDate(value: string): string {
+  const date = civilDateToPickerDate(value);
+  if (date === null) return value;
+  return new Intl.DateTimeFormat('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
+}
+
+/** Ajoute le jour de la semaine pour les écrans centrés sur une prise. */
+export function formatFullFrenchCivilDate(value: string): string {
+  const date = civilDateToPickerDate(value);
+  if (date === null) return value;
+  return new Intl.DateTimeFormat('fr-FR', {
+    dateStyle: 'full',
+  }).format(date);
+}
+
+/** Affiche un horodatage SQLite/ISO dans le fuseau local de l’appareil. */
+export function formatFrenchDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('fr-FR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
 /** Crée une date locale à midi pour éviter les changements de jour liés au fuseau. */
 export function civilDateToPickerDate(value: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);

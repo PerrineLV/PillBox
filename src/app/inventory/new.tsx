@@ -292,7 +292,6 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   container: { backgroundColor: colors.background, flex: 1 },
-  field: { marginBottom: 14 },
   form: { gap: spacing.lg, padding: spacing.lg },
   guide: {
     borderColor: '#fff',
@@ -315,13 +314,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     padding: 14,
   },
-  input: {
-    borderColor: '#9ca3af',
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 12,
-  },
-  label: { fontWeight: '700', marginBottom: 5 },
   medication: typography.heading,
   quantityNotice: { fontWeight: '700', marginBottom: 8 },
   raw: { color: '#4b5563', fontSize: 12, marginTop: 18 },

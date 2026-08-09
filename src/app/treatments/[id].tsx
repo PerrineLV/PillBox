@@ -11,10 +11,14 @@ import {
   deleteUnusedTreatment,
   getTreatment,
   getTreatmentRemovalAction,
-  reactivateTreatment,
+  restoreArchivedTreatment,
   type TreatmentRemovalAction,
   updateTreatment,
 } from '@/infrastructure/treatments/treatment-repository';
+import {
+  synchronizeIntakeReminders,
+  synchronizeTreatmentIntakeReminders,
+} from '@/infrastructure/reminders/intake-reminder-scheduler';
 import { AppButton, LoadingState, Message, colors, spacing } from '@/ui';
 
 export default function EditTreatmentScreen() {
@@ -56,6 +60,7 @@ export default function EditTreatmentScreen() {
     setError(null);
     try {
       await action();
+      await synchronizeTreatmentIntakeReminders(database, numericId);
       router.replace({ pathname: '/treatments', params: { notice } });
     } catch (reason: unknown) {
       setError(
@@ -80,13 +85,14 @@ export default function EditTreatmentScreen() {
       {treatment && treatment.archivedAt === null ? (
         <TreatmentForm
           initialValue={treatment}
-          submitLabel="Enregistrer"
+          submitLabel="Enregistrer les modifications"
           onSubmit={async (draft) => {
             await updateTreatment(database, {
               ...draft,
               id: treatment.id,
               archivedAt: treatment.archivedAt,
             });
+            await synchronizeTreatmentIntakeReminders(database, treatment.id);
             router.replace('/treatments');
           }}
         />
@@ -99,13 +105,13 @@ export default function EditTreatmentScreen() {
       {treatment && removalAction ? (
         treatment.archivedAt ? (
           <AppButton
-            label="Réactiver le traitement"
+            label="Restaurer le traitement"
             variant="secondary"
             loading={processing}
             onPress={() =>
               void runAction(
-                () => reactivateTreatment(database, treatment.id),
-                `Le traitement « ${treatment.specialtyName} » a été réactivé.`,
+                () => restoreArchivedTreatment(database, treatment.id),
+                `Le traitement « ${treatment.specialtyName} » a été restauré.`,
               )
             }
           />
@@ -128,10 +134,10 @@ export default function EditTreatmentScreen() {
             loading={processing}
             onPress={() =>
               confirmPermanentTreatmentDeletion(treatment.specialtyName, () => {
-                void runAction(
-                  () => deleteUnusedTreatment(database, treatment.id),
-                  `Le traitement « ${treatment.specialtyName} » a été supprimé.`,
-                );
+                void runAction(async () => {
+                  await deleteUnusedTreatment(database, treatment.id);
+                  await synchronizeIntakeReminders(database);
+                }, `Le traitement « ${treatment.specialtyName} » a été supprimé.`);
               })
             }
           />
@@ -146,48 +152,5 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     gap: spacing.lg,
     padding: spacing.lg,
-  },
-  error: { color: '#b91c1c' },
-  archiveAction: {
-    borderColor: '#92400e',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 20,
-    padding: 14,
-  },
-  archiveActionText: {
-    color: '#92400e',
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  deleteAction: {
-    borderColor: '#b91c1c',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 20,
-    padding: 14,
-  },
-  deleteActionText: {
-    color: '#b91c1c',
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  archivedNotice: {
-    backgroundColor: '#fef3c7',
-    color: '#78350f',
-    marginTop: 12,
-    padding: 12,
-  },
-  secondaryAction: {
-    borderColor: '#2563eb',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 20,
-    padding: 14,
-  },
-  secondaryActionText: {
-    color: '#2563eb',
-    fontWeight: '700',
-    textAlign: 'center',
   },
 });

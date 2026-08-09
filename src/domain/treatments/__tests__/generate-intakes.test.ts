@@ -11,7 +11,6 @@ function treatment(phases: TreatmentPhase[]): Treatment {
     specialtyCis: '60000001',
     specialtyName: 'Médicament de test',
     pharmaceuticalForm: 'comprimé',
-    active: true,
     includedInPillbox: true,
     archivedAt: null,
     phases,
@@ -210,12 +209,12 @@ describe('generateIntakes avec phases', () => {
     ]);
   });
 
-  it('ignore les traitements inactifs ou exclus du pilulier', () => {
+  it('ignore les traitements archivés ou exclus du pilulier', () => {
     const base = treatment([daily('2026-08-03', null)]);
     expect(
       generateIntakes(
         [
-          { ...base, active: false },
+          { ...base, archivedAt: '2026-08-01' },
           { ...base, id: 13, includedInPillbox: false },
         ],
         '2026-08-03',

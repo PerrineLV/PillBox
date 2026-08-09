@@ -20,7 +20,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 
 # Modèle fonctionnel
 
-**Traitement** : spécialité + phases successives de posologie structurée + actif/inactif + inclusion dans le pilulier.
+**Traitement** : spécialité + phases successives de posologie structurée + inclusion dans le pilulier + archivage.
 
 **Phase de posologie** : période datée, fréquence explicite (quotidienne, tous les N jours avec ancre, ou hebdomadaire avec jour choisi) + créneaux matin/midi/soir/coucher + quantités fractionnaires possibles.
 
@@ -55,7 +55,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 
 # Hors scope MVP
 
-Rappels de prise, conseils médicaux, interactions, diagnostic, lecture automatique d'ordonnance, professionnels de santé, profils multiples, synchronisation cloud, IA médicale, Mon espace santé.
+Conseils médicaux, interactions, diagnostic, lecture automatique d'ordonnance, professionnels de santé, profils multiples, synchronisation cloud, IA médicale, Mon espace santé.
 
 # Definition of Done MVP
 

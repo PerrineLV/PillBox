@@ -152,7 +152,6 @@ const styles = StyleSheet.create({
     padding: 13,
     textAlign: 'center',
   },
-  empty: { color: '#4b5563', paddingTop: 24, textAlign: 'center' },
   error: { color: '#b91c1c', marginBottom: 12 },
   name: typography.heading,
   presentation: {
@@ -162,11 +161,4 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
   },
   result: { marginBottom: spacing.md },
-  searchInput: {
-    borderColor: '#9ca3af',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 12,
-    padding: 12,
-  },
 });

@@ -6,7 +6,8 @@ describe('HomeScreen', () => {
   it('affiche le titre de l’application', () => {
     const screen = HomeContent({ alerts: null, loading: false, error: null });
     expect(JSON.stringify(screen)).toContain('PillBox');
-    expect(JSON.stringify(screen)).toContain('Préparer mon pilulier');
+    expect(JSON.stringify(screen)).toContain('Préparer les 7 prochains jours');
+    expect(JSON.stringify(screen)).toContain('Commencer');
   });
 
   it('affiche les alertes de stock et de péremption', () => {
@@ -38,7 +39,7 @@ describe('HomeScreen', () => {
       },
     });
     const rendered = JSON.stringify(screen);
-    expect(rendered).toContain('À vérifier avant le prochain pilulier');
+    expect(rendered).toContain('À vérifier');
     expect(rendered).toContain('Stock insuffisant');
     expect(rendered).toContain('LOT-B');
   });

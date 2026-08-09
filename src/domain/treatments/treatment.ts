@@ -50,7 +50,6 @@ export type Treatment = {
   specialtyCis: string;
   specialtyName: string;
   pharmaceuticalForm: string | null;
-  active: boolean;
   includedInPillbox: boolean;
   archivedAt: string | null;
   phases: TreatmentPhase[];

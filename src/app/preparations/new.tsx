@@ -3,9 +3,10 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
+import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import {
   parseGs1Expiration,
   todayIso,
@@ -39,9 +40,9 @@ import {
   Card,
   LoadingState,
   Message,
+  Screen,
   colors,
   radii,
-  spacing,
   typography,
 } from '@/ui';
 
@@ -188,7 +189,7 @@ export default function NewPreparationScreen() {
     );
     if (verification.status === 'EXPIRED') {
       rejectScan(
-        `Boîte périmée depuis le ${verification.box.expirationDate} : utilisation bloquée.`,
+        `Boîte périmée depuis le ${formatLongFrenchCivilDate(verification.box.expirationDate)} : utilisation bloquée.`,
       );
     } else if (verification.status === 'WRONG_MEDICATION') {
       rejectScan(
@@ -297,7 +298,13 @@ export default function NewPreparationScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <Screen
+      stickyFooter={
+        current && !pending ? (
+          <AppButton label="Scanner la boîte utilisée" onPress={beginScan} />
+        ) : undefined
+      }
+    >
       <Stack.Screen
         options={{ headerShown: true, title: 'Préparer mon pilulier' }}
       />
@@ -324,11 +331,17 @@ export default function NewPreparationScreen() {
       {snapshot ? (
         <>
           <Text style={styles.period}>
-            Du {snapshot.startDate} au {snapshot.endDate}
+            Du {formatLongFrenchCivilDate(snapshot.startDate)} au{' '}
+            {formatLongFrenchCivilDate(snapshot.endDate)}
           </Text>
-          <Text style={styles.progress}>
-            {completed.size} / {snapshot.requirements.length} médicaments
-            préparés
+          <Text accessibilityRole="header" style={styles.progress}>
+            {completed.size + (current ? 1 : 0)} sur{' '}
+            {snapshot.requirements.length}
+          </Text>
+          <Text style={typography.caption}>
+            {completed.size} médicament{completed.size > 1 ? 's' : ''} déjà
+            vérifié
+            {completed.size > 1 ? 's' : ''}
           </Text>
           {completed.size > 0 && current ? (
             <Badge label="Préparation reprise" tone="success" />
@@ -354,9 +367,6 @@ export default function NewPreparationScreen() {
           name={current.specialtyName}
           requiredHalfUnits={current.requiredHalfUnits}
         />
-      ) : null}
-      {current && !pending ? (
-        <AppButton label="Scanner la boîte utilisée" onPress={beginScan} />
       ) : null}
       {pending && current ? (
         <ScanConfirmation
@@ -403,7 +413,7 @@ export default function NewPreparationScreen() {
           leur stock. Elle ne peut être effectuée qu’une fois.
         </Text>
       </AppModal>
-    </ScrollView>
+    </Screen>
   );
 }
 
@@ -417,7 +427,7 @@ function DailyFinalCheck({ snapshot }: { snapshot: PreparationSnapshot }) {
     <View style={styles.finalCheck}>
       {dates.map((date) => (
         <View key={date} style={styles.day}>
-          <Text style={styles.dayTitle}>{date}</Text>
+          <Text style={styles.dayTitle}>{formatLongFrenchCivilDate(date)}</Text>
           {snapshot.items
             .filter((item) => item.date === date)
             .map((item, index) => (
@@ -455,13 +465,16 @@ function MedicationStep({
   return (
     <Card style={styles.card}>
       <Text style={styles.name}>{name}</Text>
+      {cases[0]?.pharmaceuticalForm ? (
+        <Text style={typography.body}>{cases[0].pharmaceuticalForm}</Text>
+      ) : null}
       <Text style={styles.total}>
         Quantité totale : {formatHalfUnits(requiredHalfUnits)}
       </Text>
       <Text style={styles.casesTitle}>Cases concernées</Text>
       {cases.map((item, index) => (
         <Text key={`${item.date}-${item.slot}-${index}`} style={styles.case}>
-          • {item.date} · {SLOT_LABELS[item.slot]} :{' '}
+          • {formatLongFrenchCivilDate(item.date)} · {SLOT_LABELS[item.slot]} :{' '}
           {formatHalfUnits(item.quantityHalfUnits)}
         </Text>
       ))}
@@ -487,13 +500,14 @@ function ScanConfirmation({
         {isFefo ? 'Boîte vérifiée' : 'Boîte valide, mais non FEFO'}
       </Text>
       <Text>
-        Lot {box.lot} · péremption {box.expirationDate}
+        Lot {box.lot} · péremption{' '}
+        {formatLongFrenchCivilDate(box.expirationDate)}
       </Text>
       {!isFefo ? (
         <Text>
           Lot recommandé : {recommendedBox.lot} · péremption{' '}
-          {recommendedBox.expirationDate}. Vous pouvez continuer en confirmant
-          cet avertissement.
+          {formatLongFrenchCivilDate(recommendedBox.expirationDate)}. Vous
+          pouvez continuer en confirmant cet avertissement.
         </Text>
       ) : null}
       <AppButton
@@ -549,12 +563,6 @@ const styles = StyleSheet.create({
     gap: 16,
     justifyContent: 'center',
     padding: 24,
-  },
-  container: {
-    backgroundColor: colors.background,
-    flexGrow: 1,
-    gap: spacing.lg,
-    padding: spacing.lg,
   },
   finalCheck: { gap: 12, marginVertical: 12 },
   day: { borderTopColor: colors.border, borderTopWidth: 1, paddingTop: 8 },

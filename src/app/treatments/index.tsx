@@ -1,7 +1,7 @@
-import { Link, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Link, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { formatHalfUnits, type Treatment } from '@/domain/treatments/treatment';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
@@ -22,6 +22,17 @@ export default function TreatmentsScreen() {
   const [treatments, setTreatments] = useState<Treatment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const normalizedQuery = query.trim().toLocaleLowerCase('fr-FR');
+  const visibleTreatments = treatments.filter((item) =>
+    item.specialtyName.toLocaleLowerCase('fr-FR').includes(normalizedQuery),
+  );
+  const activeTreatments = visibleTreatments.filter(
+    (item) => item.archivedAt === null,
+  );
+  const archivedTreatments = visibleTreatments.filter(
+    (item) => item.archivedAt !== null,
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -53,10 +64,28 @@ export default function TreatmentsScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ headerShown: true, title: 'Mes traitements' }} />
-      <Link href="/medications/search" style={styles.add}>
-        Ajouter un traitement
-      </Link>
+      <View style={styles.header}>
+        <View style={styles.headerText}>
+          <Text accessibilityRole="header" style={typography.title}>
+            Traitements
+          </Text>
+          <Text style={typography.caption}>
+            {activeTreatments.length} actif
+            {activeTreatments.length > 1 ? 's' : ''}
+          </Text>
+        </View>
+        <Link href="/medications/search" style={styles.add}>
+          Ajouter
+        </Link>
+      </View>
+      <TextInput
+        accessibilityLabel="Rechercher dans mes traitements"
+        onChangeText={setQuery}
+        placeholder="Rechercher un traitement"
+        placeholderTextColor={colors.textMuted}
+        style={styles.search}
+        value={query}
+      />
       {notice ? (
         <Text accessibilityRole="alert" style={styles.notice}>
           {notice}
@@ -69,36 +98,48 @@ export default function TreatmentsScreen() {
         </Message>
       ) : null}
       <FlatList
-        data={treatments}
+        data={activeTreatments}
         keyExtractor={(item) => String(item.id)}
         ListEmptyComponent={
           !loading && !error ? (
             <EmptyState
-              title="Aucun traitement enregistré"
-              description="Ajoutez un traitement depuis le référentiel local. La posologie restera toujours à saisir manuellement."
+              title={
+                query
+                  ? 'Aucun traitement trouvé'
+                  : 'Aucun traitement enregistré'
+              }
+              description={
+                query
+                  ? 'Modifiez votre recherche pour afficher d’autres traitements.'
+                  : 'Ajoutez un traitement depuis le référentiel local. La posologie restera toujours à saisir manuellement.'
+              }
             />
           ) : null
         }
         renderItem={({ item }) => <TreatmentItem treatment={item} />}
+        ListFooterComponent={
+          archivedTreatments.length > 0 ? (
+            <View style={styles.archived}>
+              <Text accessibilityRole="header" style={typography.heading}>
+                Archivés
+              </Text>
+              <Text style={typography.caption}>
+                Conservés pour préserver vos historiques.
+              </Text>
+              {archivedTreatments.map((item) => (
+                <TreatmentItem key={item.id} treatment={item} />
+              ))}
+            </View>
+          ) : null
+        }
+        contentContainerStyle={styles.list}
       />
     </View>
   );
 }
 
 function TreatmentItem({ treatment }: { treatment: Treatment }) {
-  const summary = treatment.phases
-    .map((phase) => {
-      if (phase.frequency.type === 'legacy-weekdays')
-        return `Posologie existante · ${phase.dosage.length} prise(s)`;
-      const period = `${phase.startDate}${phase.endDate ? ` → ${phase.endDate}` : ' → sans fin'}`;
-      const quantities = phase.dosage
-        .map(
-          (item) => `${item.slot}: ${formatHalfUnits(item.quantityHalfUnits)}`,
-        )
-        .join(', ');
-      return `${period} · ${quantities}`;
-    })
-    .join(' · ');
+  const summary = treatment.phases.map(humanPhaseSummary).join(' Puis ');
   return (
     <Link
       href={{
@@ -107,26 +148,20 @@ function TreatmentItem({ treatment }: { treatment: Treatment }) {
       }}
       style={styles.item}
     >
-      <View>
+      <View style={styles.itemContent}>
         <Text style={styles.name}>{treatment.specialtyName}</Text>
         <View style={styles.badges}>
-          <Badge
-            label={
-              treatment.archivedAt
-                ? 'Archivé'
-                : treatment.active
-                  ? 'Actif'
-                  : 'Inactif'
-            }
-            tone={
-              treatment.active && !treatment.archivedAt ? 'success' : 'neutral'
-            }
-          />
-          <Badge
-            label={
-              treatment.includedInPillbox ? 'Dans le pilulier' : 'Hors pilulier'
-            }
-          />
+          {treatment.archivedAt ? (
+            <Badge label="Archivé" tone="neutral" />
+          ) : (
+            <Badge
+              label={
+                treatment.includedInPillbox
+                  ? 'Dans le pilulier'
+                  : 'Hors pilulier'
+              }
+            />
+          )}
         </View>
         <Text numberOfLines={2} style={styles.summary}>
           {summary}
@@ -136,15 +171,42 @@ function TreatmentItem({ treatment }: { treatment: Treatment }) {
   );
 }
 
+const SLOT_LABELS = {
+  morning: 'matin',
+  noon: 'midi',
+  evening: 'soir',
+  bedtime: 'coucher',
+} as const;
+function humanPhaseSummary(phase: Treatment['phases'][number]): string {
+  if (phase.frequency.type === 'legacy-weekdays')
+    return `Posologie existante · ${phase.dosage.length} prise(s)`;
+  const frequency =
+    phase.frequency.type === 'daily'
+      ? 'Chaque jour'
+      : phase.frequency.type === 'interval'
+        ? `Tous les ${phase.frequency.everyNDays} jours`
+        : phase.frequency.weekday
+          ? `Chaque ${phase.frequency.weekday}`
+          : 'Jour hebdomadaire non renseigné';
+  const dosage = phase.dosage
+    .map(
+      (item) =>
+        `${formatHalfUnits(item.quantityHalfUnits)} ${SLOT_LABELS[item.slot]}`,
+    )
+    .join(', ');
+  return `${frequency} · ${dosage}`;
+}
+
 const styles = StyleSheet.create({
   add: {
     backgroundColor: colors.brand,
     borderRadius: radii.md,
     color: '#fff',
     fontWeight: '700',
-    marginBottom: 12,
     overflow: 'hidden',
-    padding: 14,
+    minHeight: 48,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
     textAlign: 'center',
   },
   badges: {
@@ -158,12 +220,35 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: spacing.lg,
   },
-  empty: { color: '#4b5563', paddingTop: 30, textAlign: 'center' },
-  error: { color: '#b91c1c' },
+  header: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  headerText: { flex: 1, gap: spacing.xs },
+  list: { gap: spacing.md, paddingBottom: spacing.xxl },
+  archived: { gap: spacing.md, marginTop: spacing.xl },
   item: {
-    borderBottomColor: '#e5e7eb',
-    borderBottomWidth: 1,
-    paddingVertical: 16,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    minHeight: 104,
+    overflow: 'hidden',
+    padding: spacing.lg,
+  },
+  itemContent: { gap: spacing.xs },
+  search: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    color: colors.text,
+    fontSize: 16,
+    marginBottom: spacing.lg,
+    minHeight: 48,
+    paddingHorizontal: spacing.lg,
   },
   name: typography.heading,
   notice: {

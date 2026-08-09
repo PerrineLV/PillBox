@@ -140,6 +140,10 @@ describe('sauvegarde et restauration personnelles', () => {
     const {
       backup_settings: _backupSettings,
       privacy_settings: _privacySettings,
+      treatment_reminder_settings: _treatmentReminders,
+      intake_reminder_slot_settings: _slotSettings,
+      intake_records: _intakeRecords,
+      intake_postponements: _postponements,
       ...schema9Tables
     } = current.tables;
     const contents = {
@@ -179,7 +183,14 @@ describe('sauvegarde et restauration personnelles', () => {
       '2026-08-09T10:00:00.000Z',
       digest,
     );
-    const { privacy_settings: _omitted, ...schema10Tables } = current.tables;
+    const {
+      privacy_settings: _omitted,
+      treatment_reminder_settings: _treatmentReminders,
+      intake_reminder_slot_settings: _slotSettings,
+      intake_records: _intakeRecords,
+      intake_postponements: _postponements,
+      ...schema10Tables
+    } = current.tables;
     const contents = {
       metadata: { ...current.metadata, schemaVersion: 10 },
       tables: schema10Tables,
@@ -211,7 +222,7 @@ describe('sauvegarde et restauration personnelles', () => {
     );
     const tooRecent = {
       ...backup,
-      metadata: { ...backup.metadata, schemaVersion: 12 },
+      metadata: { ...backup.metadata, schemaVersion: 16 },
     };
     const tooOld = {
       ...backup,

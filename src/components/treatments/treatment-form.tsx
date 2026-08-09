@@ -65,7 +65,6 @@ type Props = {
 
 export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
   const [phases, setPhases] = useState<TreatmentPhase[]>(initialValue.phases);
-  const [active, setActive] = useState(initialValue.active);
   const [included, setIncluded] = useState(initialValue.includedInPillbox);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -78,7 +77,6 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
       setError(null);
       await onSubmit({
         ...initialValue,
-        active,
         includedInPillbox: included,
         phases: orderedPhases,
       });
@@ -158,7 +156,6 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
         variant="secondary"
         onPress={() => setPhases([...phases, emptyPhase()])}
       />
-      <Toggle label="Traitement actif" value={active} onChange={setActive} />
       <Toggle
         label="Inclure dans le pilulier"
         value={included}
@@ -499,18 +496,10 @@ const styles = StyleSheet.create({
   },
   datePlaceholder: { color: '#6b7280' },
   compactInput: { width: 100 },
-  fieldLabel: { flex: 1 },
   fieldRow: { alignItems: 'center', flexDirection: 'row', marginTop: 8 },
   form: { gap: spacing.md },
   heading: { ...typography.heading, marginTop: 12 },
   hint: typography.caption,
-  input: {
-    borderColor: '#9ca3af',
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 10,
-    width: 100,
-  },
   label: { fontWeight: '600', marginTop: 8 },
   name: typography.title,
   phase: {
@@ -522,29 +511,12 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   phaseTitle: { fontSize: 16, fontWeight: '700' },
-  remove: { alignSelf: 'flex-start', marginTop: 8, paddingVertical: 6 },
-  removeText: { color: '#b91c1c' },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  secondaryButton: {
-    borderColor: '#2563eb',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 8,
-    padding: 12,
-  },
   secondaryButtonText: {
     color: '#1d4ed8',
     fontWeight: '700',
     textAlign: 'center',
   },
-  submit: {
-    alignItems: 'center',
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
-    marginTop: 12,
-    padding: 14,
-  },
-  submitText: { color: '#fff', fontWeight: '700' },
   toggle: {
     alignItems: 'center',
     flexDirection: 'row',

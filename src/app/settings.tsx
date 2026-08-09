@@ -17,14 +17,21 @@ import {
 } from 'react-native';
 
 import type { PillBoxBackup, BackupSummary } from '@/domain/backup/backup';
+import type { SlotTime } from '@/domain/reminders/intake-reminder';
 
 import {
   formatReminderTime,
   type PreparationReminderSchedule,
 } from '@/domain/reminders/preparation-reminder';
-import { WEEKDAYS, type Weekday } from '@/domain/treatments/treatment';
+import {
+  INTAKE_SLOTS,
+  WEEKDAYS,
+  type IntakeSlot,
+  type Weekday,
+} from '@/domain/treatments/treatment';
 import {
   cancelPreparationReminders,
+  cancelPostponedIntakeReminders,
   getLocalNotificationPermission,
   replacePreparationReminder,
   requestLocalNotificationPermission,
@@ -33,6 +40,15 @@ import {
   getPreparationReminderSettings,
   savePreparationReminderSettings,
 } from '@/infrastructure/reminders/preparation-reminder-repository';
+import {
+  getGlobalIntakeReminderSettings,
+  isIntakeRemindersEnabled,
+  saveGlobalIntakeReminderSettings,
+  setIntakeRemindersEnabled,
+  type GlobalIntakeReminderSettings,
+} from '@/infrastructure/reminders/intake-reminder-repository';
+import { synchronizeIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
+import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 import {
   createBackup,
   getLastSuccessfulBackupAt,
@@ -84,6 +100,18 @@ const DEFAULT_SCHEDULE: PreparationReminderSchedule = {
   hour: 18,
   minute: 0,
 };
+const SLOT_LABELS: Record<IntakeSlot, string> = {
+  morning: 'Matin',
+  noon: 'Midi',
+  evening: 'Soir',
+  bedtime: 'Coucher',
+};
+const DEFAULT_SLOT_TIMES: GlobalIntakeReminderSettings = {
+  morning: { hour: 8, minute: 0 },
+  noon: { hour: 12, minute: 0 },
+  evening: { hour: 19, minute: 0 },
+  bedtime: { hour: 22, minute: 0 },
+};
 
 export default function SettingsScreen() {
   const database = useSQLiteContext();
@@ -91,6 +119,7 @@ export default function SettingsScreen() {
   const [enabled, setEnabled] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [dayPickerOpen, setDayPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -107,6 +136,13 @@ export default function SettingsScreen() {
     useState(false);
   const [appLockEnabled, setAppLockEnabledState] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
+  const [slotTimes, setSlotTimes] = useState(DEFAULT_SLOT_TIMES);
+  const [activeIntakeSlot, setActiveIntakeSlot] = useState<IntakeSlot | null>(
+    null,
+  );
+  const [slotTimesDirty, setSlotTimesDirty] = useState(false);
+  const [intakeRemindersEnabled, setIntakeRemindersEnabledState] =
+    useState(false);
 
   useEffect(() => {
     let active = true;
@@ -115,29 +151,51 @@ export default function SettingsScreen() {
       getLocalNotificationPermission(),
       getLastSuccessfulBackupAt(database),
       isAppLockEnabled(database),
+      getGlobalIntakeReminderSettings(database),
+      isIntakeRemindersEnabled(database),
     ])
-      .then(async ([settings, permission, backupAt, lockEnabled]) => {
-        if (!active) return;
-        const loaded = {
-          weekday: settings.weekday,
-          hour: settings.hour,
-          minute: settings.minute,
-        };
-        setSchedule(loaded);
-        setPermissionDenied(permission === 'denied');
-        setLastBackupAt(backupAt);
-        setAppLockEnabledState(lockEnabled);
-        if (settings.enabled && permission === 'denied') {
-          await cancelPreparationReminders();
-          await savePreparationReminderSettings(database, loaded, null);
-          if (active)
-            setMessage(
-              'Le rappel a été désactivé car les notifications ne sont plus autorisées.',
-            );
-        } else {
-          setEnabled(settings.enabled);
-        }
-      })
+      .then(
+        async ([
+          settings,
+          permission,
+          backupAt,
+          lockEnabled,
+          globalTimes,
+          intakeEnabled,
+        ]) => {
+          if (!active) return;
+          const loaded = {
+            weekday: settings.weekday,
+            hour: settings.hour,
+            minute: settings.minute,
+          };
+          setSchedule(loaded);
+          setPermissionDenied(permission !== 'granted');
+          setLastBackupAt(backupAt);
+          setAppLockEnabledState(lockEnabled);
+          setSlotTimes(globalTimes);
+          if (intakeEnabled && permission !== 'granted') {
+            await setIntakeRemindersEnabled(database, false);
+            setIntakeRemindersEnabledState(false);
+            if (active)
+              setMessage(
+                'Les rappels ont été désactivés car les notifications ne sont plus autorisées.',
+              );
+          } else {
+            setIntakeRemindersEnabledState(intakeEnabled);
+          }
+          if (settings.enabled && permission !== 'granted') {
+            await cancelPreparationReminders();
+            await savePreparationReminderSettings(database, loaded, null);
+            if (active)
+              setMessage(
+                'Le rappel a été désactivé car les notifications ne sont plus autorisées.',
+              );
+          } else {
+            setEnabled(settings.enabled);
+          }
+        },
+      )
       .catch((reason: unknown) => {
         if (active) setMessage(errorMessage(reason));
       })
@@ -163,13 +221,15 @@ export default function SettingsScreen() {
         return;
       }
       const permission = await requestLocalNotificationPermission();
-      setPermissionDenied(permission === 'denied');
-      if (permission === 'denied') {
+      setPermissionDenied(permission !== 'granted');
+      if (permission !== 'granted') {
         await cancelPreparationReminders();
         await savePreparationReminderSettings(database, schedule, null);
         setEnabled(false);
         setMessage(
-          'Permission refusée : aucun rappel n’a été programmé. Vous pouvez l’autoriser dans les réglages Android.',
+          permission === 'blocked'
+            ? 'Les notifications sont définitivement refusées. Autorisez-les dans les réglages Android.'
+            : 'Permission refusée : aucun rappel n’a été programmé. Vous pouvez l’autoriser dans les réglages Android.',
         );
         return;
       }
@@ -227,6 +287,70 @@ export default function SettingsScreen() {
       minute: date.getMinutes(),
     }));
     setDirty(true);
+  }
+
+  function chooseIntakeSlotTime(
+    slot: IntakeSlot,
+    event: DateTimePickerEvent,
+    date?: Date,
+  ): void {
+    if (Platform.OS !== 'ios') setActiveIntakeSlot(null);
+    if (event.type !== 'set' || date === undefined) return;
+    setSlotTimes((current) => ({
+      ...current,
+      [slot]: { hour: date.getHours(), minute: date.getMinutes() },
+    }));
+    setSlotTimesDirty(true);
+  }
+
+  async function saveIntakeSlotTimes(): Promise<void> {
+    if (saving) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      await saveGlobalIntakeReminderSettings(database, slotTimes);
+      await synchronizeIntakeReminders(database);
+      setSlotTimesDirty(false);
+      setMessage('Heures des rappels de prise enregistrées.');
+    } catch (reason: unknown) {
+      setMessage(errorMessage(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateIntakeRemindersEnabled(
+    nextEnabled: boolean,
+  ): Promise<void> {
+    if (saving) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      if (nextEnabled) {
+        const permission = await requestLocalNotificationPermission();
+        setPermissionDenied(permission !== 'granted');
+        if (permission !== 'granted') {
+          setMessage(
+            permission === 'blocked'
+              ? 'Les notifications sont définitivement refusées. Autorisez-les dans les réglages Android.'
+              : 'Permission refusée : aucun rappel de prise n’a été programmé.',
+          );
+          return;
+        }
+      }
+      await setIntakeRemindersEnabled(database, nextEnabled);
+      await synchronizeIntakeReminders(database);
+      setIntakeRemindersEnabledState(nextEnabled);
+      setMessage(
+        nextEnabled
+          ? 'Rappels de prise activés pour tous les traitements non archivés.'
+          : 'Rappels de prise désactivés.',
+      );
+    } catch (reason: unknown) {
+      setMessage(errorMessage(reason));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function exportData(): Promise<void> {
@@ -325,6 +449,7 @@ export default function SettingsScreen() {
       await restoreBackup(database, pendingRestore.backup, async () => {
         writeSafetyBackup(safety);
       });
+      await cancelPostponedIntakeReminders();
       setLastBackupAt(await getLastSuccessfulBackupAt(database));
       setPendingRestore(null);
       setRestoreConfirmationVisible(false);
@@ -349,6 +474,13 @@ export default function SettingsScreen() {
         } else {
           setEnabled(false);
         }
+        setSlotTimes(await getGlobalIntakeReminderSettings(database));
+        setIntakeRemindersEnabledState(
+          await isIntakeRemindersEnabled(database),
+        );
+        setSlotTimesDirty(false);
+        await synchronizeIntakeReminders(database);
+        await reconcileIntakePostponements(database);
         setMessage(
           'Sauvegarde restaurée intégralement. Une copie de sécurité de l’ancien état est conservée sur ce téléphone.',
         );
@@ -388,10 +520,13 @@ export default function SettingsScreen() {
 
   if (loading)
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator />
-        <Text>Chargement des réglages…</Text>
-      </View>
+      <>
+        <Stack.Screen options={{ headerShown: true, title: 'Réglages' }} />
+        <View style={styles.centered}>
+          <ActivityIndicator />
+          <Text>Chargement des réglages…</Text>
+        </View>
+      </>
     );
 
   const pickerDate = new Date();
@@ -422,6 +557,77 @@ export default function SettingsScreen() {
       </Text>
 
       <Divider />
+      <SectionTitle>Heures des rappels de prise</SectionTitle>
+      <View style={styles.switchRow}>
+        <View style={styles.switchLabel}>
+          <Text style={styles.label}>Rappels de prise</Text>
+          <Text style={styles.help}>
+            S’applique à tous les traitements non archivés.
+          </Text>
+        </View>
+        <Switch
+          accessibilityLabel="Activer les rappels de prise"
+          disabled={saving}
+          onValueChange={(value) => void updateIntakeRemindersEnabled(value)}
+          value={intakeRemindersEnabled}
+        />
+      </View>
+      <Text style={styles.help}>
+        Une même heure s’applique à tous les traitements utilisant le créneau.
+        Les médicaments prévus ensemble sont regroupés dans une seule
+        notification.
+      </Text>
+      <View style={styles.slotGrid}>
+        {INTAKE_SLOTS.map((slot) => {
+          const time = slotTimes[slot];
+          const value = slotTimePickerDate(time);
+          return (
+            <View key={slot} style={styles.slotTimeField}>
+              <Text style={styles.label}>{SLOT_LABELS[slot]}</Text>
+              <Pressable
+                accessibilityLabel={`${SLOT_LABELS[slot]}, ${formatReminderTime(time.hour, time.minute)}`}
+                accessibilityHint="Ouvre le sélecteur d’heure"
+                accessibilityRole="button"
+                onPress={() => setActiveIntakeSlot(slot)}
+                style={styles.timeButton}
+              >
+                <Text style={styles.timeText}>
+                  {formatReminderTime(time.hour, time.minute)}
+                </Text>
+              </Pressable>
+              {activeIntakeSlot === slot ? (
+                <>
+                  <DateTimePicker
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    is24Hour
+                    mode="time"
+                    onChange={(event, date) =>
+                      chooseIntakeSlotTime(slot, event, date)
+                    }
+                    value={value}
+                  />
+                  {Platform.OS === 'ios' ? (
+                    <AppButton
+                      label="Valider cette heure"
+                      variant="secondary"
+                      onPress={() => setActiveIntakeSlot(null)}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+      {slotTimesDirty ? (
+        <AppButton
+          label="Enregistrer les heures de prise"
+          loading={saving}
+          onPress={() => void saveIntakeSlotTimes()}
+        />
+      ) : null}
+
+      <Divider />
       <SectionTitle>Rappel de préparation</SectionTitle>
       <View style={styles.switchRow}>
         <View style={styles.switchLabel}>
@@ -439,26 +645,47 @@ export default function SettingsScreen() {
       </View>
 
       <Text style={styles.label}>Jour</Text>
-      <View style={styles.days}>
-        {WEEKDAYS.map((weekday) => (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected: schedule.weekday === weekday }}
-            key={weekday}
-            onPress={() => chooseDay(weekday)}
-            style={[
-              styles.day,
-              schedule.weekday === weekday && styles.daySelected,
-            ]}
-          >
-            <Text
-              style={schedule.weekday === weekday && styles.dayTextSelected}
-            >
-              {DAY_LABELS[weekday]}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <Pressable
+        accessibilityLabel={`Jour de préparation, ${DAY_LABELS[schedule.weekday]}`}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: dayPickerOpen }}
+        onPress={() => setDayPickerOpen((open) => !open)}
+        style={styles.selectButton}
+      >
+        <Text style={styles.selectText}>{DAY_LABELS[schedule.weekday]}</Text>
+        <Text accessibilityElementsHidden style={styles.selectChevron}>
+          {dayPickerOpen ? '⌃' : '⌄'}
+        </Text>
+      </Pressable>
+      {dayPickerOpen ? (
+        <Card style={styles.dayMenu}>
+          {WEEKDAYS.map((weekday) => {
+            const selected = schedule.weekday === weekday;
+            return (
+              <Pressable
+                accessibilityRole="menuitem"
+                accessibilityState={{ selected }}
+                key={weekday}
+                onPress={() => {
+                  chooseDay(weekday);
+                  setDayPickerOpen(false);
+                }}
+                style={[styles.dayOption, selected && styles.dayOptionSelected]}
+              >
+                <Text
+                  style={[
+                    styles.dayOptionText,
+                    selected && styles.dayOptionTextSelected,
+                  ]}
+                >
+                  {DAY_LABELS[weekday]}
+                </Text>
+                {selected ? <Text style={styles.check}>✓</Text> : null}
+              </Pressable>
+            );
+          })}
+        </Card>
+      ) : null}
 
       <Text style={styles.label}>Heure</Text>
       <Pressable
@@ -598,6 +825,12 @@ function formatBackupDate(value: string): string {
   }).format(new Date(value));
 }
 
+function slotTimePickerDate(time: SlotTime): Date {
+  const value = new Date();
+  value.setHours(time.hour, time.minute, 0, 0);
+  return value;
+}
+
 const styles = StyleSheet.create({
   centered: {
     alignItems: 'center',
@@ -610,45 +843,45 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     padding: spacing.lg,
   },
-  dangerButton: {
-    alignItems: 'center',
-    backgroundColor: '#9E2A2B',
-    borderRadius: 8,
-    marginTop: 8,
-    padding: 14,
+  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  slotTimeField: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    gap: spacing.sm,
+    minWidth: 140,
+    padding: spacing.md,
+    width: '48%',
   },
-  divider: { backgroundColor: '#D8E0DE', height: 1, marginVertical: 8 },
-  day: {
+  selectButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
     borderColor: colors.borderStrong,
     borderRadius: radii.md,
     borderWidth: 1,
-    justifyContent: 'center',
+    flexDirection: 'row',
     minHeight: sizes.touch,
-    padding: 10,
+    paddingHorizontal: spacing.lg,
   },
-  daySelected: { backgroundColor: '#0F6F70', borderColor: '#0F6F70' },
-  dayTextSelected: { color: '#FFFFFF', fontWeight: '700' },
-  days: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  selectText: { ...typography.body, flex: 1, fontWeight: '700' },
+  selectChevron: { color: colors.brand, fontSize: 22 },
+  dayMenu: { gap: 0, padding: spacing.xs },
+  dayOption: {
+    alignItems: 'center',
+    borderRadius: radii.md,
+    flexDirection: 'row',
+    minHeight: sizes.touch,
+    paddingHorizontal: spacing.md,
+  },
+  dayOptionSelected: { backgroundColor: colors.brandSoft },
+  dayOptionText: { ...typography.body, flex: 1 },
+  dayOptionTextSelected: { color: colors.brand, fontWeight: '700' },
+  check: { color: colors.success, fontSize: 18, fontWeight: '800' },
   help: { ...typography.caption, marginTop: 4 },
   label: typography.label,
   linkText: { color: '#0F6F70', fontWeight: '600', paddingVertical: 8 },
-  message: { backgroundColor: '#EAF4F1', borderRadius: 8, padding: 12 },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#0F6F70',
-    borderRadius: 8,
-    padding: 14,
-  },
-  primaryButtonText: { color: '#FFFFFF', fontWeight: '700' },
   restoreSummary: { backgroundColor: colors.surface },
-  secondaryButton: {
-    alignItems: 'center',
-    borderColor: '#0F6F70',
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 14,
-  },
-  secondaryButtonText: { color: '#0F6F70', fontWeight: '700' },
   switchLabel: { flex: 1 },
   switchRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   timeButton: {
@@ -659,5 +892,4 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   timeText: { fontSize: 20, fontVariant: ['tabular-nums'] },
-  title: { fontSize: 26, fontWeight: '700' },
 });
