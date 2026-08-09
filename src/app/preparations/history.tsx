@@ -1,19 +1,22 @@
 import { Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { formatHalfUnits } from '@/domain/treatments/treatment';
 import {
   listPreparationHistory,
   type PreparationHistoryEntry,
 } from '@/infrastructure/preparations/preparation-repository';
+import {
+  Card,
+  EmptyState,
+  LoadingState,
+  Message,
+  colors,
+  spacing,
+  typography,
+} from '@/ui';
 
 export default function PreparationHistoryScreen() {
   const database = useSQLiteContext();
@@ -46,17 +49,20 @@ export default function PreparationHistoryScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Stack.Screen options={{ headerShown: true, title: 'Historique' }} />
-      {loading ? <ActivityIndicator /> : null}
+      {loading ? <LoadingState label="Chargement de l’historique…" /> : null}
       {error ? (
-        <Text accessibilityRole="alert" style={styles.error}>
+        <Message tone="error" title="Historique indisponible">
           {error}
-        </Text>
+        </Message>
       ) : null}
       {!loading && !error && history.length === 0 ? (
-        <Text>Aucune préparation terminée.</Text>
+        <EmptyState
+          title="Aucune préparation terminée"
+          description="Les préparations validées et les lots utilisés apparaîtront ici."
+        />
       ) : null}
       {history.map((preparation) => (
-        <View key={preparation.id} style={styles.card}>
+        <Card key={preparation.id} style={styles.card}>
           <Text style={styles.title}>
             Du {preparation.startDate} au {preparation.endDate}
           </Text>
@@ -75,7 +81,7 @@ export default function PreparationHistoryScreen() {
               </Text>
             </View>
           ))}
-        </View>
+        </Card>
       ))}
     </ScrollView>
   );
@@ -88,7 +94,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 14,
   },
-  container: { backgroundColor: '#fff', flexGrow: 1, gap: 14, padding: 16 },
+  container: {
+    backgroundColor: colors.background,
+    flexGrow: 1,
+    gap: spacing.lg,
+    padding: spacing.lg,
+  },
   error: { color: '#b91c1c', fontWeight: '700' },
   medication: {
     borderTopColor: '#e5e7eb',
@@ -98,5 +109,5 @@ const styles = StyleSheet.create({
   },
   muted: { color: '#4b5563', marginTop: 3 },
   name: { fontWeight: '700' },
-  title: { fontSize: 18, fontWeight: '800' },
+  title: typography.heading,
 });

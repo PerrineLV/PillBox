@@ -1,16 +1,20 @@
 import { Link, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  FlatList,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 
 import { formatHalfUnits, type Treatment } from '@/domain/treatments/treatment';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
+import {
+  Badge,
+  EmptyState,
+  LoadingState,
+  Message,
+  colors,
+  radii,
+  spacing,
+  typography,
+} from '@/ui';
 
 export default function TreatmentsScreen() {
   const database = useSQLiteContext();
@@ -58,18 +62,21 @@ export default function TreatmentsScreen() {
           {notice}
         </Text>
       ) : null}
-      {loading ? <ActivityIndicator /> : null}
+      {loading ? <LoadingState label="Chargement des traitements…" /> : null}
       {error ? (
-        <Text accessibilityRole="alert" style={styles.error}>
+        <Message tone="error" title="Traitements indisponibles">
           {error}
-        </Text>
+        </Message>
       ) : null}
       <FlatList
         data={treatments}
         keyExtractor={(item) => String(item.id)}
         ListEmptyComponent={
           !loading && !error ? (
-            <Text style={styles.empty}>Aucun traitement enregistré.</Text>
+            <EmptyState
+              title="Aucun traitement enregistré"
+              description="Ajoutez un traitement depuis le référentiel local. La posologie restera toujours à saisir manuellement."
+            />
           ) : null
         }
         renderItem={({ item }) => <TreatmentItem treatment={item} />}
@@ -102,17 +109,25 @@ function TreatmentItem({ treatment }: { treatment: Treatment }) {
     >
       <View>
         <Text style={styles.name}>{treatment.specialtyName}</Text>
-        <Text>
-          {treatment.archivedAt
-            ? 'Archivé'
-            : treatment.active
-              ? 'Actif'
-              : 'Inactif'}{' '}
-          ·{' '}
-          {treatment.includedInPillbox
-            ? 'Dans le pilulier'
-            : 'Exclu du pilulier'}
-        </Text>
+        <View style={styles.badges}>
+          <Badge
+            label={
+              treatment.archivedAt
+                ? 'Archivé'
+                : treatment.active
+                  ? 'Actif'
+                  : 'Inactif'
+            }
+            tone={
+              treatment.active && !treatment.archivedAt ? 'success' : 'neutral'
+            }
+          />
+          <Badge
+            label={
+              treatment.includedInPillbox ? 'Dans le pilulier' : 'Hors pilulier'
+            }
+          />
+        </View>
         <Text numberOfLines={2} style={styles.summary}>
           {summary}
         </Text>
@@ -123,8 +138,8 @@ function TreatmentItem({ treatment }: { treatment: Treatment }) {
 
 const styles = StyleSheet.create({
   add: {
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: radii.md,
     color: '#fff',
     fontWeight: '700',
     marginBottom: 12,
@@ -132,7 +147,17 @@ const styles = StyleSheet.create({
     padding: 14,
     textAlign: 'center',
   },
-  container: { backgroundColor: '#fff', flex: 1, padding: 16 },
+  badges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  container: {
+    backgroundColor: colors.background,
+    flex: 1,
+    padding: spacing.lg,
+  },
   empty: { color: '#4b5563', paddingTop: 30, textAlign: 'center' },
   error: { color: '#b91c1c' },
   item: {
@@ -140,7 +165,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     paddingVertical: 16,
   },
-  name: { fontSize: 17, fontWeight: '700' },
+  name: typography.heading,
   notice: {
     backgroundColor: '#dcfce7',
     color: '#166534',

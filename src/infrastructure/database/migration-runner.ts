@@ -21,12 +21,10 @@ export class DatabaseMigrationError extends Error {
   readonly cause: unknown;
 
   constructor(migration: SchemaMigration, cause: unknown) {
-    const detail = cause instanceof Error ? ` ${cause.message}` : '';
-
     super(
       `La mise à jour de la base locale a échoué à l’étape ${migration.version} ` +
         `(${migration.name}). La migration a été annulée sans conserver de modification ` +
-        `partielle.${detail}`,
+        'partielle. Le détail technique a été neutralisé pour protéger les données locales.',
     );
     this.name = 'DatabaseMigrationError';
     this.migrationVersion = migration.version;

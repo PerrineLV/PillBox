@@ -3,15 +3,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Button,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import {
@@ -40,6 +32,18 @@ import {
   savePreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
+import {
+  AppButton,
+  AppModal,
+  Badge,
+  Card,
+  LoadingState,
+  Message,
+  colors,
+  radii,
+  spacing,
+  typography,
+} from '@/ui';
 
 const SLOT_LABELS: Record<IntakeSlot, string> = {
   morning: 'matin',
@@ -65,6 +69,8 @@ export default function NewPreparationScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [finalized, setFinalized] = useState(false);
+  const [finalConfirmationVisible, setFinalConfirmationVisible] =
+    useState(false);
   const [error, setError] = useState<string | null>(null);
   const scanLocked = useRef(false);
 
@@ -233,6 +239,7 @@ export default function NewPreparationScreen() {
     try {
       await completePreparation(database, preparationId, todayIso());
       setFinalized(true);
+      setFinalConfirmationVisible(false);
       setBoxes(await listMedicationBoxes(database));
     } catch (reason: unknown) {
       setError(message(reason, 'Validation finale impossible.'));
@@ -244,7 +251,7 @@ export default function NewPreparationScreen() {
   if (loading)
     return (
       <Centered text="Chargement de la préparation…">
-        <ActivityIndicator />
+        <LoadingState label="Chargement de la préparation…" />
       </Centered>
     );
   if (scanning) {
@@ -253,8 +260,15 @@ export default function NewPreparationScreen() {
     if (!permission.granted)
       return (
         <Centered text="La caméra est nécessaire pour vérifier la boîte.">
-          <Button title="Autoriser la caméra" onPress={requestPermission} />
-          <Button title="Annuler" onPress={() => setScanning(false)} />
+          <AppButton
+            label="Autoriser la caméra"
+            onPress={() => void requestPermission()}
+          />
+          <AppButton
+            label="Annuler"
+            variant="quiet"
+            onPress={() => setScanning(false)}
+          />
         </Centered>
       );
     return (
@@ -273,7 +287,11 @@ export default function NewPreparationScreen() {
             </Text>
           </View>
         </CameraView>
-        <Button title="Annuler" onPress={() => setScanning(false)} />
+        <AppButton
+          label="Annuler le scan"
+          variant="quiet"
+          onPress={() => setScanning(false)}
+        />
       </View>
     );
   }
@@ -299,9 +317,9 @@ export default function NewPreparationScreen() {
         </Pressable>
       ) : null}
       {error ? (
-        <Text accessibilityRole="alert" style={styles.error}>
+        <Message tone="error" title="Action impossible">
           {error}
-        </Text>
+        </Message>
       ) : null}
       {snapshot ? (
         <>
@@ -312,18 +330,19 @@ export default function NewPreparationScreen() {
             {completed.size} / {snapshot.requirements.length} médicaments
             préparés
           </Text>
+          {completed.size > 0 && current ? (
+            <Badge label="Préparation reprise" tone="success" />
+          ) : null}
         </>
       ) : null}
       {snapshot?.hasShortages ? (
-        <View style={styles.warning}>
-          <Text style={styles.warningTitle}>
-            Stock total insuffisant signalé lors de la génération
-          </Text>
-          <Text>
-            La validation reste bloquée si la boîte scannée ne couvre pas le
-            besoin.
-          </Text>
-        </View>
+        <Message
+          tone="warning"
+          title="Stock total insuffisant signalé lors de la génération"
+        >
+          La validation reste bloquée si la boîte scannée ne couvre pas le
+          besoin.
+        </Message>
       ) : null}
       {snapshot && snapshot.requirements.length === 0 ? (
         <Text>Aucune prise prévue pour cette période.</Text>
@@ -337,7 +356,7 @@ export default function NewPreparationScreen() {
         />
       ) : null}
       {current && !pending ? (
-        <Button title="Scanner la boîte utilisée" onPress={beginScan} />
+        <AppButton label="Scanner la boîte utilisée" onPress={beginScan} />
       ) : null}
       {pending && current ? (
         <ScanConfirmation
@@ -348,30 +367,42 @@ export default function NewPreparationScreen() {
         />
       ) : null}
       {snapshot && current === null && !finalized ? (
-        <View style={styles.success}>
+        <Card style={styles.success}>
           <Text style={styles.successTitle}>Contrôle final jour par jour</Text>
           <Text>
             Vérifiez le contenu attendu de chaque case avant de décrémenter le
             stock.
           </Text>
           <DailyFinalCheck snapshot={snapshot} />
-          <Button
-            disabled={saving}
-            title={
-              saving ? 'Validation…' : 'Valider définitivement la préparation'
-            }
-            onPress={() => void validateFinalPreparation()}
+          <Message tone="warning">
+            Cette validation décrémentera le stock une seule fois. Contrôlez
+            chaque case avant de continuer.
+          </Message>
+          <AppButton
+            label="Valider définitivement la préparation"
+            loading={saving}
+            onPress={() => setFinalConfirmationVisible(true)}
           />
-        </View>
+        </Card>
       ) : null}
       {finalized ? (
-        <View style={styles.success}>
-          <Text style={styles.successTitle}>Préparation validée</Text>
-          <Text>
-            Le stock et les lots utilisés ont été enregistrés dans l’historique.
-          </Text>
-        </View>
+        <Message tone="success" title="Préparation validée">
+          Le stock et les lots utilisés ont été enregistrés dans l’historique.
+        </Message>
       ) : null}
+      <AppModal
+        visible={finalConfirmationVisible}
+        title="Valider la préparation ?"
+        primaryLabel="Valider et décrémenter le stock"
+        busy={saving}
+        onCancel={() => setFinalConfirmationVisible(false)}
+        onPrimary={() => void validateFinalPreparation()}
+      >
+        <Text style={styles.intro}>
+          Cette action enregistre définitivement les lots utilisés et décrémente
+          leur stock. Elle ne peut être effectuée qu’une fois.
+        </Text>
+      </AppModal>
     </ScrollView>
   );
 }
@@ -422,7 +453,7 @@ function MedicationStep({
     (item) => item.specialtyCis === specialtyCis,
   );
   return (
-    <View style={styles.card}>
+    <Card style={styles.card}>
       <Text style={styles.name}>{name}</Text>
       <Text style={styles.total}>
         Quantité totale : {formatHalfUnits(requiredHalfUnits)}
@@ -434,7 +465,7 @@ function MedicationStep({
           {formatHalfUnits(item.quantityHalfUnits)}
         </Text>
       ))}
-    </View>
+    </Card>
   );
 }
 
@@ -465,18 +496,18 @@ function ScanConfirmation({
           cet avertissement.
         </Text>
       ) : null}
-      <Button
-        disabled={saving}
-        title={
-          saving
-            ? 'Sauvegarde…'
-            : isFefo
-              ? 'Valider ce médicament'
-              : 'Utiliser quand même cette boîte'
+      <AppButton
+        loading={saving}
+        label={
+          isFefo ? 'Valider ce médicament' : 'Utiliser quand même cette boîte'
         }
         onPress={() => void onValidate(!isFefo)}
       />
-      <Button title="Scanner une autre boîte" onPress={onRescan} />
+      <AppButton
+        label="Scanner une autre boîte"
+        variant="secondary"
+        onPress={onRescan}
+      />
     </View>
   );
 }
@@ -505,12 +536,10 @@ function message(reason: unknown, fallback: string): string {
 const styles = StyleSheet.create({
   camera: { flex: 1 },
   cameraContainer: { flex: 1 },
-  case: { color: '#374151', marginTop: 5 },
+  case: { color: colors.textMuted, marginTop: 5 },
   casesTitle: { fontWeight: '700', marginTop: 14 },
   card: {
-    borderColor: '#d1d5db',
-    borderRadius: 10,
-    borderWidth: 1,
+    borderColor: colors.border,
     marginBottom: 16,
     padding: 14,
   },
@@ -521,10 +550,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
-  container: { backgroundColor: '#fff', flexGrow: 1, padding: 16 },
-  error: { color: '#b91c1c', fontWeight: '700', marginVertical: 12 },
+  container: {
+    backgroundColor: colors.background,
+    flexGrow: 1,
+    gap: spacing.lg,
+    padding: spacing.lg,
+  },
   finalCheck: { gap: 12, marginVertical: 12 },
-  day: { borderTopColor: '#d1d5db', borderTopWidth: 1, paddingTop: 8 },
+  day: { borderTopColor: colors.border, borderTopWidth: 1, paddingTop: 8 },
   dayTitle: { fontSize: 16, fontWeight: '800' },
   guide: {
     borderColor: '#fff',
@@ -541,8 +574,8 @@ const styles = StyleSheet.create({
     padding: 6,
     textAlign: 'center',
   },
-  intro: { color: '#374151', lineHeight: 21 },
-  name: { fontSize: 20, fontWeight: '800' },
+  intro: typography.body,
+  name: typography.title,
   period: { fontSize: 19, fontWeight: '800', marginTop: 18 },
   primary: {
     backgroundColor: '#0F6F70',
@@ -552,31 +585,31 @@ const styles = StyleSheet.create({
   },
   primaryText: { color: '#fff', fontWeight: '700', textAlign: 'center' },
   progress: { marginBottom: 16, marginTop: 4 },
-  success: { backgroundColor: '#F4FAF7', borderRadius: 8, padding: 14 },
+  success: { backgroundColor: colors.surface },
   successTitle: {
-    color: '#0F6F70',
+    color: colors.success,
     fontSize: 18,
     fontWeight: '800',
     marginBottom: 5,
   },
   total: { fontSize: 17, fontWeight: '700', marginTop: 8 },
   verified: {
-    backgroundColor: '#F4FAF7',
-    borderColor: '#0F6F70',
-    borderRadius: 8,
+    backgroundColor: colors.successSoft,
+    borderColor: colors.success,
+    borderRadius: radii.md,
     borderWidth: 1,
     gap: 10,
     marginTop: 14,
     padding: 12,
   },
   warning: {
-    backgroundColor: '#fff7ed',
-    borderColor: '#c2410c',
-    borderRadius: 8,
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warning,
+    borderRadius: radii.md,
     borderWidth: 1,
     gap: 10,
     marginBottom: 16,
     padding: 12,
   },
-  warningTitle: { color: '#9a3412', fontWeight: '800' },
+  warningTitle: { color: colors.warning, fontWeight: '800' },
 });

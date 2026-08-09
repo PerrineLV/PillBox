@@ -48,7 +48,10 @@ class DatabaseErrorBoundary extends Component<
           <Text accessibilityRole="alert" style={styles.title}>
             Impossible de mettre à jour la base locale
           </Text>
-          <Text style={styles.message}>{this.state.error.message}</Text>
+          <Text style={styles.message}>
+            La migration locale a échoué. Aucun détail de donnée ni chemin de
+            fichier n’est affiché.
+          </Text>
           <Text style={styles.message}>
             La base n’a pas été réinitialisée. Fermez l’application et
             réessayez.

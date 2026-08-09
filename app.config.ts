@@ -9,6 +9,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: config.slug ?? 'pillbox',
   android: {
     ...config.android,
+    allowBackup: false,
     package: 'com.perrinelv.pillbox',
     permissions: appendValue(
       config.android?.permissions,
@@ -16,7 +17,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ),
     versionCode: resolveAndroidVersionCode(process.env.ANDROID_VERSION_CODE),
   },
-  plugins: appendPlugin(config.plugins, 'expo-notifications'),
+  plugins: appendPlugin(
+    appendPlugin(config.plugins, 'expo-notifications'),
+    'expo-local-authentication',
+  ),
 });
 
 function appendValue(

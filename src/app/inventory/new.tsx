@@ -10,11 +10,9 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Button,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -26,6 +24,15 @@ import {
   findMedicationPresentationByCip13,
   type IdentifiedMedicationPresentation,
 } from '@/infrastructure/medications/medication-reference';
+import {
+  AppButton,
+  AppField,
+  Card,
+  Message,
+  colors,
+  spacing,
+  typography,
+} from '@/ui';
 
 export default function AddBoxScreen() {
   const personalDatabase = useSQLiteContext();
@@ -142,7 +149,10 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
   if (!permission.granted) {
     return (
       <Centered text="La caméra est nécessaire pour ajouter une boîte.">
-        <Button title="Autoriser la caméra" onPress={requestPermission} />
+        <AppButton
+          label="Autoriser la caméra"
+          onPress={() => void requestPermission()}
+        />
       </Centered>
     );
   }
@@ -176,16 +186,16 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
             <ActivityIndicator accessibilityLabel="Identification en cours" />
           ) : null}
           {medication ? (
-            <View style={styles.identified}>
+            <Card style={styles.identified}>
               <Text style={styles.medication}>{medication.name}</Text>
               <Text>{medication.label}</Text>
               <Text>CIP13 {medication.cip13}</Text>
-            </View>
+            </Card>
           ) : null}
           {error ? (
-            <Text accessibilityRole="alert" style={styles.error}>
+            <Message tone="error" title="Boîte non validée">
               {error}
-            </Text>
+            </Message>
           ) : null}
           <Field
             label="Lot"
@@ -209,21 +219,25 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
             Quantité initiale requise : elle ne peut pas être obtenue de façon
             fiable depuis le DataMatrix.
           </Text>
-          <TextInput
-            accessibilityLabel="Quantité initiale"
+          <AppField
+            label="Quantité initiale"
             keyboardType="number-pad"
             onChangeText={setQuantity}
-            placeholder="Quantité initiale"
-            style={styles.input}
+            placeholder="Ex. 30"
             value={quantity}
           />
-          <Button
-            title={saving ? 'Enregistrement…' : 'Ajouter cette boîte'}
+          <AppButton
+            label="Ajouter cette boîte"
+            loading={saving}
             disabled={saving || identifying || medication === null}
-            onPress={save}
+            onPress={() => void save()}
           />
           <View style={styles.secondary}>
-            <Button title="Scanner à nouveau" onPress={reset} />
+            <AppButton
+              label="Scanner à nouveau"
+              variant="secondary"
+              onPress={reset}
+            />
           </View>
           <Text selectable style={styles.raw}>
             Scan brut conservé : {JSON.stringify(scan.data)}
@@ -241,10 +255,12 @@ function Field(props: {
   placeholder: string;
 }) {
   return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{props.label}</Text>
-      <TextInput {...props} style={styles.input} />
-    </View>
+    <AppField
+      label={props.label}
+      value={props.value}
+      onChangeText={props.onChangeText}
+      placeholder={props.placeholder}
+    />
   );
 }
 
@@ -260,7 +276,7 @@ function Centered({
       <Stack.Screen
         options={{ headerShown: true, title: 'Ajouter une boîte' }}
       />
-      <Text>{text}</Text>
+      <Text style={typography.body}>{text}</Text>
       {children}
     </View>
   );
@@ -275,10 +291,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
-  container: { backgroundColor: '#fff', flex: 1 },
-  error: { color: '#b91c1c', marginBottom: 12 },
+  container: { backgroundColor: colors.background, flex: 1 },
   field: { marginBottom: 14 },
-  form: { padding: 18 },
+  form: { gap: spacing.lg, padding: spacing.lg },
   guide: {
     borderColor: '#fff',
     borderWidth: 2,
@@ -295,7 +310,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   identified: {
-    backgroundColor: '#F4FAF7',
+    backgroundColor: colors.surface,
     borderRadius: 8,
     marginBottom: 16,
     padding: 14,
@@ -307,7 +322,7 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   label: { fontWeight: '700', marginBottom: 5 },
-  medication: { fontSize: 17, fontWeight: '800' },
+  medication: typography.heading,
   quantityNotice: { fontWeight: '700', marginBottom: 8 },
   raw: { color: '#4b5563', fontSize: 12, marginTop: 18 },
   secondary: { marginTop: 12 },

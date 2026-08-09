@@ -1,13 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-} from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
 
 import { TreatmentForm } from '@/components/treatments/treatment-form';
 import { confirmPermanentTreatmentDeletion } from '@/components/treatments/delete-confirmation';
@@ -21,6 +15,7 @@ import {
   type TreatmentRemovalAction,
   updateTreatment,
 } from '@/infrastructure/treatments/treatment-repository';
+import { AppButton, LoadingState, Message, colors, spacing } from '@/ui';
 
 export default function EditTreatmentScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -78,12 +73,10 @@ export default function EditTreatmentScreen() {
       <Stack.Screen
         options={{ headerShown: true, title: 'Modifier le traitement' }}
       />
-      {error ? (
-        <Text accessibilityRole="alert" style={styles.error}>
-          {error}
-        </Text>
+      {error ? <Message tone="error">{error}</Message> : null}
+      {!error && treatment === null ? (
+        <LoadingState label="Chargement du traitement…" />
       ) : null}
-      {!error && treatment === null ? <ActivityIndicator /> : null}
       {treatment && treatment.archivedAt === null ? (
         <TreatmentForm
           initialValue={treatment}
@@ -99,44 +92,40 @@ export default function EditTreatmentScreen() {
         />
       ) : null}
       {treatment?.archivedAt ? (
-        <Text style={styles.archivedNotice}>
-          Ce traitement est archivé. Ses posologies et son historique sont
-          conservés.
-        </Text>
+        <Message tone="warning" title="Traitement archivé">
+          Ses posologies et son historique sont conservés.
+        </Message>
       ) : null}
       {treatment && removalAction ? (
         treatment.archivedAt ? (
-          <Pressable
-            accessibilityRole="button"
-            disabled={processing}
+          <AppButton
+            label="Réactiver le traitement"
+            variant="secondary"
+            loading={processing}
             onPress={() =>
               void runAction(
                 () => reactivateTreatment(database, treatment.id),
                 `Le traitement « ${treatment.specialtyName} » a été réactivé.`,
               )
             }
-            style={styles.secondaryAction}
-          >
-            <Text style={styles.secondaryActionText}>Réactiver</Text>
-          </Pressable>
+          />
         ) : removalAction === 'ARCHIVE' ? (
-          <Pressable
-            accessibilityRole="button"
-            disabled={processing}
+          <AppButton
+            label="Archiver le traitement"
+            variant="secondary"
+            loading={processing}
             onPress={() =>
               void runAction(
                 () => archiveTreatment(database, treatment.id),
                 `Le traitement « ${treatment.specialtyName} » a été archivé.`,
               )
             }
-            style={styles.archiveAction}
-          >
-            <Text style={styles.archiveActionText}>Archiver</Text>
-          </Pressable>
+          />
         ) : (
-          <Pressable
-            accessibilityRole="button"
-            disabled={processing}
+          <AppButton
+            label="Supprimer définitivement"
+            variant="danger"
+            loading={processing}
             onPress={() =>
               confirmPermanentTreatmentDeletion(treatment.specialtyName, () => {
                 void runAction(
@@ -145,19 +134,19 @@ export default function EditTreatmentScreen() {
                 );
               })
             }
-            style={styles.deleteAction}
-          >
-            <Text style={styles.deleteActionText}>
-              Supprimer définitivement
-            </Text>
-          </Pressable>
+          />
         )
       ) : null}
     </ScrollView>
   );
 }
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#fff', flexGrow: 1, padding: 16 },
+  container: {
+    backgroundColor: colors.background,
+    flexGrow: 1,
+    gap: spacing.lg,
+    padding: spacing.lg,
+  },
   error: { color: '#b91c1c' },
   archiveAction: {
     borderColor: '#92400e',
