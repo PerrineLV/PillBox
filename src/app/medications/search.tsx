@@ -1,6 +1,6 @@
 import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
-import { Stack } from 'expo-router';
+import { Link, Stack } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -104,6 +104,19 @@ function MedicationResult({ result }: { result: MedicationSearchResult }) {
       {result.pharmaceuticalForm === null ? null : (
         <Text>Forme : {result.pharmaceuticalForm}</Text>
       )}
+      <Link
+        href={{
+          pathname: '/treatments/new',
+          params: {
+            cis: result.cis,
+            name: result.name,
+            form: result.pharmaceuticalForm ?? '',
+          },
+        }}
+        style={styles.createTreatment}
+      >
+        Créer un traitement
+      </Link>
       {result.presentations.map((presentation) => (
         <View key={presentation.cip13} style={styles.presentation}>
           <Text>CIP13 {presentation.cip13}</Text>
@@ -116,6 +129,7 @@ function MedicationResult({ result }: { result: MedicationSearchResult }) {
 
 const styles = StyleSheet.create({
   container: { backgroundColor: '#ffffff', flex: 1, padding: 16 },
+  createTreatment: { color: '#1d4ed8', fontWeight: '700', marginTop: 8 },
   empty: { color: '#4b5563', paddingTop: 24, textAlign: 'center' },
   error: { color: '#b91c1c', marginBottom: 12 },
   name: { fontSize: 16, fontWeight: '700' },

@@ -5,6 +5,9 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Pilulier</Text>
+      <Link href="/treatments" style={styles.link}>
+        Mes traitements
+      </Link>
       <Link href="/medications/search" style={styles.link}>
         Rechercher un médicament
       </Link>
