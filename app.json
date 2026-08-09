@@ -4,11 +4,16 @@
     "slug": "pillbox",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/branding/pillbox-icon.png",
     "scheme": "pillbox",
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "com.perrinelv.pillbox",
-      "versionCode": 1
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/branding/pillbox-adaptive-icon.png",
+        "backgroundColor": "#F4FAF7"
+      }
     },
     "plugins": [
       "expo-router",
