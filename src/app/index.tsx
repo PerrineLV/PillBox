@@ -8,6 +8,9 @@ export default function HomeScreen() {
       <Link href="/treatments" style={styles.link}>
         Mes traitements
       </Link>
+      <Link href="/inventory" style={styles.link}>
+        Mon stock de boîtes
+      </Link>
       <Link href="/medications/search" style={styles.link}>
         Rechercher un médicament
       </Link>
