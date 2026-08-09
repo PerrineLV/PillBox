@@ -52,10 +52,11 @@ export type Treatment = {
   pharmaceuticalForm: string | null;
   active: boolean;
   includedInPillbox: boolean;
+  archivedAt: string | null;
   phases: TreatmentPhase[];
 };
 
-export type TreatmentDraft = Omit<Treatment, 'id'>;
+export type TreatmentDraft = Omit<Treatment, 'id' | 'archivedAt'>;
 
 export function isLegacyTreatmentPhase(
   phase: TreatmentPhase,

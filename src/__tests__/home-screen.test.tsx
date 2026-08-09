@@ -5,6 +5,6 @@ describe('HomeScreen', () => {
     const screen = HomeScreen();
     const [title] = screen.props.children;
 
-    expect(title.props.children).toBe('Pilulier');
+    expect(title.props.children).toBe('PillBox');
   });
 });

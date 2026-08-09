@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 export default function HomeScreen() {
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Pilulier</Text>
+      <Text style={styles.title}>PillBox</Text>
       <Link href="/preparations/new" style={styles.primaryLink}>
         Préparer mon pilulier
       </Link>

@@ -16,6 +16,7 @@ function treatment(overrides: Partial<Treatment> = {}): Treatment {
     pharmaceuticalForm: 'comprimé',
     active: true,
     includedInPillbox: true,
+    archivedAt: null,
     phases: [
       {
         id: 1,

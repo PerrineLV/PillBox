@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 8;
+export const LATEST_SCHEMA_VERSION = 9;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -327,6 +327,16 @@ export const SCHEMA_MIGRATIONS = [
         );
 
         INSERT INTO preparation_reminder_settings (singleton_id) VALUES (1);
+      `);
+    },
+  },
+  {
+    version: 9,
+    name: 'ajout de l’archivage explicite des traitements',
+    async up(transaction) {
+      await transaction.execute(`
+        ALTER TABLE treatments ADD COLUMN archived_at TEXT;
+        CREATE INDEX treatments_archived_at_idx ON treatments(archived_at);
       `);
     },
   },
