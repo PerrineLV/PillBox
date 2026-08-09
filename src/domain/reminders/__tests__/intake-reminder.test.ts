@@ -1,7 +1,4 @@
-import {
-  planIntakeReminders,
-  type TreatmentReminderSettings,
-} from '../intake-reminder';
+import { type IntakeSlotTimes, planIntakeReminders } from '../intake-reminder';
 import type {
   PhaseFrequency,
   ScheduledTreatmentPhase,
@@ -31,23 +28,23 @@ function treatment(
     specialtyCis: String(id),
     specialtyName: `Médicament ${id}`,
     pharmaceuticalForm: null,
-    active: true,
     includedInPillbox: true,
     archivedAt: null,
     phases: [scheduledPhase(id * 10, frequency)],
     ...overrides,
   };
 }
-function settings(...ids: number[]): TreatmentReminderSettings[] {
-  return ids.map((treatmentId) => ({
-    treatmentId,
-    enabled: true,
-    slotTimes: { morning: { hour: 8, minute: 0 } },
-  }));
+function settings(..._ids: number[]): IntakeSlotTimes {
+  return {
+    morning: { hour: 8, minute: 0 },
+    noon: { hour: 12, minute: 0 },
+    evening: { hour: 19, minute: 0 },
+    bedtime: { hour: 22, minute: 0 },
+  };
 }
 function plan(
   treatments: Treatment[],
-  reminderSettings: TreatmentReminderSettings[],
+  reminderSettings: IntakeSlotTimes,
   from = new Date(2026, 2, 2, 0),
   until = new Date(2026, 2, 10, 23, 59),
 ) {
@@ -64,6 +61,43 @@ describe('planification pure des rappels de prise', () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0].treatmentIds).toEqual([1, 2]);
+  });
+
+  it('inclut les traitements hors pilulier tant qu’ils ne sont pas archivés', () => {
+    const result = plan(
+      [treatment(1, { type: 'daily' }, { includedInPillbox: false })],
+      settings(1),
+      new Date(2026, 2, 2, 7),
+      new Date(2026, 2, 2, 9),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].treatmentIds).toEqual([1]);
+  });
+
+  it('conserve des groupes distincts lorsque deux créneaux partagent la même heure', () => {
+    const value = treatment(1);
+    value.phases[0] = {
+      ...scheduledPhase(10, { type: 'daily' }),
+      dosage: [
+        { slot: 'morning', quantityHalfUnits: 2 },
+        { slot: 'noon', quantityHalfUnits: 2 },
+      ],
+    };
+    const reminderSettings = {
+      ...settings(1),
+      noon: { hour: 8, minute: 0 },
+    };
+    const result = plan(
+      [value],
+      reminderSettings,
+      new Date(2026, 2, 2, 7),
+      new Date(2026, 2, 2, 9),
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].groups).toEqual([
+      { date: '2026-03-02', slot: 'morning' },
+      { date: '2026-03-02', slot: 'noon' },
+    ]);
   });
 
   it('respecte deux phases successives avec changement de quantité sans dupliquer la logique des phases', () => {
@@ -114,7 +148,7 @@ describe('planification pure des rappels de prise', () => {
     ).toEqual([1, 3]);
   });
 
-  it('écarte traitement futur, terminé, désactivé et archivé', () => {
+  it('écarte les traitements futurs, terminés et archivés', () => {
     const future = treatment(1);
     future.phases[0] = {
       ...scheduledPhase(10, { type: 'daily' }),
@@ -130,18 +164,19 @@ describe('planification pure des rappels de prise', () => {
         [
           future,
           ended,
-          treatment(3, { type: 'daily' }, { active: false }),
-          treatment(4, { type: 'daily' }, { archivedAt: '2026-01-01' }),
+          treatment(3, { type: 'daily' }, { archivedAt: '2026-01-01' }),
         ],
-        settings(1, 2, 3, 4),
+        settings(1, 2, 3),
       ),
     ).toEqual([]);
   });
 
   it('recalcule sans doublon après modification', () => {
     const first = plan([treatment(1)], settings(1));
-    const changed = settings(1);
-    changed[0].slotTimes.morning = { hour: 9, minute: 30 };
+    const changed = {
+      ...settings(1),
+      morning: { hour: 9, minute: 30 },
+    };
     const second = plan([treatment(1)], changed);
     expect(
       new Set(second.map((item) => item.scheduledAt.toISOString())).size,

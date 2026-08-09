@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 13;
+export const LATEST_SCHEMA_VERSION = 15;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -423,6 +423,52 @@ export const SCHEMA_MIGRATIONS = [
         );
         INSERT INTO intake_reminder_slot_settings (singleton_id) VALUES (1);
         UPDATE treatment_reminder_settings SET enabled = 0;
+      `);
+    },
+  },
+  {
+    version: 14,
+    name: 'suivi et report des prises prévues',
+    async up(transaction) {
+      await transaction.execute(`
+        CREATE TABLE intake_records (
+          intake_key TEXT PRIMARY KEY NOT NULL,
+          source_treatment_id INTEGER NOT NULL,
+          intake_date TEXT NOT NULL CHECK (intake_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          slot TEXT NOT NULL CHECK (slot IN ('morning', 'noon', 'evening', 'bedtime')),
+          specialty_cis TEXT NOT NULL,
+          specialty_name TEXT NOT NULL,
+          pharmaceutical_form TEXT,
+          quantity_half_units INTEGER NOT NULL CHECK (quantity_half_units > 0),
+          status TEXT NOT NULL DEFAULT 'UNSET' CHECK (status IN ('UNSET', 'TAKEN', 'SKIPPED')),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (source_treatment_id, intake_date, slot)
+        );
+        CREATE INDEX intake_records_history_idx
+          ON intake_records(intake_date DESC, slot, specialty_name);
+        CREATE INDEX intake_records_treatment_idx
+          ON intake_records(source_treatment_id, intake_date DESC);
+
+        CREATE TABLE intake_postponements (
+          intake_date TEXT NOT NULL CHECK (intake_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          slot TEXT NOT NULL CHECK (slot IN ('morning', 'noon', 'evening', 'bedtime')),
+          scheduled_at TEXT NOT NULL,
+          notification_id TEXT UNIQUE,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (intake_date, slot)
+        );
+      `);
+    },
+  },
+  {
+    version: 15,
+    name: 'activation globale des rappels de prise',
+    async up(transaction) {
+      await transaction.execute(`
+        ALTER TABLE intake_reminder_slot_settings
+          ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1));
       `);
     },
   },

@@ -16,7 +16,6 @@ type TreatmentRow = {
   specialty_cis: string;
   specialty_name: string;
   pharmaceutical_form: string | null;
-  active: number;
   included_in_pillbox: number;
   archived_at: string | null;
 };
@@ -43,7 +42,7 @@ export async function listTreatments(
   database: SQLiteDatabase,
 ): Promise<Treatment[]> {
   const rows = await database.getAllAsync<TreatmentRow>(
-    `${TREATMENT_SELECT} ORDER BY active DESC, specialty_name`,
+    `${TREATMENT_SELECT} ORDER BY archived_at IS NOT NULL, specialty_name`,
   );
   return hydrateTreatments(database, rows);
 }
@@ -57,7 +56,10 @@ export async function getTreatmentRemovalAction(
   const row = await database.getFirstAsync<{ used: number }>(
     `SELECT EXISTS(
        SELECT 1 FROM preparation_items WHERE source_treatment_id = ?
+       UNION ALL
+       SELECT 1 FROM intake_records WHERE source_treatment_id = ?
      ) AS used`,
+    treatmentId,
     treatmentId,
   );
   return row?.used === 1 ? 'ARCHIVE' : 'DELETE';
@@ -94,7 +96,7 @@ export async function archiveTreatment(
         'Ce traitement n’a jamais été utilisé et doit être supprimé définitivement.',
       );
     const result = await transaction.runAsync(
-      `UPDATE treatments SET active = 0, included_in_pillbox = 0,
+      `UPDATE treatments SET active = 0,
        archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND archived_at IS NULL`,
       treatmentId,
@@ -104,12 +106,12 @@ export async function archiveTreatment(
   });
 }
 
-export async function reactivateTreatment(
+export async function restoreArchivedTreatment(
   database: SQLiteDatabase,
   treatmentId: number,
 ): Promise<void> {
   const result = await database.runAsync(
-    `UPDATE treatments SET active = 1, included_in_pillbox = 1, archived_at = NULL,
+    `UPDATE treatments SET active = 1, archived_at = NULL,
      updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL`,
     treatmentId,
   );
@@ -138,12 +140,11 @@ export async function createTreatment(
   await database.withExclusiveTransactionAsync(async (transaction) => {
     result = await transaction.runAsync(
       `INSERT INTO treatments
-       (specialty_cis, specialty_name, pharmaceutical_form, active, included_in_pillbox)
-       VALUES (?, ?, ?, ?, ?)`,
+       (specialty_cis, specialty_name, pharmaceutical_form, included_in_pillbox)
+       VALUES (?, ?, ?, ?)`,
       draft.specialtyCis,
       draft.specialtyName,
       draft.pharmaceuticalForm,
-      draft.active ? 1 : 0,
       draft.includedInPillbox ? 1 : 0,
     );
     await insertPhases(transaction, result.lastInsertRowId, draft.phases);
@@ -160,11 +161,10 @@ export async function updateTreatment(
   await database.withExclusiveTransactionAsync(async (transaction) => {
     const result = await transaction.runAsync(
       `UPDATE treatments SET specialty_cis = ?, specialty_name = ?, pharmaceutical_form = ?,
-       active = ?, included_in_pillbox = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+       included_in_pillbox = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       treatment.specialtyCis,
       treatment.specialtyName,
       treatment.pharmaceuticalForm,
-      treatment.active ? 1 : 0,
       treatment.includedInPillbox ? 1 : 0,
       treatment.id,
     );
@@ -319,7 +319,6 @@ async function hydrateTreatments(
     specialtyCis: row.specialty_cis,
     specialtyName: row.specialty_name,
     pharmaceuticalForm: row.pharmaceutical_form,
-    active: row.active === 1,
     includedInPillbox: row.included_in_pillbox === 1,
     archivedAt: row.archived_at,
     phases: phasesByTreatment.get(row.id) ?? [],
@@ -333,4 +332,4 @@ function validateDraft(draft: TreatmentDraft): void {
 }
 
 const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form,
-  active, included_in_pillbox, archived_at FROM treatments`;
+  included_in_pillbox, archived_at FROM treatments`;

@@ -40,7 +40,15 @@ describe('migration des rappels de prise', () => {
       noon_hour: 12,
       evening_hour: 19,
       bedtime_hour: 22,
+      enabled: 0,
     });
+    expect(() =>
+      database
+        .prepare(
+          'UPDATE intake_reminder_slot_settings SET enabled = 2 WHERE singleton_id = 1',
+        )
+        .run(),
+    ).toThrow();
     expect(() =>
       database
         .prepare(

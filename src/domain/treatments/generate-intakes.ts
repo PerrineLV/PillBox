@@ -34,7 +34,6 @@ export function generateIntakes(
     const date = formatCivilDay(day);
     for (const treatment of treatments) {
       if (
-        !treatment.active ||
         treatment.archivedAt !== null ||
         (!options.includeTreatmentsOutsidePillbox &&
           !treatment.includedInPillbox)

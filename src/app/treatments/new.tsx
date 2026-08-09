@@ -22,7 +22,6 @@ export default function NewTreatmentScreen() {
     specialtyCis: params.cis,
     specialtyName: params.name,
     pharmaceuticalForm: params.form || null,
-    active: true,
     includedInPillbox: true,
     phases: [],
   };

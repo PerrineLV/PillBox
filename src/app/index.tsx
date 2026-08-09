@@ -172,6 +172,11 @@ export function HomeContent({
           detail="Préparations validées et lots utilisés"
         />
         <HomeLink
+          href="/intakes/history"
+          title="Historique des prises"
+          detail="Prises, reports et corrections enregistrés localement"
+        />
+        <HomeLink
           href="/settings"
           title="Réglages"
           detail="Rappel, sauvegarde et restauration"
@@ -186,7 +191,12 @@ function HomeLink({
   title,
   detail,
 }: {
-  href: '/treatments' | '/inventory' | '/preparations/history' | '/settings';
+  href:
+    | '/treatments'
+    | '/inventory'
+    | '/preparations/history'
+    | '/intakes/history'
+    | '/settings';
   title: string;
   detail: string;
 }) {

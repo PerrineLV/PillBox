@@ -14,7 +14,6 @@ function treatment(overrides: Partial<Treatment> = {}): Treatment {
     specialtyCis: '60000001',
     specialtyName: 'Alpha',
     pharmaceuticalForm: 'comprimé',
-    active: true,
     includedInPillbox: true,
     archivedAt: null,
     phases: [
@@ -142,10 +141,10 @@ describe('génération d’une préparation de sept jours', () => {
     });
   });
 
-  it('ignore les traitements inactifs ou exclus', () => {
+  it('ignore les traitements archivés ou exclus du pilulier', () => {
     const snapshot = generatePreparationSnapshot(
       [
-        treatment({ active: false }),
+        treatment({ archivedAt: '2026-08-01' }),
         treatment({ id: 2, includedInPillbox: false }),
       ],
       [],

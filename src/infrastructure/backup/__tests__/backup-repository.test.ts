@@ -142,6 +142,8 @@ describe('sauvegarde et restauration personnelles', () => {
       privacy_settings: _privacySettings,
       treatment_reminder_settings: _treatmentReminders,
       intake_reminder_slot_settings: _slotSettings,
+      intake_records: _intakeRecords,
+      intake_postponements: _postponements,
       ...schema9Tables
     } = current.tables;
     const contents = {
@@ -185,6 +187,8 @@ describe('sauvegarde et restauration personnelles', () => {
       privacy_settings: _omitted,
       treatment_reminder_settings: _treatmentReminders,
       intake_reminder_slot_settings: _slotSettings,
+      intake_records: _intakeRecords,
+      intake_postponements: _postponements,
       ...schema10Tables
     } = current.tables;
     const contents = {
@@ -218,7 +222,7 @@ describe('sauvegarde et restauration personnelles', () => {
     );
     const tooRecent = {
       ...backup,
-      metadata: { ...backup.metadata, schemaVersion: 14 },
+      metadata: { ...backup.metadata, schemaVersion: 16 },
     };
     const tooOld = {
       ...backup,

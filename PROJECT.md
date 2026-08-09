@@ -20,7 +20,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 
 # Modèle fonctionnel
 
-**Traitement** : spécialité + phases successives de posologie structurée + actif/inactif + inclusion dans le pilulier.
+**Traitement** : spécialité + phases successives de posologie structurée + inclusion dans le pilulier + archivage.
 
 **Phase de posologie** : période datée, fréquence explicite (quotidienne, tous les N jours avec ancre, ou hebdomadaire avec jour choisi) + créneaux matin/midi/soir/coucher + quantités fractionnaires possibles.
 

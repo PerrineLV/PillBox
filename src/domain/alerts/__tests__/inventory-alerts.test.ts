@@ -11,7 +11,6 @@ const treatment = (): Treatment => ({
   specialtyCis: '60000001',
   specialtyName: 'Alpha',
   pharmaceuticalForm: 'comprimé',
-  active: true,
   includedInPillbox: true,
   archivedAt: null,
   phases: [

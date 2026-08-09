@@ -65,7 +65,6 @@ type Props = {
 
 export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
   const [phases, setPhases] = useState<TreatmentPhase[]>(initialValue.phases);
-  const [active, setActive] = useState(initialValue.active);
   const [included, setIncluded] = useState(initialValue.includedInPillbox);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -78,7 +77,6 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
       setError(null);
       await onSubmit({
         ...initialValue,
-        active,
         includedInPillbox: included,
         phases: orderedPhases,
       });
@@ -158,7 +156,6 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
         variant="secondary"
         onPress={() => setPhases([...phases, emptyPhase()])}
       />
-      <Toggle label="Traitement actif" value={active} onChange={setActive} />
       <Toggle
         label="Inclure dans le pilulier"
         value={included}

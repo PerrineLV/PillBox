@@ -11,15 +11,14 @@ import {
   deleteUnusedTreatment,
   getTreatment,
   getTreatmentRemovalAction,
-  reactivateTreatment,
+  restoreArchivedTreatment,
   type TreatmentRemovalAction,
   updateTreatment,
 } from '@/infrastructure/treatments/treatment-repository';
-import { synchronizeTreatmentIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
 import {
-  getTreatmentReminderSettings,
-  saveTreatmentReminderSettings,
-} from '@/infrastructure/reminders/intake-reminder-repository';
+  synchronizeIntakeReminders,
+  synchronizeTreatmentIntakeReminders,
+} from '@/infrastructure/reminders/intake-reminder-scheduler';
 import { AppButton, LoadingState, Message, colors, spacing } from '@/ui';
 
 export default function EditTreatmentScreen() {
@@ -84,31 +83,19 @@ export default function EditTreatmentScreen() {
         <LoadingState label="Chargement du traitement…" />
       ) : null}
       {treatment && treatment.archivedAt === null ? (
-        <>
-          <TreatmentForm
-            initialValue={treatment}
-            submitLabel="Enregistrer"
-            onSubmit={async (draft) => {
-              await updateTreatment(database, {
-                ...draft,
-                id: treatment.id,
-                archivedAt: treatment.archivedAt,
-              });
-              await synchronizeTreatmentIntakeReminders(database, treatment.id);
-              router.replace('/treatments');
-            }}
-          />
-          <AppButton
-            label="Configurer les rappels de prise"
-            variant="secondary"
-            onPress={() =>
-              router.push({
-                pathname: '/treatments/[id]/reminders',
-                params: { id: String(treatment.id) },
-              })
-            }
-          />
-        </>
+        <TreatmentForm
+          initialValue={treatment}
+          submitLabel="Enregistrer"
+          onSubmit={async (draft) => {
+            await updateTreatment(database, {
+              ...draft,
+              id: treatment.id,
+              archivedAt: treatment.archivedAt,
+            });
+            await synchronizeTreatmentIntakeReminders(database, treatment.id);
+            router.replace('/treatments');
+          }}
+        />
       ) : null}
       {treatment?.archivedAt ? (
         <Message tone="warning" title="Traitement archivé">
@@ -118,13 +105,13 @@ export default function EditTreatmentScreen() {
       {treatment && removalAction ? (
         treatment.archivedAt ? (
           <AppButton
-            label="Réactiver le traitement"
+            label="Restaurer le traitement"
             variant="secondary"
             loading={processing}
             onPress={() =>
               void runAction(
-                () => reactivateTreatment(database, treatment.id),
-                `Le traitement « ${treatment.specialtyName} » a été réactivé.`,
+                () => restoreArchivedTreatment(database, treatment.id),
+                `Le traitement « ${treatment.specialtyName} » a été restauré.`,
               )
             }
           />
@@ -148,19 +135,8 @@ export default function EditTreatmentScreen() {
             onPress={() =>
               confirmPermanentTreatmentDeletion(treatment.specialtyName, () => {
                 void runAction(async () => {
-                  const reminderSettings = await getTreatmentReminderSettings(
-                    database,
-                    treatment.id,
-                  );
-                  await saveTreatmentReminderSettings(database, {
-                    ...reminderSettings,
-                    enabled: false,
-                  });
-                  await synchronizeTreatmentIntakeReminders(
-                    database,
-                    treatment.id,
-                  );
                   await deleteUnusedTreatment(database, treatment.id);
+                  await synchronizeIntakeReminders(database);
                 }, `Le traitement « ${treatment.specialtyName} » a été supprimé.`);
               })
             }

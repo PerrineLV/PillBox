@@ -6,10 +6,12 @@ import {
   expoWeekday,
   type PreparationReminderSchedule,
 } from '@/domain/reminders/preparation-reminder';
+import { isIntakeSlot, type IntakeSlot } from '@/domain/treatments/treatment';
 
 export const PREPARATION_ROUTE = '/preparations/new' as const;
 const REMINDER_KIND = 'pillbox-preparation-reminder';
 const INTAKE_REMINDER_KIND = 'pillbox-intake-reminder';
+const POSTPONED_INTAKE_KIND = 'pillbox-postponed-intake-reminder';
 const ANDROID_CHANNEL_ID = 'pillbox-preparation-reminders';
 const ANDROID_INTAKE_CHANNEL_ID = 'pillbox-intake-reminders';
 
@@ -43,6 +45,7 @@ export async function requestLocalNotificationPermission(): Promise<LocalNotific
 
 export async function scheduleIntakeReminder(
   scheduledAt: Date,
+  groups: readonly { date: string; slot: IntakeSlot }[],
 ): Promise<string> {
   await ensureAndroidIntakeChannel();
   return Notifications.scheduleNotificationAsync({
@@ -51,7 +54,43 @@ export async function scheduleIntakeReminder(
       data: {
         kind: INTAKE_REMINDER_KIND,
         scheduledAt: scheduledAt.toISOString(),
+        groups: groups.map((group) => `${group.date}:${group.slot}`).join(','),
       },
+      sound: 'default',
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: scheduledAt,
+      channelId: ANDROID_INTAKE_CHANNEL_ID,
+    },
+  });
+}
+
+export function intakeReminderGroups(
+  notification: Notifications.Notification,
+): { date: string; slot: IntakeSlot }[] {
+  const raw = notification.request.content.data?.groups;
+  if (typeof raw !== 'string') return [];
+  return raw.split(',').flatMap((item) => {
+    const match = /^(\d{4}-\d{2}-\d{2}):(morning|noon|evening|bedtime)$/.exec(
+      item,
+    );
+    return match && isIntakeSlot(match[2])
+      ? [{ date: match[1], slot: match[2] }]
+      : [];
+  });
+}
+
+export async function schedulePostponedIntakeReminder(
+  scheduledAt: Date,
+  date: string,
+  slot: IntakeSlot,
+): Promise<string> {
+  await ensureAndroidIntakeChannel();
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      ...NEUTRAL_REMINDER_CONTENT,
+      data: { kind: POSTPONED_INTAKE_KIND, date, slot },
       sound: 'default',
     },
     trigger: {
@@ -67,6 +106,17 @@ export async function cancelIntakeReminders(): Promise<void> {
   await Promise.all(
     scheduled
       .filter((item) => item.content.data?.kind === INTAKE_REMINDER_KIND)
+      .map((item) =>
+        Notifications.cancelScheduledNotificationAsync(item.identifier),
+      ),
+  );
+}
+
+export async function cancelPostponedIntakeReminders(): Promise<void> {
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  await Promise.all(
+    scheduled
+      .filter((item) => item.content.data?.kind === POSTPONED_INTAKE_KIND)
       .map((item) =>
         Notifications.cancelScheduledNotificationAsync(item.identifier),
       ),
@@ -90,6 +140,18 @@ export function intakeReminderDate(
   return data?.kind === INTAKE_REMINDER_KIND &&
     typeof data.scheduledAt === 'string'
     ? data.scheduledAt
+    : null;
+}
+
+export function postponedIntakeGroup(
+  notification: Notifications.Notification,
+): { date: string; slot: IntakeSlot } | null {
+  const data = notification.request.content.data;
+  return data?.kind === POSTPONED_INTAKE_KIND &&
+    typeof data.date === 'string' &&
+    typeof data.slot === 'string' &&
+    isIntakeSlot(data.slot)
+    ? { date: data.date, slot: data.slot }
     : null;
 }
 

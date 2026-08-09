@@ -31,6 +31,7 @@ import {
 } from '@/domain/treatments/treatment';
 import {
   cancelPreparationReminders,
+  cancelPostponedIntakeReminders,
   getLocalNotificationPermission,
   replacePreparationReminder,
   requestLocalNotificationPermission,
@@ -41,10 +42,13 @@ import {
 } from '@/infrastructure/reminders/preparation-reminder-repository';
 import {
   getGlobalIntakeReminderSettings,
+  isIntakeRemindersEnabled,
   saveGlobalIntakeReminderSettings,
+  setIntakeRemindersEnabled,
   type GlobalIntakeReminderSettings,
 } from '@/infrastructure/reminders/intake-reminder-repository';
 import { synchronizeIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
+import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 import {
   createBackup,
   getLastSuccessfulBackupAt,
@@ -136,6 +140,8 @@ export default function SettingsScreen() {
     null,
   );
   const [slotTimesDirty, setSlotTimesDirty] = useState(false);
+  const [intakeRemindersEnabled, setIntakeRemindersEnabledState] =
+    useState(false);
 
   useEffect(() => {
     let active = true;
@@ -145,9 +151,17 @@ export default function SettingsScreen() {
       getLastSuccessfulBackupAt(database),
       isAppLockEnabled(database),
       getGlobalIntakeReminderSettings(database),
+      isIntakeRemindersEnabled(database),
     ])
       .then(
-        async ([settings, permission, backupAt, lockEnabled, globalTimes]) => {
+        async ([
+          settings,
+          permission,
+          backupAt,
+          lockEnabled,
+          globalTimes,
+          intakeEnabled,
+        ]) => {
           if (!active) return;
           const loaded = {
             weekday: settings.weekday,
@@ -159,6 +173,16 @@ export default function SettingsScreen() {
           setLastBackupAt(backupAt);
           setAppLockEnabledState(lockEnabled);
           setSlotTimes(globalTimes);
+          if (intakeEnabled && permission !== 'granted') {
+            await setIntakeRemindersEnabled(database, false);
+            setIntakeRemindersEnabledState(false);
+            if (active)
+              setMessage(
+                'Les rappels ont été désactivés car les notifications ne sont plus autorisées.',
+              );
+          } else {
+            setIntakeRemindersEnabledState(intakeEnabled);
+          }
           if (settings.enabled && permission !== 'granted') {
             await cancelPreparationReminders();
             await savePreparationReminderSettings(database, loaded, null);
@@ -294,6 +318,40 @@ export default function SettingsScreen() {
     }
   }
 
+  async function updateIntakeRemindersEnabled(
+    nextEnabled: boolean,
+  ): Promise<void> {
+    if (saving) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      if (nextEnabled) {
+        const permission = await requestLocalNotificationPermission();
+        setPermissionDenied(permission !== 'granted');
+        if (permission !== 'granted') {
+          setMessage(
+            permission === 'blocked'
+              ? 'Les notifications sont définitivement refusées. Autorisez-les dans les réglages Android.'
+              : 'Permission refusée : aucun rappel de prise n’a été programmé.',
+          );
+          return;
+        }
+      }
+      await setIntakeRemindersEnabled(database, nextEnabled);
+      await synchronizeIntakeReminders(database);
+      setIntakeRemindersEnabledState(nextEnabled);
+      setMessage(
+        nextEnabled
+          ? 'Rappels de prise activés pour tous les traitements non archivés.'
+          : 'Rappels de prise désactivés.',
+      );
+    } catch (reason: unknown) {
+      setMessage(errorMessage(reason));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function exportData(): Promise<void> {
     if (backupBusy) return;
     setBackupBusy(true);
@@ -390,6 +448,7 @@ export default function SettingsScreen() {
       await restoreBackup(database, pendingRestore.backup, async () => {
         writeSafetyBackup(safety);
       });
+      await cancelPostponedIntakeReminders();
       setLastBackupAt(await getLastSuccessfulBackupAt(database));
       setPendingRestore(null);
       setRestoreConfirmationVisible(false);
@@ -415,8 +474,12 @@ export default function SettingsScreen() {
           setEnabled(false);
         }
         setSlotTimes(await getGlobalIntakeReminderSettings(database));
+        setIntakeRemindersEnabledState(
+          await isIntakeRemindersEnabled(database),
+        );
         setSlotTimesDirty(false);
         await synchronizeIntakeReminders(database);
+        await reconcileIntakePostponements(database);
         setMessage(
           'Sauvegarde restaurée intégralement. Une copie de sécurité de l’ancien état est conservée sur ce téléphone.',
         );
@@ -494,6 +557,20 @@ export default function SettingsScreen() {
 
       <Divider />
       <SectionTitle>Heures des rappels de prise</SectionTitle>
+      <View style={styles.switchRow}>
+        <View style={styles.switchLabel}>
+          <Text style={styles.label}>Rappels de prise</Text>
+          <Text style={styles.help}>
+            S’applique automatiquement à tous les traitements non archivés.
+          </Text>
+        </View>
+        <Switch
+          accessibilityLabel="Activer les rappels de prise"
+          disabled={saving}
+          onValueChange={(value) => void updateIntakeRemindersEnabled(value)}
+          value={intakeRemindersEnabled}
+        />
+      </View>
       <Text style={styles.help}>
         Une même heure s’applique à tous les traitements utilisant le créneau.
         Les médicaments prévus ensemble sont regroupés dans une seule

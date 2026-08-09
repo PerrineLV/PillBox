@@ -2,8 +2,14 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import {
   INTAKE_REMINDER_HORIZON_DAYS,
+  localCivilDate,
   planIntakeReminders,
+  type PlannedIntakeReminder,
 } from '@/domain/reminders/intake-reminder';
+import { snapshotGeneratedIntake } from '@/domain/intakes/intake-tracking';
+import { generateIntakes } from '@/domain/treatments/generate-intakes';
+import type { Treatment } from '@/domain/treatments/treatment';
+import { materializeIntakeSnapshots } from '@/infrastructure/intakes/intake-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
   cancelIntakeReminders,
@@ -12,8 +18,9 @@ import {
   scheduleIntakeReminder,
 } from './local-notifications';
 import {
+  getGlobalIntakeReminderSettings,
+  isIntakeRemindersEnabled,
   listScheduledReminderManifest,
-  listTreatmentReminderSettings,
   replaceScheduledReminderManifest,
 } from './intake-reminder-repository';
 
@@ -23,15 +30,18 @@ export async function synchronizeIntakeReminders(
 ): Promise<number> {
   await cancelIntakeReminders();
   await replaceScheduledReminderManifest(database, []);
+  if (!(await isIntakeRemindersEnabled(database))) return 0;
   if ((await getLocalNotificationPermission()) !== 'granted') return 0;
   const until = new Date(now);
   until.setDate(until.getDate() + INTAKE_REMINDER_HORIZON_DAYS);
+  const treatments = await listTreatments(database);
   const planned = planIntakeReminders(
-    await listTreatments(database),
-    await listTreatmentReminderSettings(database),
+    treatments,
+    await getGlobalIntakeReminderSettings(database),
     now,
     until,
   );
+  await materializePlannedIntakes(database, treatments, planned, now, until);
   const manifest: {
     notificationId: string;
     scheduledAt: string;
@@ -40,7 +50,10 @@ export async function synchronizeIntakeReminders(
   try {
     for (const reminder of planned) {
       manifest.push({
-        notificationId: await scheduleIntakeReminder(reminder.scheduledAt),
+        notificationId: await scheduleIntakeReminder(
+          reminder.scheduledAt,
+          reminder.groups,
+        ),
         scheduledAt: reminder.scheduledAt.toISOString(),
         treatmentIds: reminder.treatmentIds,
       });
@@ -61,6 +74,13 @@ export async function synchronizeTreatmentIntakeReminders(
   now = new Date(),
 ): Promise<number> {
   const existing = await listScheduledReminderManifest(database);
+  if (!(await isIntakeRemindersEnabled(database))) {
+    await cancelScheduledNotifications(
+      existing.map((item) => item.notificationId),
+    );
+    await replaceScheduledReminderManifest(database, []);
+    return 0;
+  }
   if ((await getLocalNotificationPermission()) !== 'granted') {
     const affected = existing.filter((item) =>
       item.treatmentIds.includes(treatmentId),
@@ -76,12 +96,14 @@ export async function synchronizeTreatmentIntakeReminders(
   }
   const until = new Date(now);
   until.setDate(until.getDate() + INTAKE_REMINDER_HORIZON_DAYS);
+  const treatments = await listTreatments(database);
   const desired = planIntakeReminders(
-    await listTreatments(database),
-    await listTreatmentReminderSettings(database),
+    treatments,
+    await getGlobalIntakeReminderSettings(database),
     now,
     until,
   );
+  await materializePlannedIntakes(database, treatments, desired, now, until);
   const affectedTimes = new Set<string>();
   for (const item of existing)
     if (item.treatmentIds.includes(treatmentId))
@@ -102,10 +124,45 @@ export async function synchronizeTreatmentIntakeReminders(
     affectedTimes.has(item.scheduledAt.toISOString()),
   ))
     manifest.push({
-      notificationId: await scheduleIntakeReminder(reminder.scheduledAt),
+      notificationId: await scheduleIntakeReminder(
+        reminder.scheduledAt,
+        reminder.groups,
+      ),
       scheduledAt: reminder.scheduledAt.toISOString(),
       treatmentIds: reminder.treatmentIds,
     });
   await replaceScheduledReminderManifest(database, manifest);
   return manifest.length;
+}
+
+async function materializePlannedIntakes(
+  database: SQLiteDatabase,
+  treatments: readonly Treatment[],
+  planned: readonly PlannedIntakeReminder[],
+  from: Date,
+  until: Date,
+): Promise<void> {
+  const expected = new Set<string>();
+  for (const reminder of planned)
+    for (const treatmentId of reminder.treatmentIds)
+      for (const group of reminder.groups)
+        expected.add(`${treatmentId}:${group.date}:${group.slot}`);
+  const treatmentById = new Map(treatments.map((item) => [item.id, item]));
+  const intakes = generateIntakes(
+    treatments,
+    localCivilDate(from),
+    localCivilDate(until),
+    { includeTreatmentsOutsidePillbox: true },
+  ).filter((item) =>
+    expected.has(`${item.treatmentId}:${item.date}:${item.slot}`),
+  );
+  await materializeIntakeSnapshots(
+    database,
+    intakes.map((item) =>
+      snapshotGeneratedIntake(
+        item,
+        treatmentById.get(item.treatmentId)?.pharmaceuticalForm ?? null,
+      ),
+    ),
+  );
 }

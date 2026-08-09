@@ -9,7 +9,7 @@ Les rappels utilisent uniquement `expo-notifications` et une programmation local
 2. Vérifier que la date, l'heure et le fuseau horaire automatiques du téléphone sont corrects.
 3. Ouvrir **Réglages > Rappel de préparation** dans PillBox.
 
-Configurer d’abord les heures communes **Matin**, **Midi**, **Soir** et **Coucher** dans **Réglages > Heures des rappels de prise**, puis ouvrir chaque traitement pour activer ou désactiver ses rappels. Le contenu système reste toujours neutre ; le détail n'apparaît que dans PillBox, après le verrou local lorsqu'il est activé.
+Configurer les heures communes **Matin**, **Midi**, **Soir** et **Coucher**, puis activer l’unique interrupteur **Rappels de prise** dans les réglages. Tous les traitements non archivés sont alors pris en compte automatiquement, y compris ceux qui sont hors pilulier ; un traitement archivé ne génère aucun rappel. Le contenu système reste toujours neutre ; le détail n'apparaît que dans PillBox, après le verrou local lorsqu'il est activé.
 
 ## Scénarios à vérifier
 
@@ -45,8 +45,19 @@ Les optimisations batterie propres à certains constructeurs peuvent retarder un
 
 1. Activer deux traitements utilisant le même créneau : une seule notification neutre doit apparaître à l’heure globale de ce créneau.
 2. Toucher la notification : l'écran **Prise prévue** doit afficher les deux traitements, uniquement après déverrouillage de PillBox si cette protection est active.
-3. Modifier une posologie, désactiver puis archiver un traitement : les anciennes alarmes ne doivent plus se déclencher et aucun doublon ne doit apparaître.
+3. Modifier une posologie puis archiver un traitement : les anciennes alarmes ne doivent plus se déclencher et aucun doublon ne doit apparaître.
 4. Redémarrer le téléphone avec une prise prévue dans l'horizon, sans rouvrir PillBox, puis vérifier son déclenchement. Android restaure normalement les alarmes planifiées par `expo-notifications`, mais certains constructeurs peuvent les supprimer ou les retarder ; cette garantie ne peut pas être absolue avec la pile Expo actuelle.
 5. Changer manuellement de fuseau, ou traverser un changement d'heure légale, puis rouvrir PillBox. Les 30 prochains jours doivent être recalculés à l'heure civile configurée. Tant que PillBox n'a pas été rouverte, une alarme déjà remise en place par Android peut conserver l'instant calculé dans l'ancien fuseau : l'application ne dispose pas, dans la pile Expo actuelle, d'un callback JavaScript fiable lorsque l'app est fermée pour recalculer immédiatement toutes les alarmes.
 
 Une notification est une aide de ponctualité. Elle ne prouve ni n'enregistre la prise du médicament.
+
+## Confirmation, historique et report
+
+1. Ouvrir une notification et vérifier que les médicaments sont séparés par créneau lorsque deux créneaux partagent la même heure globale.
+2. Marquer deux médicaments avec des états différents, puis corriger chacun vers **Non renseigné**, **Pris** et **Ignoré** depuis l'historique.
+3. Reporter un seul créneau à une heure proche. Vérifier que la notification reportée reste neutre et que l'autre créneau à la même heure n'est pas déplacé.
+4. Remplacer le report : seule la nouvelle heure doit sonner. L'annuler : aucune notification reportée ne doit subsister.
+5. Modifier ensuite la posologie et archiver le traitement. L'historique doit conserver le nom, la forme et la quantité qui avaient été matérialisés avant la modification.
+6. Vérifier avant et après ces actions que le stock et l'historique de préparation n'ont pas changé.
+
+Les statuts et reports restent locaux. **Non renseigné** signifie uniquement qu'aucune information n'a été saisie ; il ne permet pas de conclure que la prise a été faite ou omise.

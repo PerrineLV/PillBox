@@ -8,28 +8,20 @@ import {
 export const INTAKE_REMINDER_HORIZON_DAYS = 30;
 
 export type SlotTime = { hour: number; minute: number };
-export type TreatmentReminderSettings = {
-  treatmentId: number;
-  enabled: boolean;
-  slotTimes: Partial<Record<IntakeSlot, SlotTime>>;
-};
+export type IntakeSlotTimes = Readonly<Record<IntakeSlot, SlotTime>>;
 export type PlannedIntakeReminder = {
   scheduledAt: Date;
   treatmentIds: number[];
+  groups: { date: string; slot: IntakeSlot }[];
 };
 
 export function planIntakeReminders(
   treatments: readonly Treatment[],
-  settings: readonly TreatmentReminderSettings[],
+  slotTimes: IntakeSlotTimes,
   from: Date,
   until: Date,
 ): PlannedIntakeReminder[] {
   if (until < from) throw new Error('Horizon de rappel invalide.');
-  const settingsByTreatment = new Map(
-    settings
-      .filter((item) => item.enabled)
-      .map((item) => [item.treatmentId, item]),
-  );
   const startDate = localCivilDate(from);
   const endDate = localCivilDate(until);
   const grouped = new Map<string, PlannedIntakeReminder>();
@@ -37,10 +29,7 @@ export function planIntakeReminders(
     includeTreatmentsOutsidePillbox: true,
   });
   for (const intake of intakes) {
-    const time = settingsByTreatment.get(intake.treatmentId)?.slotTimes[
-      intake.slot
-    ];
-    if (time === undefined) continue;
+    const time = slotTimes[intake.slot];
     assertSlotTime(time);
     const scheduledAt = localDateTime(intake.date, time);
     if (scheduledAt < from || scheduledAt > until) continue;
@@ -49,14 +38,25 @@ export function planIntakeReminders(
     if (existing) {
       if (!existing.treatmentIds.includes(intake.treatmentId))
         existing.treatmentIds.push(intake.treatmentId);
+      if (
+        !existing.groups.some(
+          (group) => group.date === intake.date && group.slot === intake.slot,
+        )
+      )
+        existing.groups.push({ date: intake.date, slot: intake.slot });
     } else {
-      grouped.set(key, { scheduledAt, treatmentIds: [intake.treatmentId] });
+      grouped.set(key, {
+        scheduledAt,
+        treatmentIds: [intake.treatmentId],
+        groups: [{ date: intake.date, slot: intake.slot }],
+      });
     }
   }
   return [...grouped.values()]
     .map((item) => ({
       ...item,
       treatmentIds: [...item.treatmentIds].sort((a, b) => a - b),
+      groups: [...item.groups].sort((a, b) => a.slot.localeCompare(b.slot)),
     }))
     .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
 }

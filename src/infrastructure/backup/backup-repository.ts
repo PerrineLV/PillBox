@@ -197,23 +197,86 @@ const TABLES = [
       'bedtime_hour',
       'bedtime_minute',
       'updated_at',
+      'enabled',
+    ],
+  },
+  {
+    name: 'intake_records',
+    columns: [
+      'intake_key',
+      'source_treatment_id',
+      'intake_date',
+      'slot',
+      'specialty_cis',
+      'specialty_name',
+      'pharmaceutical_form',
+      'quantity_half_units',
+      'status',
+      'created_at',
+      'updated_at',
+    ],
+  },
+  {
+    name: 'intake_postponements',
+    columns: [
+      'intake_date',
+      'slot',
+      'scheduled_at',
+      'created_at',
+      'updated_at',
     ],
   },
 ] as const satisfies readonly TableDefinition[];
+
+const LEGACY_INTAKE_SLOT_SETTINGS = {
+  name: 'intake_reminder_slot_settings',
+  columns: [
+    'singleton_id',
+    'morning_hour',
+    'morning_minute',
+    'noon_hour',
+    'noon_minute',
+    'evening_hour',
+    'evening_minute',
+    'bedtime_hour',
+    'bedtime_minute',
+    'updated_at',
+  ],
+} as const satisfies TableDefinition;
 
 const SCHEMA_10_TABLES = TABLES.filter(
   (table) =>
     table.name !== 'privacy_settings' &&
     table.name !== 'treatment_reminder_settings' &&
-    table.name !== 'intake_reminder_slot_settings',
+    table.name !== 'intake_reminder_slot_settings' &&
+    table.name !== 'intake_records' &&
+    table.name !== 'intake_postponements',
 );
 const SCHEMA_11_TABLES = TABLES.filter(
   (table) =>
     table.name !== 'treatment_reminder_settings' &&
-    table.name !== 'intake_reminder_slot_settings',
+    table.name !== 'intake_reminder_slot_settings' &&
+    table.name !== 'intake_records' &&
+    table.name !== 'intake_postponements',
 );
 const SCHEMA_12_TABLES = TABLES.filter(
-  (table) => table.name !== 'intake_reminder_slot_settings',
+  (table) =>
+    table.name !== 'intake_reminder_slot_settings' &&
+    table.name !== 'intake_records' &&
+    table.name !== 'intake_postponements',
+);
+const SCHEMA_13_TABLES = TABLES.filter(
+  (table) =>
+    table.name !== 'intake_records' && table.name !== 'intake_postponements',
+).map((table) =>
+  table.name === 'intake_reminder_slot_settings'
+    ? LEGACY_INTAKE_SLOT_SETTINGS
+    : table,
+);
+const SCHEMA_14_TABLES = TABLES.map((table) =>
+  table.name === 'intake_reminder_slot_settings'
+    ? LEGACY_INTAKE_SLOT_SETTINGS
+    : table,
 );
 const SCHEMA_9_TABLES = SCHEMA_10_TABLES.filter(
   (table) => table.name !== 'backup_settings',
@@ -224,6 +287,8 @@ function tableDefinitions(schemaVersion: number): readonly TableDefinition[] {
   if (schemaVersion === 10) return SCHEMA_10_TABLES;
   if (schemaVersion === 11) return SCHEMA_11_TABLES;
   if (schemaVersion === 12) return SCHEMA_12_TABLES;
+  if (schemaVersion === 13) return SCHEMA_13_TABLES;
+  if (schemaVersion === 14) return SCHEMA_14_TABLES;
   return TABLES;
 }
 

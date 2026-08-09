@@ -110,23 +110,17 @@ function TreatmentItem({ treatment }: { treatment: Treatment }) {
       <View>
         <Text style={styles.name}>{treatment.specialtyName}</Text>
         <View style={styles.badges}>
-          <Badge
-            label={
-              treatment.archivedAt
-                ? 'Archivé'
-                : treatment.active
-                  ? 'Actif'
-                  : 'Inactif'
-            }
-            tone={
-              treatment.active && !treatment.archivedAt ? 'success' : 'neutral'
-            }
-          />
-          <Badge
-            label={
-              treatment.includedInPillbox ? 'Dans le pilulier' : 'Hors pilulier'
-            }
-          />
+          {treatment.archivedAt ? (
+            <Badge label="Archivé" tone="neutral" />
+          ) : (
+            <Badge
+              label={
+                treatment.includedInPillbox
+                  ? 'Dans le pilulier'
+                  : 'Hors pilulier'
+              }
+            />
+          )}
         </View>
         <Text numberOfLines={2} style={styles.summary}>
           {summary}

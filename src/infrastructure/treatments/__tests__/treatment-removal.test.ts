@@ -2,13 +2,14 @@ import Database from 'better-sqlite3';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { generatePreparationSnapshot } from '@/domain/preparations/preparation';
+import { generateIntakes } from '@/domain/treatments/generate-intakes';
 import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 import {
   archiveTreatment,
   deleteUnusedTreatment,
   getTreatment,
   getTreatmentRemovalAction,
-  reactivateTreatment,
+  restoreArchivedTreatment,
 } from '../treatment-repository';
 
 type Parameters = readonly (string | number | null)[];
@@ -116,6 +117,20 @@ function useInPreparation(
 }
 
 describe('suppression et archivage des traitements', () => {
+  it('ne laisse pas l’ancien marqueur inactif exclure un traitement non archivé', async () => {
+    const { raw, database, treatmentId } = await setup();
+    raw
+      .prepare('UPDATE treatments SET active = 0 WHERE id = ?')
+      .run(treatmentId);
+
+    const treatment = await getTreatment(database, treatmentId);
+
+    expect(
+      generateIntakes(treatment ? [treatment] : [], '2026-08-03', '2026-08-03'),
+    ).toHaveLength(1);
+    raw.close();
+  });
+
   it('supprime définitivement un traitement jamais utilisé et ses posologies en cascade', async () => {
     const { raw, database, treatmentId } = await setup();
     expect(await getTreatmentRemovalAction(database, treatmentId)).toBe(
@@ -158,8 +173,7 @@ describe('suppression et archivage des traitements', () => {
 
     const treatment = await getTreatment(database, treatmentId);
     expect(treatment).toMatchObject({
-      active: false,
-      includedInPillbox: false,
+      includedInPillbox: true,
     });
     expect(treatment?.archivedAt).not.toBeNull();
     expect(treatment?.phases[0].dosage).toEqual([
@@ -188,16 +202,18 @@ describe('suppression et archivage des traitements', () => {
     raw.close();
   });
 
-  it('permet de réactiver explicitement un traitement archivé', async () => {
+  it('permet de restaurer un traitement archivé sans modifier son inclusion dans le pilulier', async () => {
     const { raw, database, treatmentId } = await setup();
+    raw
+      .prepare('UPDATE treatments SET included_in_pillbox = 0 WHERE id = ?')
+      .run(treatmentId);
     useInPreparation(raw, treatmentId);
     await archiveTreatment(database, treatmentId);
 
-    await reactivateTreatment(database, treatmentId);
+    await restoreArchivedTreatment(database, treatmentId);
 
     expect(await getTreatment(database, treatmentId)).toMatchObject({
-      active: true,
-      includedInPillbox: true,
+      includedInPillbox: false,
       archivedAt: null,
     });
     raw.close();

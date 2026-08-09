@@ -1,25 +1,10 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import type {
-  SlotTime,
-  TreatmentReminderSettings,
-} from '@/domain/reminders/intake-reminder';
+import type { SlotTime } from '@/domain/reminders/intake-reminder';
 import type { IntakeSlot } from '@/domain/treatments/treatment';
 
-type Row = {
-  treatment_id: number;
-  enabled: number;
-  morning_hour: number | null;
-  morning_minute: number | null;
-  noon_hour: number | null;
-  noon_minute: number | null;
-  evening_hour: number | null;
-  evening_minute: number | null;
-  bedtime_hour: number | null;
-  bedtime_minute: number | null;
-};
-
 type GlobalSlotRow = {
+  enabled: number;
   morning_hour: number;
   morning_minute: number;
   noon_hour: number;
@@ -31,6 +16,27 @@ type GlobalSlotRow = {
 };
 
 export type GlobalIntakeReminderSettings = Record<IntakeSlot, SlotTime>;
+
+export async function isIntakeRemindersEnabled(
+  database: SQLiteDatabase,
+): Promise<boolean> {
+  const row = await database.getFirstAsync<{ enabled: number }>(
+    'SELECT enabled FROM intake_reminder_slot_settings WHERE singleton_id = 1',
+  );
+  if (!row) throw new Error('Réglage des rappels de prise introuvable.');
+  return row.enabled === 1;
+}
+
+export async function setIntakeRemindersEnabled(
+  database: SQLiteDatabase,
+  enabled: boolean,
+): Promise<void> {
+  await database.runAsync(
+    `UPDATE intake_reminder_slot_settings SET enabled = ?,
+     updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1`,
+    enabled ? 1 : 0,
+  );
+}
 
 export async function getGlobalIntakeReminderSettings(
   database: SQLiteDatabase,
@@ -64,60 +70,6 @@ export async function saveGlobalIntakeReminderSettings(
     value.evening.minute,
     value.bedtime.hour,
     value.bedtime.minute,
-  );
-}
-
-export async function listTreatmentReminderSettings(
-  database: SQLiteDatabase,
-): Promise<TreatmentReminderSettings[]> {
-  const global = await getGlobalIntakeReminderSettings(database);
-  const rows = await database.getAllAsync<Row>(
-    'SELECT * FROM treatment_reminder_settings',
-  );
-  return rows.map((row) => ({ ...toSettings(row), slotTimes: global }));
-}
-
-export async function getTreatmentReminderSettings(
-  database: SQLiteDatabase,
-  treatmentId: number,
-): Promise<TreatmentReminderSettings> {
-  const [row, global] = await Promise.all([
-    database.getFirstAsync<Row>(
-      'SELECT * FROM treatment_reminder_settings WHERE treatment_id = ?',
-      treatmentId,
-    ),
-    getGlobalIntakeReminderSettings(database),
-  ]);
-  return row
-    ? { ...toSettings(row), slotTimes: global }
-    : { treatmentId, enabled: false, slotTimes: global };
-}
-
-export async function saveTreatmentReminderSettings(
-  database: SQLiteDatabase,
-  value: TreatmentReminderSettings,
-): Promise<void> {
-  await database.runAsync(
-    `INSERT INTO treatment_reminder_settings
-     (treatment_id, enabled, morning_hour, morning_minute, noon_hour, noon_minute,
-      evening_hour, evening_minute, bedtime_hour, bedtime_minute)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(treatment_id) DO UPDATE SET enabled = excluded.enabled,
-      morning_hour = excluded.morning_hour, morning_minute = excluded.morning_minute,
-      noon_hour = excluded.noon_hour, noon_minute = excluded.noon_minute,
-      evening_hour = excluded.evening_hour, evening_minute = excluded.evening_minute,
-      bedtime_hour = excluded.bedtime_hour, bedtime_minute = excluded.bedtime_minute,
-      updated_at = CURRENT_TIMESTAMP`,
-    value.treatmentId,
-    value.enabled ? 1 : 0,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
   );
 }
 
@@ -179,18 +131,4 @@ export async function listScheduledReminderManifest(
     grouped.set(row.notification_id, item);
   }
   return [...grouped.values()];
-}
-
-function toSettings(row: Row): TreatmentReminderSettings {
-  const slotTimes: Partial<Record<IntakeSlot, SlotTime>> = {};
-  for (const slot of ['morning', 'noon', 'evening', 'bedtime'] as const) {
-    const hour = row[`${slot}_hour`];
-    const minute = row[`${slot}_minute`];
-    if (hour !== null && minute !== null) slotTimes[slot] = { hour, minute };
-  }
-  return {
-    treatmentId: row.treatment_id,
-    enabled: row.enabled === 1,
-    slotTimes,
-  };
 }

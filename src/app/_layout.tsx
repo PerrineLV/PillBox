@@ -10,9 +10,12 @@ import { colors, typography } from '@/ui';
 import {
   isPreparationReminder,
   intakeReminderDate,
+  intakeReminderGroups,
+  postponedIntakeGroup,
   PREPARATION_ROUTE,
 } from '@/infrastructure/reminders/local-notifications';
 import { synchronizeIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
+import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -49,7 +52,10 @@ function ReminderCoordinator() {
   const database = useSQLiteContext();
   useEffect(() => {
     const synchronize = () => {
-      void synchronizeIntakeReminders(database).catch(() => {
+      void Promise.all([
+        synchronizeIntakeReminders(database),
+        reconcileIntakePostponements(database),
+      ]).catch(() => {
         /* L’UI de réglage signalera une erreur ; aucune donnée médicale n’est journalisée. */
       });
     };
@@ -72,9 +78,24 @@ function usePreparationNotificationNavigation(): void {
       }
       const scheduledAt = intakeReminderDate(notification);
       if (scheduledAt !== null) {
+        const groups = intakeReminderGroups(notification);
         router.push({
           pathname: '/intakes/planned',
-          params: { at: scheduledAt },
+          params: {
+            at: scheduledAt,
+            groups: groups
+              .map((group) => `${group.date}:${group.slot}`)
+              .join(','),
+          },
+        });
+        Notifications.clearLastNotificationResponse();
+        return;
+      }
+      const postponed = postponedIntakeGroup(notification);
+      if (postponed !== null) {
+        router.push({
+          pathname: '/intakes/planned',
+          params: { date: postponed.date, slot: postponed.slot },
         });
         Notifications.clearLastNotificationResponse();
       }
