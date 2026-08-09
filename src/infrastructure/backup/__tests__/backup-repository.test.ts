@@ -137,7 +137,11 @@ describe('sauvegarde et restauration personnelles', () => {
       '2026-08-09T10:00:00.000Z',
       digest,
     );
-    const { backup_settings: _omitted, ...schema9Tables } = current.tables;
+    const {
+      backup_settings: _backupSettings,
+      privacy_settings: _privacySettings,
+      ...schema9Tables
+    } = current.tables;
     const contents = {
       metadata: { ...current.metadata, schemaVersion: 9 },
       tables: schema9Tables,
@@ -167,6 +171,37 @@ describe('sauvegarde et restauration personnelles', () => {
     source.raw.close();
   });
 
+  it('restaure un schéma 10 en désactivant le verrou absent du fichier', async () => {
+    const source = await database();
+    seed(source.raw);
+    const current = await createBackup(
+      source.database,
+      '2026-08-09T10:00:00.000Z',
+      digest,
+    );
+    const { privacy_settings: _omitted, ...schema10Tables } = current.tables;
+    const contents = {
+      metadata: { ...current.metadata, schemaVersion: 10 },
+      tables: schema10Tables,
+    };
+    const schema10: PillBoxBackup = {
+      ...contents,
+      integrity: {
+        algorithm: 'SHA-256',
+        checksum: await digest(stableStringify(contents)),
+      },
+    };
+    const target = await database();
+
+    await restoreBackup(target.database, schema10, () => Promise.resolve());
+
+    expect(
+      target.raw.prepare('SELECT * FROM privacy_settings').get(),
+    ).toMatchObject({ singleton_id: 1, app_lock_enabled: 0 });
+    target.raw.close();
+    source.raw.close();
+  });
+
   it('refuse les formats trop anciens, trop récents et les fichiers corrompus', async () => {
     const source = await database();
     const backup = await createBackup(
@@ -176,7 +211,7 @@ describe('sauvegarde et restauration personnelles', () => {
     );
     const tooRecent = {
       ...backup,
-      metadata: { ...backup.metadata, schemaVersion: 11 },
+      metadata: { ...backup.metadata, schemaVersion: 12 },
     };
     const tooOld = {
       ...backup,

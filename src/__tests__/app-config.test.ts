@@ -1,4 +1,14 @@
-import { resolveAndroidVersionCode } from '../../app.config';
+import buildConfig, { resolveAndroidVersionCode } from '../../app.config';
+
+describe('durcissement de la configuration Android', () => {
+  it('exclut explicitement toutes les données de la sauvegarde Android', () => {
+    const config = buildConfig({ config: {} } as Parameters<
+      typeof buildConfig
+    >[0]);
+    expect(config.android?.allowBackup).toBe(false);
+    expect(config.plugins).toContain('expo-local-authentication');
+  });
+});
 
 describe('resolveAndroidVersionCode', () => {
   it('utilise la version initiale hors CI', () => {

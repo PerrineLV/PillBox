@@ -11,6 +11,11 @@ export const PREPARATION_ROUTE = '/preparations/new' as const;
 const REMINDER_KIND = 'pillbox-preparation-reminder';
 const ANDROID_CHANNEL_ID = 'pillbox-preparation-reminders';
 
+export const NEUTRAL_REMINDER_CONTENT = {
+  title: 'Rappel PillBox',
+  body: 'Une action planifiée vous attend dans l’application.',
+} as const;
+
 export type LocalNotificationPermission = 'granted' | 'denied';
 
 export async function getLocalNotificationPermission(): Promise<LocalNotificationPermission> {
@@ -34,8 +39,7 @@ export async function replacePreparationReminder(
   await ensureAndroidChannel();
   return Notifications.scheduleNotificationAsync({
     content: {
-      title: 'Préparer mon pilulier',
-      body: 'C’est le moment de préparer votre pilulier pour la semaine.',
+      ...NEUTRAL_REMINDER_CONTENT,
       data: { kind: REMINDER_KIND, url: PREPARATION_ROUTE },
       sound: 'default',
     },
@@ -76,6 +80,7 @@ async function ensureAndroidChannel(): Promise<void> {
     name: 'Préparation du pilulier',
     description: 'Rappel hebdomadaire local de préparation du pilulier',
     importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
     sound: 'default',
   });
 }

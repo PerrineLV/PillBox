@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 10;
+export const LATEST_SCHEMA_VERSION = 11;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -351,6 +351,21 @@ export const SCHEMA_MIGRATIONS = [
         );
 
         INSERT INTO backup_settings (singleton_id) VALUES (1);
+      `);
+    },
+  },
+  {
+    version: 11,
+    name: 'ajout des réglages de confidentialité locale',
+    async up(transaction) {
+      await transaction.execute(`
+        CREATE TABLE privacy_settings (
+          singleton_id INTEGER PRIMARY KEY NOT NULL DEFAULT 1 CHECK (singleton_id = 1),
+          app_lock_enabled INTEGER NOT NULL DEFAULT 0 CHECK (app_lock_enabled IN (0, 1)),
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        INSERT INTO privacy_settings (singleton_id) VALUES (1);
       `);
     },
   },

@@ -164,11 +164,24 @@ const TABLES = [
     name: 'backup_settings',
     columns: ['singleton_id', 'last_successful_backup_at'],
   },
+  {
+    name: 'privacy_settings',
+    columns: ['singleton_id', 'app_lock_enabled', 'updated_at'],
+  },
 ] as const satisfies readonly TableDefinition[];
 
-const SCHEMA_9_TABLES = TABLES.filter(
+const SCHEMA_10_TABLES = TABLES.filter(
+  (table) => table.name !== 'privacy_settings',
+);
+const SCHEMA_9_TABLES = SCHEMA_10_TABLES.filter(
   (table) => table.name !== 'backup_settings',
 );
+
+function tableDefinitions(schemaVersion: number): readonly TableDefinition[] {
+  if (schemaVersion === 9) return SCHEMA_9_TABLES;
+  if (schemaVersion === 10) return SCHEMA_10_TABLES;
+  return TABLES;
+}
 
 export async function createBackup(
   database: SQLiteDatabase,
@@ -252,7 +265,7 @@ export async function parseAndValidateBackup(
       'Le contrôle d’intégrité est absent ou incompatible.',
     );
   }
-  const definitions = metadata.schemaVersion === 9 ? SCHEMA_9_TABLES : TABLES;
+  const definitions = tableDefinitions(metadata.schemaVersion);
   validateTables(raw.tables, definitions);
   const contents: BackupContents = {
     metadata: metadata as BackupContents['metadata'],
@@ -276,8 +289,7 @@ export async function restoreBackup(
   createSafetyCopy: () => Promise<void>,
 ): Promise<void> {
   await createSafetyCopy();
-  const definitions =
-    backup.metadata.schemaVersion === 9 ? SCHEMA_9_TABLES : TABLES;
+  const definitions = tableDefinitions(backup.metadata.schemaVersion);
   await database.withExclusiveTransactionAsync(async (transaction) => {
     for (const table of [...TABLES].reverse())
       await transaction.runAsync(`DELETE FROM ${table.name}`);
@@ -293,6 +305,11 @@ export async function restoreBackup(
     if (backup.metadata.schemaVersion === 9) {
       await transaction.runAsync(
         'INSERT INTO backup_settings (singleton_id) VALUES (1)',
+      );
+    }
+    if (backup.metadata.schemaVersion <= 10) {
+      await transaction.runAsync(
+        'INSERT INTO privacy_settings (singleton_id) VALUES (1)',
       );
     }
   });

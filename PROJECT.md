@@ -60,3 +60,10 @@ Rappels de prise, conseils médicaux, interactions, diagnostic, lecture automati
 # Definition of Done MVP
 
 Je peux saisir mes traitements, scanner mes boîtes, suivre lots/péremptions/stocks, recevoir mon rappel hebdomadaire, préparer réellement un pilulier de 7 jours avec vérification des boîtes, valider la préparation et retrouver les lots utilisés dans l'historique, sans connexion à un serveur.
+
+# Confidentialité locale et durcissement Android
+
+- La base SQLite et les réglages locaux sont explicitement exclus de la sauvegarde automatique et du transfert d’appareil Android (`android.allowBackup: false`). Les caches sont privés et exclus par Android ; les fichiers intermédiaires d’export/import y sont supprimés après utilisation. Les copies de sécurité créées avant restauration sont, elles, conservées volontairement dans le dossier privé de documents de PillBox.
+- Le verrou optionnel délègue l’authentification à Android via `expo-local-authentication`. PillBox ne stocke aucun PIN, mot de passe, secret ou gabarit biométrique. Ce verrou contrôle l’accès à l’interface mais ne chiffre pas SQLite ni les exports.
+- Les notifications ont un contenu neutre et une visibilité privée sur l’écran verrouillé. Aucun réglage de contenu détaillé n’est proposé.
+- Les captures d’écran ne sont pas bloquées. `expo-screen-capture` fournit une API Expo stable, mais un blocage sur les écrans de traitements, posologies, stock et historique empêcherait des usages légitimes (montrer ponctuellement une information à un professionnel ou demander de l’aide). Le verrou au passage en arrière-plan limite l’exposition dans le sélecteur d’applications lorsque l’option est activée. Cette décision est à réévaluer si PillBox ajoute un mode confidentialité distinct et explicite.

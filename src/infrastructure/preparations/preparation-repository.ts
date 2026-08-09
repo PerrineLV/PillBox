@@ -257,12 +257,16 @@ export async function completePreparation(
         );
       }
       if (usage.expiration_date < completionDate) {
-        throw new Error(`Le lot ${usage.lot ?? 'sans numéro'} est périmé.`);
+        throw new Error(
+          'Une boîte sélectionnée est périmée. Vérifiez la préparation.',
+        );
       }
       const consumedQuantity = usage.required_half_units / 2;
       const quantityAfter = usage.remaining_quantity - consumedQuantity;
       if (quantityAfter < 0) {
-        throw new Error(`Stock insuffisant pour ${usage.specialty_name}.`);
+        throw new Error(
+          'Le stock d’une boîte sélectionnée est insuffisant. Rechargez la préparation.',
+        );
       }
       const update = await transaction.runAsync(
         `UPDATE medication_boxes

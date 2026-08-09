@@ -18,11 +18,15 @@ export async function shareBackup(backup: PillBoxBackup): Promise<void> {
       'La feuille de partage n’est pas disponible sur cet appareil.',
     );
   const file = writeBackupFile(Paths.cache, backup, 'pillbox-sauvegarde');
-  await Sharing.shareAsync(file.uri, {
-    mimeType: 'application/json',
-    dialogTitle: 'Exporter mes données PillBox',
-    UTI: 'public.json',
-  });
+  try {
+    await Sharing.shareAsync(file.uri, {
+      mimeType: 'application/json',
+      dialogTitle: 'Exporter mes données PillBox',
+      UTI: 'public.json',
+    });
+  } finally {
+    deletePrivateFile(file);
+  }
 }
 
 export async function chooseBackupFile(): Promise<string | null> {
@@ -32,7 +36,22 @@ export async function chooseBackupFile(): Promise<string | null> {
     multiple: false,
   });
   if (result.canceled) return null;
-  return new File(result.assets[0].uri).text();
+  const copiedFile = new File(result.assets[0].uri);
+  try {
+    return await copiedFile.text();
+  } finally {
+    deletePrivateFile(copiedFile);
+  }
+}
+
+function deletePrivateFile(file: File): void {
+  try {
+    if (file.exists) file.delete();
+  } catch {
+    // Le cache privé reste inaccessible aux autres applications et Android
+    // peut le purger. Une suppression impossible ne doit pas masquer le
+    // résultat du partage ou de la sélection.
+  }
 }
 
 export function writeSafetyBackup(backup: PillBoxBackup): string {

@@ -48,6 +48,14 @@ import {
   writeSafetyBackup,
 } from '@/infrastructure/backup/backup-files';
 import {
+  isAppLockEnabled,
+  setAppLockEnabled,
+} from '@/infrastructure/privacy/app-lock-repository';
+import {
+  authenticateLocally,
+  getLocalAuthAvailability,
+} from '@/infrastructure/privacy/local-authentication';
+import {
   AppButton,
   AppModal,
   Card,
@@ -95,6 +103,10 @@ export default function SettingsScreen() {
   } | null>(null);
   const [restoreConfirmationVisible, setRestoreConfirmationVisible] =
     useState(false);
+  const [exportConfirmationVisible, setExportConfirmationVisible] =
+    useState(false);
+  const [appLockEnabled, setAppLockEnabledState] = useState(false);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -102,8 +114,9 @@ export default function SettingsScreen() {
       getPreparationReminderSettings(database),
       getLocalNotificationPermission(),
       getLastSuccessfulBackupAt(database),
+      isAppLockEnabled(database),
     ])
-      .then(async ([settings, permission, backupAt]) => {
+      .then(async ([settings, permission, backupAt, lockEnabled]) => {
         if (!active) return;
         const loaded = {
           weekday: settings.weekday,
@@ -113,6 +126,7 @@ export default function SettingsScreen() {
         setSchedule(loaded);
         setPermissionDenied(permission === 'denied');
         setLastBackupAt(backupAt);
+        setAppLockEnabledState(lockEnabled);
         if (settings.enabled && permission === 'denied') {
           await cancelPreparationReminders();
           await savePreparationReminderSettings(database, loaded, null);
@@ -218,6 +232,7 @@ export default function SettingsScreen() {
   async function exportData(): Promise<void> {
     if (backupBusy) return;
     setBackupBusy(true);
+    setExportConfirmationVisible(false);
     setMessage(null);
     try {
       const createdAt = new Date().toISOString();
@@ -234,6 +249,43 @@ export default function SettingsScreen() {
       );
     } finally {
       setBackupBusy(false);
+    }
+  }
+
+  async function updateAppLock(nextEnabled: boolean): Promise<void> {
+    if (privacyBusy) return;
+    setPrivacyBusy(true);
+    setMessage(null);
+    try {
+      if (nextEnabled) {
+        const availability = await getLocalAuthAvailability();
+        if (availability !== 'available') {
+          setMessage(
+            availability === 'not-enrolled'
+              ? 'Configurez d’abord une biométrie sécurisée dans Android.'
+              : 'L’authentification locale sécurisée n’est pas disponible sur cet appareil.',
+          );
+          return;
+        }
+        const result = await authenticateLocally();
+        if (!result.success) {
+          setMessage(
+            'Activation annulée : votre identité n’a pas été vérifiée.',
+          );
+          return;
+        }
+      }
+      await setAppLockEnabled(database, nextEnabled);
+      setAppLockEnabledState(nextEnabled);
+      setMessage(
+        nextEnabled
+          ? 'Verrouillage local activé.'
+          : 'Verrouillage local désactivé.',
+      );
+    } catch {
+      setMessage('Le réglage de verrouillage n’a pas pu être enregistré.');
+    } finally {
+      setPrivacyBusy(false);
     }
   }
 
@@ -348,6 +400,28 @@ export default function SettingsScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Stack.Screen options={{ headerShown: true, title: 'Réglages' }} />
+      <SectionTitle>Confidentialité locale</SectionTitle>
+      <View style={styles.switchRow}>
+        <View style={styles.switchLabel}>
+          <Text style={styles.label}>Verrouiller PillBox</Text>
+          <Text style={styles.help}>
+            Demande la biométrie sécurisée ou la sécurité de l’appareil via
+            Android. Aucun code ni secret n’est stocké par PillBox.
+          </Text>
+        </View>
+        <Switch
+          accessibilityLabel="Verrouiller PillBox avec Android"
+          disabled={privacyBusy}
+          onValueChange={(value) => void updateAppLock(value)}
+          value={appLockEnabled}
+        />
+      </View>
+      <Text style={styles.help}>
+        Ce verrou protège l’accès courant à l’application ; il ne chiffre pas la
+        base SQLite ni les fichiers exportés.
+      </Text>
+
+      <Divider />
       <SectionTitle>Rappel de préparation</SectionTitle>
       <View style={styles.switchRow}>
         <View style={styles.switchLabel}>
@@ -442,7 +516,7 @@ export default function SettingsScreen() {
       <AppButton
         label="Exporter mes données"
         loading={backupBusy}
-        onPress={() => void exportData()}
+        onPress={() => setExportConfirmationVisible(true)}
       />
       <AppButton
         label="Choisir une sauvegarde à restaurer"
@@ -477,6 +551,20 @@ export default function SettingsScreen() {
         </Card>
       ) : null}
       <AppModal
+        visible={exportConfirmationVisible}
+        title="Exporter des données sensibles ?"
+        primaryLabel="Créer et partager la sauvegarde"
+        busy={backupBusy}
+        onCancel={() => setExportConfirmationVisible(false)}
+        onPrimary={() => void exportData()}
+      >
+        <Text style={styles.help}>
+          Cette sauvegarde contient notamment vos traitements, posologies,
+          stocks, lots et historique. Le fichier n’est pas chiffré : toute
+          personne qui y accède peut le lire. Choisissez un emplacement sûr.
+        </Text>
+      </AppModal>
+      <AppModal
         visible={restoreConfirmationVisible}
         title="Remplacer les données actuelles ?"
         primaryLabel="Restaurer et remplacer"
@@ -495,16 +583,12 @@ export default function SettingsScreen() {
   );
 }
 
-function errorMessage(reason: unknown): string {
-  return reason instanceof Error
-    ? `Le rappel n’a pas pu être programmé : ${reason.message}`
-    : 'Le rappel n’a pas pu être programmé.';
+function errorMessage(_reason: unknown): string {
+  return 'Le rappel n’a pas pu être programmé. Vérifiez les autorisations Android puis réessayez.';
 }
 
-function backupErrorMessage(prefix: string, reason: unknown): string {
-  return reason instanceof Error
-    ? `${prefix} : ${reason.message}`
-    : `${prefix}.`;
+function backupErrorMessage(prefix: string, _reason: unknown): string {
+  return `${prefix}. Le fichier n’a pas été affiché ni enregistré dans les journaux.`;
 }
 
 function formatBackupDate(value: string): string {

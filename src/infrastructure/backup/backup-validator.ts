@@ -24,9 +24,9 @@ export async function validateBackupCanRestore(
     );
     if (violations.length > 0)
       throw new Error('certaines références entre données sont absentes');
-  } catch (reason: unknown) {
+  } catch {
     throw new InvalidBackupError(
-      `Les données de la sauvegarde sont incomplètes ou incohérentes : ${reason instanceof Error ? reason.message : 'validation impossible'}`,
+      'Les données de la sauvegarde sont incomplètes ou incohérentes. La validation relationnelle a échoué.',
     );
   } finally {
     await temporaryDatabase?.closeAsync();
