@@ -21,6 +21,12 @@ updates:
         dependency-type: development
         patterns:
           - '*'
+    ignore:
+      # Expo SDK 54 utilise encore la chaîne ESLint 9. Une mise à jour majeure
+      # isolée vers ESLint 10 fait échouer `expo lint` avant l'analyse du code.
+      - dependency-name: eslint
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
