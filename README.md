@@ -64,6 +64,18 @@ L’application ne doit jamais :
 
 En cas d’incertitude, l’application doit demander confirmation ou refuser l’automatisation.
 
+## Règles des alertes de stock
+
+L’accueil calcule le besoin exact des traitements inclus dans le prochain pilulier,
+sur les sept jours commençant le lendemain. Le stock est « proche du besoin » lorsqu’il
+est suffisant mais ne dépasse pas le besoin de plus de 25 %. Ce pourcentage est défini
+par `LOW_STOCK_MARGIN_PERCENT`.
+
+Un lot non vide est signalé comme proche de sa péremption pendant les 30 jours civils
+qui la précèdent, date du jour comprise. Cette fenêtre est définie par
+`EXPIRATION_WARNING_DAYS`. Un lot déjà périmé n’apparaît pas dans cette alerte et reste
+toujours exclu du stock utilisable.
+
 ## Développement
 
 Installer les dépendances :
