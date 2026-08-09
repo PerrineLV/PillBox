@@ -18,6 +18,13 @@ L’objectif est de réduire les erreurs pendant le remplissage en combinant :
 
 Le projet est développé avant tout pour un usage personnel.
 
+## Télécharger l’application
+
+[Télécharger la dernière version Android de PillBox](https://github.com/PerrineLV/PillBox/releases/latest/download/pillbox-latest.apk)
+
+Lors de l’installation, Android peut demander d’autoriser l’installation d’applications
+provenant du navigateur ou de GitHub.
+
 ## Fonctionnalités prévues
 
 * Recherche de médicaments à partir de la Base de données publique des médicaments
@@ -142,9 +149,11 @@ les mots de passe et leur représentation Base64 ne doivent jamais être commit�
 
 1. Fusionner une pull request dans `main`. Il est recommandé de protéger `main` dans
    les règles GitHub afin d’interdire les push directs.
-2. Ouvrir l’onglet `Actions`, puis le run `Android release APK` correspondant.
-3. Télécharger l’artefact `pillbox-apk-<SHA>` dans la section `Artifacts`. Il est
-   conservé pendant 30 jours et contient `app-release.apk`.
+2. Télécharger l’APK depuis la section [Télécharger l’application](#télécharger-lapplication).
+
+Chaque build réussi est aussi conservé pendant 30 jours comme artefact du run GitHub
+Actions : ouvrir le run `Android release APK`, puis télécharger
+`pillbox-apk-<SHA>`, qui contient `app-release.apk`.
 
 ### Installer ou mettre à jour
 

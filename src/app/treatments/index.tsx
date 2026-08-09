@@ -1,4 +1,4 @@
-import { Link, Stack, useFocusEffect } from 'expo-router';
+import { Link, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
 import {
@@ -14,6 +14,7 @@ import { listTreatments } from '@/infrastructure/treatments/treatment-repository
 
 export default function TreatmentsScreen() {
   const database = useSQLiteContext();
+  const { notice } = useLocalSearchParams<{ notice?: string }>();
   const [treatments, setTreatments] = useState<Treatment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +53,11 @@ export default function TreatmentsScreen() {
       <Link href="/medications/search" style={styles.add}>
         Ajouter un traitement
       </Link>
+      {notice ? (
+        <Text accessibilityRole="alert" style={styles.notice}>
+          {notice}
+        </Text>
+      ) : null}
       {loading ? <ActivityIndicator /> : null}
       {error ? (
         <Text accessibilityRole="alert" style={styles.error}>
@@ -97,7 +103,12 @@ function TreatmentItem({ treatment }: { treatment: Treatment }) {
       <View>
         <Text style={styles.name}>{treatment.specialtyName}</Text>
         <Text>
-          {treatment.active ? 'Actif' : 'Inactif'} ·{' '}
+          {treatment.archivedAt
+            ? 'Archivé'
+            : treatment.active
+              ? 'Actif'
+              : 'Inactif'}{' '}
+          ·{' '}
           {treatment.includedInPillbox
             ? 'Dans le pilulier'
             : 'Exclu du pilulier'}
@@ -130,5 +141,11 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   name: { fontSize: 17, fontWeight: '700' },
+  notice: {
+    backgroundColor: '#dcfce7',
+    color: '#166534',
+    marginBottom: 12,
+    padding: 12,
+  },
   summary: { color: '#4b5563', marginTop: 6 },
 });

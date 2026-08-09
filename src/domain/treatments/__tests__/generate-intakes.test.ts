@@ -13,6 +13,7 @@ function treatment(phases: TreatmentPhase[]): Treatment {
     pharmaceuticalForm: 'comprimé',
     active: true,
     includedInPillbox: true,
+    archivedAt: null,
     phases,
   };
 }

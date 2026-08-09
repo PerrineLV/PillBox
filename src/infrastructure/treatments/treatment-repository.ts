@@ -18,6 +18,7 @@ type TreatmentRow = {
   pharmaceutical_form: string | null;
   active: number;
   included_in_pillbox: number;
+  archived_at: string | null;
 };
 
 type PhaseRow = {
@@ -45,6 +46,75 @@ export async function listTreatments(
     `${TREATMENT_SELECT} ORDER BY active DESC, specialty_name`,
   );
   return hydrateTreatments(database, rows);
+}
+
+export type TreatmentRemovalAction = 'DELETE' | 'ARCHIVE';
+
+export async function getTreatmentRemovalAction(
+  database: SQLiteDatabase,
+  treatmentId: number,
+): Promise<TreatmentRemovalAction> {
+  const row = await database.getFirstAsync<{ used: number }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM preparation_items WHERE source_treatment_id = ?
+     ) AS used`,
+    treatmentId,
+  );
+  return row?.used === 1 ? 'ARCHIVE' : 'DELETE';
+}
+
+export async function deleteUnusedTreatment(
+  database: SQLiteDatabase,
+  treatmentId: number,
+): Promise<void> {
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    if (
+      (await getTreatmentRemovalAction(transaction, treatmentId)) === 'ARCHIVE'
+    )
+      throw new Error(
+        'Ce traitement a déjà été utilisé et ne peut pas être supprimé définitivement.',
+      );
+    const result = await transaction.runAsync(
+      'DELETE FROM treatments WHERE id = ?',
+      treatmentId,
+    );
+    if (result.changes !== 1) throw new Error('Traitement introuvable.');
+  });
+}
+
+export async function archiveTreatment(
+  database: SQLiteDatabase,
+  treatmentId: number,
+): Promise<void> {
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    if (
+      (await getTreatmentRemovalAction(transaction, treatmentId)) !== 'ARCHIVE'
+    )
+      throw new Error(
+        'Ce traitement n’a jamais été utilisé et doit être supprimé définitivement.',
+      );
+    const result = await transaction.runAsync(
+      `UPDATE treatments SET active = 0, included_in_pillbox = 0,
+       archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND archived_at IS NULL`,
+      treatmentId,
+    );
+    if (result.changes !== 1)
+      throw new Error('Traitement introuvable ou déjà archivé.');
+  });
+}
+
+export async function reactivateTreatment(
+  database: SQLiteDatabase,
+  treatmentId: number,
+): Promise<void> {
+  const result = await database.runAsync(
+    `UPDATE treatments SET active = 1, included_in_pillbox = 1, archived_at = NULL,
+     updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL`,
+    treatmentId,
+  );
+  if (result.changes !== 1)
+    throw new Error('Traitement introuvable ou non archivé.');
 }
 
 export async function getTreatment(
@@ -251,6 +321,7 @@ async function hydrateTreatments(
     pharmaceuticalForm: row.pharmaceutical_form,
     active: row.active === 1,
     includedInPillbox: row.included_in_pillbox === 1,
+    archivedAt: row.archived_at,
     phases: phasesByTreatment.get(row.id) ?? [],
   }));
 }
@@ -262,4 +333,4 @@ function validateDraft(draft: TreatmentDraft): void {
 }
 
 const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form,
-  active, included_in_pillbox FROM treatments`;
+  active, included_in_pillbox, archived_at FROM treatments`;
