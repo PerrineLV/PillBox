@@ -82,3 +82,39 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: release-apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: android-build-${{ github.run_number }}
+
+    steps:
+      - name: Download signed APK artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: pillbox-apk-${{ github.sha }}
+          path: release
+
+      - name: Refuse to replace an existing release
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; refusing to replace it." >&2
+            exit 1
+          fi
+
+      - name: Publish APK in GitHub Release
+        run: |
+          mv release/app-release.apk release/pillbox-latest.apk
+          gh release create "$RELEASE_TAG" \
+            release/pillbox-latest.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "PillBox Android build $GITHUB_RUN_NUMBER" \
+            --notes "APK Android release signé pour le commit $GITHUB_SHA." \
+            --latest
