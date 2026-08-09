@@ -24,7 +24,11 @@ type TestDatabase = Readonly<{
   ): Promise<void>;
 }>;
 
-function expoAdapter(database: Database.Database): SQLiteDatabase {
+function expoAdapter(
+  database: Database.Database,
+  failOnSecondPreparationMovement: boolean,
+): SQLiteDatabase {
+  let preparationMovementCount = 0;
   const api: TestDatabase = {
     async getFirstAsync<T>(
       sql: string,
@@ -41,6 +45,12 @@ function expoAdapter(database: Database.Database): SQLiteDatabase {
       return database.prepare(sql).all(...parameters) as T[];
     },
     async runAsync(sql: string, ...parameters: SqlParameters) {
+      if (sql.includes('INSERT INTO stock_movements')) {
+        preparationMovementCount += 1;
+        if (failOnSecondPreparationMovement && preparationMovementCount === 2) {
+          throw new Error('échec injecté');
+        }
+      }
       const result = database.prepare(sql).run(...parameters);
       return {
         changes: result.changes,
@@ -61,7 +71,9 @@ function expoAdapter(database: Database.Database): SQLiteDatabase {
   return api as unknown as SQLiteDatabase;
 }
 
-async function createDatabase(): Promise<{
+async function createDatabase(
+  failOnSecondPreparationMovement = false,
+): Promise<{
   raw: Database.Database;
   database: SQLiteDatabase;
 }> {
@@ -77,7 +89,7 @@ async function createDatabase(): Promise<{
       recordAppliedVersion: () => Promise.resolve(),
     });
   }
-  return { raw, database: expoAdapter(raw) };
+  return { raw, database: expoAdapter(raw, failOnSecondPreparationMovement) };
 }
 
 function seedPreparation(raw: Database.Database, medicationCount = 1): number {
@@ -171,16 +183,8 @@ describe('validation transactionnelle d’une préparation', () => {
   });
 
   it('rollback toutes les écritures si une consommation échoue en cours de transaction', async () => {
-    const { raw, database } = await createDatabase();
+    const { raw, database } = await createDatabase(true);
     const id = seedPreparation(raw, 2);
-    raw.exec(`
-      CREATE TRIGGER fail_second_preparation_movement
-      BEFORE INSERT ON stock_movements
-      WHEN NEW.type = 'PILLBOX_PREPARATION'
-        AND (SELECT COUNT(*) FROM stock_movements
-             WHERE preparation_id = NEW.preparation_id) = 1
-      BEGIN SELECT RAISE(ABORT, 'échec injecté'); END;
-    `);
 
     await expect(
       completePreparation(database, id, '2026-08-09'),
