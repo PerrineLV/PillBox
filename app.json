@@ -18,6 +18,12 @@
     "plugins": [
       "expo-router",
       "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Autoriser PillBox à utiliser la caméra pour scanner un DataMatrix."
+        }
+      ],
       "./plugins/withAndroidReleaseSigning"
     ],
     "experiments": {
