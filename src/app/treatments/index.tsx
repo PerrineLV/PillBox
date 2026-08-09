@@ -73,11 +73,18 @@ export default function TreatmentsScreen() {
 }
 
 function TreatmentItem({ treatment }: { treatment: Treatment }) {
-  const summary = treatment.dosage
-    .map(
-      (item) =>
-        `${item.weekday.slice(0, 3)} ${item.slot}: ${formatHalfUnits(item.quantityHalfUnits)}`,
-    )
+  const summary = treatment.phases
+    .map((phase) => {
+      if (phase.frequency.type === 'legacy-weekdays')
+        return `Posologie existante · ${phase.dosage.length} prise(s)`;
+      const period = `${phase.startDate}${phase.endDate ? ` → ${phase.endDate}` : ' → sans fin'}`;
+      const quantities = phase.dosage
+        .map(
+          (item) => `${item.slot}: ${formatHalfUnits(item.quantityHalfUnits)}`,
+        )
+        .join(', ');
+      return `${period} · ${quantities}`;
+    })
     .join(' · ');
   return (
     <Link

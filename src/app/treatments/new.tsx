@@ -23,7 +23,7 @@ export default function NewTreatmentScreen() {
     pharmaceuticalForm: params.form || null,
     active: true,
     includedInPillbox: true,
-    dosage: [],
+    phases: [],
   };
   return (
     <ScrollView

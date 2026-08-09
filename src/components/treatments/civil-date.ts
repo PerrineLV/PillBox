@@ -1,0 +1,33 @@
+/** Convertit une date civile stockée en ISO vers son affichage français. */
+export function formatFrenchCivilDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (match === null) return value;
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+/** Crée une date locale à midi pour éviter les changements de jour liés au fuseau. */
+export function civilDateToPickerDate(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (match === null) return null;
+  const date = new Date(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    12,
+  );
+  if (
+    date.getFullYear() !== Number(match[1]) ||
+    date.getMonth() !== Number(match[2]) - 1 ||
+    date.getDate() !== Number(match[3])
+  )
+    return null;
+  return date;
+}
+
+/** Convertit le choix local du calendrier vers le format civil SQLite. */
+export function pickerDateToCivilDate(date: Date): string {
+  const year = String(date.getFullYear()).padStart(4, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}

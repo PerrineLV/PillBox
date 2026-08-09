@@ -1,12 +1,14 @@
 import type { SQLiteDatabase, SQLiteRunResult } from 'expo-sqlite';
 
 import {
-  assertValidDosage,
+  assertValidTreatmentPhases,
   isIntakeSlot,
   isWeekday,
-  type Dosage,
+  type LegacyDosage,
+  type PhaseDosage,
   type Treatment,
   type TreatmentDraft,
+  type TreatmentPhase,
 } from '@/domain/treatments/treatment';
 
 type TreatmentRow = {
@@ -18,8 +20,19 @@ type TreatmentRow = {
   included_in_pillbox: number;
 };
 
-type DosageRow = {
+type PhaseRow = {
+  id: number;
   treatment_id: number;
+  start_date: string | null;
+  end_date: string | null;
+  frequency_type: string;
+  interval_days: number | null;
+  anchor_date: string | null;
+  weekly_weekday: string | null;
+};
+
+type PhaseDosageRow = {
+  phase_id: number;
   weekday: string;
   slot: string;
   quantity_half_units: number;
@@ -63,7 +76,7 @@ export async function createTreatment(
       draft.active ? 1 : 0,
       draft.includedInPillbox ? 1 : 0,
     );
-    await insertDosage(transaction, result.lastInsertRowId, draft.dosage);
+    await insertPhases(transaction, result.lastInsertRowId, draft.phases);
   });
   if (result === null) throw new Error('Le traitement n’a pas pu être créé.');
   return (result as SQLiteRunResult).lastInsertRowId;
@@ -87,27 +100,48 @@ export async function updateTreatment(
     );
     if (result.changes !== 1) throw new Error('Traitement introuvable.');
     await transaction.runAsync(
-      'DELETE FROM treatment_dosages WHERE treatment_id = ?',
+      `DELETE FROM treatment_phase_dosages
+       WHERE phase_id IN (SELECT id FROM treatment_phases WHERE treatment_id = ?)`,
       treatment.id,
     );
-    await insertDosage(transaction, treatment.id, treatment.dosage);
+    await transaction.runAsync(
+      'DELETE FROM treatment_phases WHERE treatment_id = ?',
+      treatment.id,
+    );
+    await insertPhases(transaction, treatment.id, treatment.phases);
   });
 }
 
-async function insertDosage(
+async function insertPhases(
   database: SQLiteDatabase,
   treatmentId: number,
-  dosage: readonly Dosage[],
+  phases: readonly TreatmentPhase[],
 ): Promise<void> {
-  for (const item of dosage) {
-    await database.runAsync(
-      `INSERT INTO treatment_dosages (treatment_id, weekday, slot, quantity_half_units)
-       VALUES (?, ?, ?, ?)`,
+  for (const [position, phase] of phases.entries()) {
+    const frequency = phase.frequency;
+    const result = await database.runAsync(
+      `INSERT INTO treatment_phases
+       (treatment_id, position, start_date, end_date, frequency_type, interval_days, anchor_date, weekly_weekday)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       treatmentId,
-      item.weekday,
-      item.slot,
-      item.quantityHalfUnits,
+      position,
+      phase.startDate,
+      phase.endDate,
+      frequency.type === 'legacy-weekdays' ? 'legacy_weekdays' : frequency.type,
+      frequency.type === 'interval' ? frequency.everyNDays : null,
+      frequency.type === 'interval' ? frequency.anchorDate : null,
+      frequency.type === 'weekly' ? frequency.weekday : null,
     );
+    for (const dosage of phase.dosage) {
+      await database.runAsync(
+        `INSERT INTO treatment_phase_dosages (phase_id, weekday, slot, quantity_half_units)
+         VALUES (?, ?, ?, ?)`,
+        result.lastInsertRowId,
+        'weekday' in dosage ? dosage.weekday : '',
+        dosage.slot,
+        dosage.quantityHalfUnits,
+      );
+    }
   }
 }
 
@@ -117,23 +151,98 @@ async function hydrateTreatments(
 ): Promise<Treatment[]> {
   if (rows.length === 0) return [];
   const placeholders = rows.map(() => '?').join(', ');
-  const dosageRows = await database.getAllAsync<DosageRow>(
-    `SELECT treatment_id, weekday, slot, quantity_half_units FROM treatment_dosages
-     WHERE treatment_id IN (${placeholders}) ORDER BY treatment_id, weekday, slot`,
+  const phaseRows = await database.getAllAsync<PhaseRow>(
+    `SELECT id, treatment_id, start_date, end_date, frequency_type, interval_days,
+      anchor_date, weekly_weekday FROM treatment_phases
+     WHERE treatment_id IN (${placeholders}) ORDER BY treatment_id, position`,
     ...rows.map((row) => row.id),
   );
-  const dosageByTreatment = new Map<number, Dosage[]>();
+  const phaseIds = phaseRows.map((row) => row.id);
+  const dosageRows =
+    phaseIds.length === 0
+      ? []
+      : await database.getAllAsync<PhaseDosageRow>(
+          `SELECT phase_id, weekday, slot, quantity_half_units FROM treatment_phase_dosages
+     WHERE phase_id IN (${phaseIds.map(() => '?').join(', ')}) ORDER BY phase_id, weekday, slot`,
+          ...phaseIds,
+        );
+  const dosageByPhase = new Map<number, PhaseDosageRow[]>();
   for (const row of dosageRows) {
-    if (!isWeekday(row.weekday) || !isIntakeSlot(row.slot)) {
-      throw new Error('La base locale contient une posologie invalide.');
+    if (!isIntakeSlot(row.slot))
+      throw new Error('La base locale contient un créneau invalide.');
+    const dosage = dosageByPhase.get(row.phase_id) ?? [];
+    dosage.push(row);
+    dosageByPhase.set(row.phase_id, dosage);
+  }
+  const phasesByTreatment = new Map<number, TreatmentPhase[]>();
+  for (const row of phaseRows) {
+    const rawDosage = dosageByPhase.get(row.id) ?? [];
+    let phase: TreatmentPhase;
+    if (row.frequency_type === 'legacy_weekdays') {
+      const dosage: LegacyDosage[] = rawDosage.map((item) => {
+        if (!isWeekday(item.weekday))
+          throw new Error('La base locale contient un jour invalide.');
+        return {
+          weekday: item.weekday,
+          slot: item.slot as LegacyDosage['slot'],
+          quantityHalfUnits: item.quantity_half_units,
+        };
+      });
+      phase = {
+        id: row.id,
+        startDate: null,
+        endDate: null,
+        frequency: { type: 'legacy-weekdays' },
+        dosage,
+      };
+    } else {
+      if (row.start_date === null)
+        throw new Error('La base locale contient une phase sans début.');
+      const dosage: PhaseDosage[] = rawDosage.map((item) => ({
+        slot: item.slot as PhaseDosage['slot'],
+        quantityHalfUnits: item.quantity_half_units,
+      }));
+      if (row.frequency_type === 'daily')
+        phase = {
+          id: row.id,
+          startDate: row.start_date,
+          endDate: row.end_date,
+          frequency: { type: 'daily' },
+          dosage,
+        };
+      else if (
+        row.frequency_type === 'interval' &&
+        row.interval_days !== null &&
+        row.anchor_date !== null
+      )
+        phase = {
+          id: row.id,
+          startDate: row.start_date,
+          endDate: row.end_date,
+          frequency: {
+            type: 'interval',
+            everyNDays: row.interval_days,
+            anchorDate: row.anchor_date,
+          },
+          dosage,
+        };
+      else if (
+        row.frequency_type === 'weekly' &&
+        row.weekly_weekday !== null &&
+        isWeekday(row.weekly_weekday)
+      )
+        phase = {
+          id: row.id,
+          startDate: row.start_date,
+          endDate: row.end_date,
+          frequency: { type: 'weekly', weekday: row.weekly_weekday },
+          dosage,
+        };
+      else throw new Error('La base locale contient une fréquence invalide.');
     }
-    const dosage = dosageByTreatment.get(row.treatment_id) ?? [];
-    dosage.push({
-      weekday: row.weekday,
-      slot: row.slot,
-      quantityHalfUnits: row.quantity_half_units,
-    });
-    dosageByTreatment.set(row.treatment_id, dosage);
+    const phases = phasesByTreatment.get(row.treatment_id) ?? [];
+    phases.push(phase);
+    phasesByTreatment.set(row.treatment_id, phases);
   }
   return rows.map((row) => ({
     id: row.id,
@@ -142,15 +251,14 @@ async function hydrateTreatments(
     pharmaceuticalForm: row.pharmaceutical_form,
     active: row.active === 1,
     includedInPillbox: row.included_in_pillbox === 1,
-    dosage: dosageByTreatment.get(row.id) ?? [],
+    phases: phasesByTreatment.get(row.id) ?? [],
   }));
 }
 
 function validateDraft(draft: TreatmentDraft): void {
-  if (draft.specialtyCis.trim() === '' || draft.specialtyName.trim() === '') {
+  if (draft.specialtyCis.trim() === '' || draft.specialtyName.trim() === '')
     throw new Error('La spécialité doit provenir du référentiel.');
-  }
-  assertValidDosage(draft.dosage);
+  assertValidTreatmentPhases(draft.phases);
 }
 
 const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form,

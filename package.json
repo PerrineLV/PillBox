@@ -26,6 +26,7 @@
     "android:release:verify": "node ./scripts/verify-android-apk.mjs"
   },
   "dependencies": {
+    "@react-native-community/datetimepicker": "8.4.4",
     "expo": "~54.0.35",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
