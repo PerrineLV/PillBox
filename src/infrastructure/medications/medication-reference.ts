@@ -14,6 +14,14 @@ export type MedicationSearchResult = {
   presentations: MedicationPresentation[];
 };
 
+export type IdentifiedMedicationPresentation = {
+  cip13: string;
+  label: string;
+  cis: string;
+  name: string;
+  pharmaceuticalForm: string | null;
+};
+
 type SpecialtySearchRow = {
   cis: string;
   name: string;
@@ -25,6 +33,38 @@ type PresentationRow = {
   cip13: string;
   label: string;
 };
+
+type IdentifiedPresentationRow = {
+  cip13: string;
+  label: string;
+  cis: string;
+  name: string;
+  pharmaceutical_form: string | null;
+};
+
+export async function findMedicationPresentationByCip13(
+  database: SQLiteDatabase,
+  cip13: string,
+): Promise<IdentifiedMedicationPresentation | null> {
+  if (!/^\d{13}$/.test(cip13)) return null;
+
+  const row = await database.getFirstAsync<IdentifiedPresentationRow>(
+    `SELECT p.cip13, p.label, s.cis, s.name, s.pharmaceutical_form
+     FROM presentations p
+     JOIN specialties s ON s.cis = p.cis
+     WHERE p.cip13 = ?`,
+    cip13,
+  );
+  if (row === null) return null;
+
+  return {
+    cip13: row.cip13,
+    label: row.label,
+    cis: row.cis,
+    name: row.name,
+    pharmaceuticalForm: row.pharmaceutical_form,
+  };
+}
 
 export async function searchMedicationReference(
   database: SQLiteDatabase,

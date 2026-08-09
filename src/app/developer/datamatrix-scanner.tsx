@@ -1,15 +1,87 @@
+import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import type { BarcodeScanningResult } from 'expo-camera';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { Stack } from 'expo-router';
-import { useRef, useState } from 'react';
-import { Button, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Button,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
+import { normalizeScannedGtinToCip13 } from '@/domain/medications/normalize-scanned-identifier';
+import {
+  findMedicationPresentationByCip13,
+  type IdentifiedMedicationPresentation,
+} from '@/infrastructure/medications/medication-reference';
 
 export default function DataMatrixScannerScreen() {
+  return (
+    <SQLiteProvider
+      databaseName="medication-reference.db"
+      assetSource={{ assetId: medicationReferenceAsset, forceOverwrite: true }}
+      options={{ useNewConnection: true }}
+    >
+      <DataMatrixScanner />
+    </SQLiteProvider>
+  );
+}
+
+type IdentificationState =
+  | { status: 'idle' | 'loading' | 'unidentified' }
+  | { status: 'identified'; presentation: IdentifiedMedicationPresentation };
+
+function DataMatrixScanner() {
+  const database = useSQLiteContext();
   const [permission, requestPermission] = useCameraPermissions();
   const [scan, setScan] = useState<BarcodeScanningResult | null>(null);
+  const [identification, setIdentification] = useState<IdentificationState>({
+    status: 'idle',
+  });
   const scanLocked = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (scan === null) {
+      setIdentification({ status: 'idle' });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const gtin = parseGs1DataMatrix(scan.data).fields.gtin;
+    const cip13 = gtin === undefined ? null : normalizeScannedGtinToCip13(gtin);
+    if (cip13 === null) {
+      setIdentification({ status: 'unidentified' });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setIdentification({ status: 'loading' });
+    findMedicationPresentationByCip13(database, cip13)
+      .then((presentation) => {
+        if (!cancelled) {
+          setIdentification(
+            presentation === null
+              ? { status: 'unidentified' }
+              : { status: 'identified', presentation },
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIdentification({ status: 'unidentified' });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [database, scan]);
 
   const handleScan = (result: BarcodeScanningResult) => {
     if (scanLocked.current) {
@@ -68,6 +140,7 @@ export default function DataMatrixScannerScreen() {
             value={JSON.stringify(scan.data)}
           />
           <Result label="GTIN (AI 01)" value={parsed?.fields.gtin} />
+          <IdentificationResult identification={identification} />
           <Result
             label="Expiration YYMMDD (AI 17)"
             value={parsed?.fields.expiration}
@@ -84,11 +157,35 @@ export default function DataMatrixScannerScreen() {
             }
           />
           <Text style={styles.note}>
-            Le GTIN est conservé tel quel. Ce spike ne le convertit pas en CIP.
+            Le GTIN et le RAW sont conservés tels quels.
           </Text>
           <Button title="Scanner à nouveau" onPress={scanAgain} />
         </ScrollView>
       )}
+    </View>
+  );
+}
+
+function IdentificationResult({
+  identification,
+}: {
+  identification: IdentificationState;
+}) {
+  if (identification.status === 'loading') {
+    return <ActivityIndicator accessibilityLabel="Identification en cours" />;
+  }
+
+  if (identification.status !== 'identified') {
+    return <Result label="Identification" value="médicament non identifié" />;
+  }
+
+  const { presentation } = identification;
+  return (
+    <View>
+      <Result label="Médicament identifié" value={presentation.name} />
+      <Result label="CIS" value={presentation.cis} />
+      <Result label="CIP13" value={presentation.cip13} />
+      <Result label="Présentation" value={presentation.label} />
     </View>
   );
 }
