@@ -15,6 +15,7 @@ expo-env.d.ts
 *.jks
 *.p8
 *.p12
+*.pem
 *.key
 *.mobileprovision
 
@@ -35,6 +36,20 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+
+# Local credentials and secret-bearing configuration
+
+*.password
+*.secret
+.envrc
+.npmrc
+credentials*.json
+secrets*.json
+service-account*.json
+google-services.json
+local.properties
+gradle.properties
+keystore.properties
 
 # Testing
 
@@ -82,6 +97,10 @@ DerivedData/
 tmp/
 temp/
 *.tmp
+*.temp
+*.bak
+*.backup
+*.orig
 *.swp
 *~
 
@@ -95,10 +114,17 @@ temp/
 *.sqlite-shm
 *.sqlite-wal
 
+# Exported PillBox backups
+
+pillbox-sauvegarde-*.json
+pillbox-avant-restauration-*.json
+*.pillbox-backup.json
+backups/
+sauvegardes/
+
 # Local medication data generated during development
 
 data/generated/
 
-*.jks
 *.keystore
 *.base64

@@ -67,7 +67,7 @@ async function writeKeystore() {
   await mkdir(resolve('android/app'), { recursive: true });
   await writeFile(keystorePath, keystore, { mode: 0o600 });
   await validateKeystore(keystorePath);
-  console.log(`Keystore Android préparé dans ${keystorePath}.`);
+  console.log('Keystore Android temporaire préparé et validé.');
 }
 
 async function validateKeystore(keystorePath) {

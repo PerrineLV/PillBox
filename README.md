@@ -81,7 +81,7 @@ toujours exclu du stock utilisable.
 Installer les dépendances :
 
 ```bash
-npm install
+npm ci
 ```
 
 Lancer l’application :
@@ -106,6 +106,11 @@ npm test
 * le typage TypeScript ;
 * les tests ;
 * la génération du bundle Android Expo.
+
+Les workflows utilisent uniquement les permissions GitHub minimales : lecture du
+dépôt pour les jobs de vérification et de build, puis écriture du contenu uniquement
+pour le job qui crée la GitHub Release. Les actions réutilisables sont épinglées sur
+des SHA de commit complets.
 
 ## APK Android release signé
 
@@ -165,7 +170,24 @@ les mots de passe et leur représentation Base64 ne doivent jamais être commit�
 
 Chaque build réussi est aussi conservé pendant 30 jours comme artefact du run GitHub
 Actions : ouvrir le run `Android release APK`, puis télécharger
-`pillbox-apk-<SHA>`, qui contient `app-release.apk`.
+`pillbox-apk-<SHA>`, qui contient `pillbox-latest.apk` et
+`pillbox-latest.apk.sha256`.
+
+### Vérifier le téléchargement
+
+Télécharger l’APK et son fichier de checksum depuis la même GitHub Release, les placer
+dans le même dossier, puis exécuter :
+
+```bash
+sha256sum --check pillbox-latest.apk.sha256
+```
+
+Le résultat attendu est `pillbox-latest.apk: OK`. Le workflow recalcule et vérifie ce
+checksum après le build puis à nouveau juste avant la publication. Il contrôle aussi
+que l’APK est présent, non vide, lisible comme archive Android, correctement signé et
+qu’aucun nom de fichier interne n’évoque manifestement un keystore, une configuration
+secrète ou une sauvegarde PillBox. Cette inspection ciblée ne constitue pas une preuve
+d’absence totale de secrets dans l’APK.
 
 ### Installer ou mettre à jour
 
@@ -198,6 +220,20 @@ Si le poste est perdu, restaurer le même fichier `.jks`, vérifier son empreint
 `keytool -list -v -storetype PKCS12 -keystore pillbox-release.jks`, puis recréer les
 trois secrets GitHub. Une nouvelle clé, même avec le même alias, ne permet pas de
 mettre à jour les installations existantes.
+
+### Réglages de sécurité GitHub à activer manuellement
+
+Dans `Settings` → `Code security and analysis`, activer lorsque le plan GitHub du dépôt
+le permet :
+
+* les alertes Dependabot et les mises à jour de sécurité Dependabot ;
+* le secret scanning et la push protection ;
+* les règles de protection de `main`, notamment l’interdiction des pushs directs.
+
+Ces options dépendent de la configuration GitHub distante et ne peuvent pas être
+garanties par les fichiers du dépôt. Le fichier `.github/dependabot.yml` limite les
+mises à jour npm à un passage hebdomadaire et celles des GitHub Actions à un passage
+mensuel, avec regroupement et plafonds de pull requests.
 
 ## Documentation
 
