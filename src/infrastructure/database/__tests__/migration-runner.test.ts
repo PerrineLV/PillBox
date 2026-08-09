@@ -63,7 +63,9 @@ describe('runMigrations', () => {
 
     await runMigrations(store, SCHEMA_MIGRATIONS, LATEST_SCHEMA_VERSION);
 
-    expect(store.appliedVersions).toEqual([1]);
+    expect(store.appliedVersions).toEqual(
+      versionsThrough(LATEST_SCHEMA_VERSION),
+    );
     expect(store.executedStatements.join('\n')).toContain(
       'CREATE TABLE IF NOT EXISTS schema_migrations',
     );
@@ -91,24 +93,28 @@ describe('runMigrations', () => {
 
     await runMigrations(store, SCHEMA_MIGRATIONS, LATEST_SCHEMA_VERSION);
 
-    expect(store.appliedVersions).toEqual([1]);
+    expect(store.appliedVersions).toEqual(
+      versionsThrough(LATEST_SCHEMA_VERSION),
+    );
     expect(store.executedStatements).toEqual(statementsAfterFirstRun);
     expect(store.transactionCount).toBe(2);
   });
 
   it('rollback toutes les étapes en attente si une migration échoue', async () => {
-    const store = new MemoryMigrationStore([1]);
+    const store = new MemoryMigrationStore(
+      versionsThrough(LATEST_SCHEMA_VERSION),
+    );
     const failingMigrations: readonly SchemaMigration[] = [
       ...SCHEMA_MIGRATIONS,
       {
-        version: 2,
+        version: LATEST_SCHEMA_VERSION + 1,
         name: 'étape valide avant l’échec',
         async up(transaction) {
           await transaction.execute('CREATE TABLE pending (id INTEGER);');
         },
       },
       {
-        version: 3,
+        version: LATEST_SCHEMA_VERSION + 2,
         name: 'migration volontairement invalide',
         async up(transaction) {
           await transaction.execute(
@@ -119,30 +125,34 @@ describe('runMigrations', () => {
       },
     ];
 
-    await expect(runMigrations(store, failingMigrations, 3)).rejects.toEqual(
+    await expect(
+      runMigrations(store, failingMigrations, LATEST_SCHEMA_VERSION + 2),
+    ).rejects.toEqual(
       expect.objectContaining({
         message: expect.stringContaining(
           'La migration a été annulée sans conserver de modification partielle',
         ),
-        migrationVersion: 3,
+        migrationVersion: LATEST_SCHEMA_VERSION + 2,
         name: DatabaseMigrationError.name,
       }),
     );
 
-    expect(store.appliedVersions).toEqual([1]);
+    expect(store.appliedVersions).toEqual(
+      versionsThrough(LATEST_SCHEMA_VERSION),
+    );
     expect(store.executedStatements).toEqual([]);
 
     const repairedMigrations: readonly SchemaMigration[] = [
       ...SCHEMA_MIGRATIONS,
       {
-        version: 2,
+        version: LATEST_SCHEMA_VERSION + 1,
         name: 'étape valide avant la correction',
         async up(transaction) {
           await transaction.execute('CREATE TABLE pending (id INTEGER);');
         },
       },
       {
-        version: 3,
+        version: LATEST_SCHEMA_VERSION + 2,
         name: 'migration corrigée',
         async up(transaction) {
           await transaction.execute('CREATE TABLE recovered (id INTEGER);');
@@ -150,9 +160,11 @@ describe('runMigrations', () => {
       },
     ];
 
-    await runMigrations(store, repairedMigrations, 3);
+    await runMigrations(store, repairedMigrations, LATEST_SCHEMA_VERSION + 2);
 
-    expect(store.appliedVersions).toEqual([1, 2, 3]);
+    expect(store.appliedVersions).toEqual(
+      versionsThrough(LATEST_SCHEMA_VERSION + 2),
+    );
     expect(store.executedStatements).toEqual([
       'CREATE TABLE pending (id INTEGER);',
       'CREATE TABLE recovered (id INTEGER);',
@@ -160,14 +172,18 @@ describe('runMigrations', () => {
   });
 
   it('refuse une base créée par une version plus récente de l’application', async () => {
-    const store = new MemoryMigrationStore([1, 2]);
+    const store = new MemoryMigrationStore(
+      versionsThrough(LATEST_SCHEMA_VERSION + 1),
+    );
 
     await expect(
       runMigrations(store, SCHEMA_MIGRATIONS, LATEST_SCHEMA_VERSION),
     ).rejects.toThrow('plus récent');
 
     expect(store.transactionCount).toBe(1);
-    expect(store.appliedVersions).toEqual([1, 2]);
+    expect(store.appliedVersions).toEqual(
+      versionsThrough(LATEST_SCHEMA_VERSION + 1),
+    );
   });
 });
 
