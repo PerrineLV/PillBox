@@ -1,4 +1,5 @@
 import {
+  isExpired,
   usableQuantity,
   type MedicationBox,
 } from '@/domain/inventory/inventory';
@@ -37,6 +38,85 @@ export type PreparationSnapshot = Readonly<{
   requirements: readonly MedicationRequirement[];
   hasShortages: boolean;
 }>;
+
+export type BoxVerification =
+  | Readonly<{ status: 'EXPIRED'; box: MedicationBox }>
+  | Readonly<{ status: 'WRONG_MEDICATION'; box: MedicationBox }>
+  | Readonly<{ status: 'INSUFFICIENT'; box: MedicationBox }>
+  | Readonly<{
+      status: 'VALID';
+      box: MedicationBox;
+      isFefo: boolean;
+      recommendedBox: MedicationBox;
+    }>;
+
+export type ScannedBoxIdentity = Readonly<{
+  presentationCip13: string;
+  lot: string;
+  serialNumber: string | null;
+  expirationDate: string;
+}>;
+
+export type ScannedBoxMatch =
+  | Readonly<{ status: 'MATCHED'; box: MedicationBox }>
+  | Readonly<{ status: 'UNKNOWN' | 'AMBIGUOUS' }>;
+
+/** Exige les données permettant de relier le scan à une boîte précise du stock. */
+export function matchScannedBox(
+  identity: ScannedBoxIdentity,
+  boxes: readonly MedicationBox[],
+): ScannedBoxMatch {
+  const matches = boxes.filter(
+    (box) =>
+      box.presentationCip13 === identity.presentationCip13 &&
+      box.lot === identity.lot &&
+      box.expirationDate === identity.expirationDate &&
+      (box.serialNumber === null ||
+        (identity.serialNumber !== null &&
+          box.serialNumber === identity.serialNumber)),
+  );
+  if (matches.length === 0) return { status: 'UNKNOWN' };
+  if (matches.length > 1) return { status: 'AMBIGUOUS' };
+  return { status: 'MATCHED', box: matches[0] };
+}
+
+/** Vérifie une boîte connue sans jamais accepter une substitution implicite. */
+export function verifyPreparationBox(
+  specialtyCis: string,
+  requiredHalfUnits: number,
+  scannedBox: MedicationBox,
+  availableBoxes: readonly MedicationBox[],
+  referenceDate: string,
+): BoxVerification {
+  if (isExpired(scannedBox.expirationDate, referenceDate)) {
+    return { status: 'EXPIRED', box: scannedBox };
+  }
+  if (scannedBox.specialtyCis !== specialtyCis) {
+    return { status: 'WRONG_MEDICATION', box: scannedBox };
+  }
+  if (scannedBox.remainingQuantity * 2 < requiredHalfUnits) {
+    return { status: 'INSUFFICIENT', box: scannedBox };
+  }
+  const eligible = availableBoxes
+    .filter(
+      (box) =>
+        box.specialtyCis === specialtyCis &&
+        !isExpired(box.expirationDate, referenceDate) &&
+        box.remainingQuantity * 2 >= requiredHalfUnits,
+    )
+    .sort(
+      (left, right) =>
+        left.expirationDate.localeCompare(right.expirationDate) ||
+        left.id - right.id,
+    );
+  const recommendedBox = eligible[0] ?? scannedBox;
+  return {
+    status: 'VALID',
+    box: scannedBox,
+    isFefo: recommendedBox.id === scannedBox.id,
+    recommendedBox,
+  };
+}
 
 /**
  * Construit les données figées d'une préparation. Les quantités restent en

@@ -3,7 +3,9 @@ import type { Treatment } from '@/domain/treatments/treatment';
 
 import {
   generatePreparationSnapshot,
+  matchScannedBox,
   preparationStartDate,
+  verifyPreparationBox,
 } from '../preparation';
 
 function treatment(overrides: Partial<Treatment> = {}): Treatment {
@@ -152,5 +154,96 @@ describe('génération d’une préparation de sept jours', () => {
     expect(snapshot.items).toEqual([]);
     expect(snapshot.requirements).toEqual([]);
     expect(snapshot.hasShortages).toBe(false);
+  });
+});
+
+describe('vérification des boîtes pendant la préparation', () => {
+  it('bloque un produit différent et une boîte périmée', () => {
+    expect(
+      verifyPreparationBox(
+        '60000001',
+        14,
+        box({ specialtyCis: 'OTHER' }),
+        [box()],
+        '2026-08-03',
+      ).status,
+    ).toBe('WRONG_MEDICATION');
+    expect(
+      verifyPreparationBox(
+        '60000001',
+        14,
+        box({ expirationDate: '2026-08-02' }),
+        [box()],
+        '2026-08-03',
+      ).status,
+    ).toBe('EXPIRED');
+  });
+
+  it('recommande FEFO mais accepte explicitement un autre lot valide', () => {
+    const earliest = box({
+      id: 1,
+      lot: 'PREMIER',
+      expirationDate: '2026-09-01',
+    });
+    const later = box({ id: 2, lot: 'SUIVANT', expirationDate: '2027-01-01' });
+    expect(
+      verifyPreparationBox(
+        '60000001',
+        14,
+        earliest,
+        [later, earliest],
+        '2026-08-03',
+      ),
+    ).toMatchObject({ status: 'VALID', isFefo: true });
+    expect(
+      verifyPreparationBox(
+        '60000001',
+        14,
+        later,
+        [later, earliest],
+        '2026-08-03',
+      ),
+    ).toMatchObject({
+      status: 'VALID',
+      isFefo: false,
+      recommendedBox: earliest,
+    });
+  });
+
+  it('relie le scan à une seule boîte avec présentation, lot et péremption exacts', () => {
+    const stored = box();
+    expect(
+      matchScannedBox(
+        {
+          presentationCip13: stored.presentationCip13,
+          lot: 'LOT',
+          serialNumber: null,
+          expirationDate: '2027-01-01',
+        },
+        [stored],
+      ),
+    ).toEqual({ status: 'MATCHED', box: stored });
+    expect(
+      matchScannedBox(
+        {
+          presentationCip13: stored.presentationCip13,
+          lot: 'AUTRE',
+          serialNumber: null,
+          expirationDate: '2027-01-01',
+        },
+        [stored],
+      ),
+    ).toEqual({ status: 'UNKNOWN' });
+    expect(
+      matchScannedBox(
+        {
+          presentationCip13: stored.presentationCip13,
+          lot: 'LOT',
+          serialNumber: null,
+          expirationDate: '2027-01-01',
+        },
+        [stored, { ...stored, id: 2 }],
+      ),
+    ).toEqual({ status: 'AMBIGUOUS' });
   });
 });

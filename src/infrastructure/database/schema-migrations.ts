@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 5;
+export const LATEST_SCHEMA_VERSION = 6;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -168,6 +168,29 @@ export const SCHEMA_MIGRATIONS = [
 
         CREATE INDEX preparation_items_preparation_idx
           ON preparation_items(preparation_id, intake_date, slot);
+      `);
+    },
+  },
+  {
+    version: 6,
+    name: 'ajout de la progression de préparation',
+    async up(transaction) {
+      await transaction.execute(`
+        CREATE TABLE preparation_progress (
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE RESTRICT,
+          specialty_cis TEXT NOT NULL,
+          box_id INTEGER NOT NULL REFERENCES medication_boxes(id) ON DELETE RESTRICT,
+          scan_raw TEXT NOT NULL,
+          non_fefo_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK (non_fefo_acknowledged IN (0, 1)),
+          completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (preparation_id, specialty_cis),
+          FOREIGN KEY (preparation_id, specialty_cis)
+            REFERENCES preparation_requirements(preparation_id, specialty_cis)
+            ON DELETE RESTRICT
+        );
+
+        CREATE INDEX preparation_progress_preparation_idx
+          ON preparation_progress(preparation_id);
       `);
     },
   },
