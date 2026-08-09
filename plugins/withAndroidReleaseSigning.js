@@ -7,7 +7,6 @@ const signingEnvironment = `${SIGNING_MARKER}
 def releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 def releaseKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
 def releaseKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
-def releaseKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
 def isReleaseBuild = gradle.startParameter.taskNames.any { taskName ->
     taskName.toLowerCase().contains("release")
 }
@@ -15,7 +14,6 @@ def missingReleaseSigningValue = [
     releaseKeystorePath,
     releaseKeystorePassword,
     releaseKeyAlias,
-    releaseKeyPassword,
 ].any { value -> value == null || value.isEmpty() }
 
 if (isReleaseBuild && missingReleaseSigningValue) {
@@ -30,7 +28,7 @@ const releaseSigningConfig = `
                 storeFile file(releaseKeystorePath)
                 storePassword releaseKeystorePassword
                 keyAlias releaseKeyAlias
-                keyPassword releaseKeyPassword
+                keyPassword releaseKeystorePassword
             }
         }
 `;
