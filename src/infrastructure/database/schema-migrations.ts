@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 4;
+export const LATEST_SCHEMA_VERSION = 5;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -127,6 +127,47 @@ export const SCHEMA_MIGRATIONS = [
 
         CREATE INDEX treatment_phases_treatment_idx
           ON treatment_phases(treatment_id, position);
+      `);
+    },
+  },
+  {
+    version: 5,
+    name: 'création des snapshots de préparation',
+    async up(transaction) {
+      await transaction.execute(`
+        CREATE TABLE preparations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          start_date TEXT NOT NULL,
+          end_date TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT')),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK (end_date >= start_date)
+        );
+
+        CREATE TABLE preparation_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE RESTRICT,
+          source_treatment_id INTEGER NOT NULL,
+          specialty_cis TEXT NOT NULL,
+          specialty_name TEXT NOT NULL,
+          pharmaceutical_form TEXT,
+          intake_date TEXT NOT NULL,
+          slot TEXT NOT NULL CHECK (slot IN ('morning', 'noon', 'evening', 'bedtime')),
+          quantity_half_units INTEGER NOT NULL CHECK (quantity_half_units > 0)
+        );
+
+        CREATE TABLE preparation_requirements (
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE RESTRICT,
+          specialty_cis TEXT NOT NULL,
+          specialty_name TEXT NOT NULL,
+          required_half_units INTEGER NOT NULL CHECK (required_half_units > 0),
+          usable_stock_half_units INTEGER NOT NULL CHECK (usable_stock_half_units >= 0),
+          missing_half_units INTEGER NOT NULL CHECK (missing_half_units >= 0),
+          PRIMARY KEY (preparation_id, specialty_cis)
+        );
+
+        CREATE INDEX preparation_items_preparation_idx
+          ON preparation_items(preparation_id, intake_date, slot);
       `);
     },
   },

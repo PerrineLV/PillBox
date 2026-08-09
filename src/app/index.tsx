@@ -5,6 +5,9 @@ export default function HomeScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Pilulier</Text>
+      <Link href="/preparations/new" style={styles.primaryLink}>
+        Préparer mon pilulier
+      </Link>
       <Link href="/treatments" style={styles.link}>
         Mes traitements
       </Link>
@@ -33,5 +36,14 @@ const styles = StyleSheet.create({
   },
   link: {
     marginTop: 24,
+  },
+  primaryLink: {
+    backgroundColor: '#0F6F70',
+    borderRadius: 8,
+    color: '#fff',
+    fontWeight: '700',
+    marginTop: 24,
+    overflow: 'hidden',
+    padding: 14,
   },
 });
