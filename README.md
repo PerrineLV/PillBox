@@ -81,11 +81,96 @@ npm test
 
 ## CI
 
-Une CI GitHub Actions vérifie automatiquement :
+À chaque push sur `dev`, GitHub Actions vérifie automatiquement :
 
 * le lint ;
 * le typage TypeScript ;
-* les tests.
+* les tests ;
+* la génération du bundle Android Expo.
+
+## APK Android release signé
+
+Le workflow `Android release APK` se déclenche uniquement lors d’un push sur `main`.
+Dans le fonctionnement attendu du dépôt, ce push est produit par la fusion d’une pull
+request. Le workflow exécute le lint, le typecheck et les tests, génère le projet
+Android avec Expo Prebuild, puis construit un APK release signé.
+
+L’identifiant Android est fixé à `com.perrinelv.pillbox`. Ne pas le modifier après la
+première installation : Android considérerait l’application comme une autre
+application. Le `versionCode` utilise le numéro croissant du run GitHub Actions.
+
+### Créer la clé de signature
+
+Générer une clé dédiée dans un emplacement privé, hors du dépôt :
+
+```bash
+keytool -genkeypair -v \
+  -keystore pillbox-release.jks \
+  -alias pillbox \
+  -keyalg RSA \
+  -keysize 4096 \
+  -validity 10000
+```
+
+Conserver les mots de passe saisis. Encoder ensuite le fichier sur une seule ligne :
+
+```bash
+# Linux
+base64 -w 0 pillbox-release.jks
+
+# macOS
+base64 < pillbox-release.jks | tr -d '\n'
+```
+
+Dans `Settings` → `Secrets and variables` → `Actions`, créer ces secrets GitHub :
+
+* `ANDROID_KEYSTORE_BASE64` : résultat Base64 complet ;
+* `ANDROID_KEYSTORE_PASSWORD` : mot de passe du keystore ;
+* `ANDROID_KEY_ALIAS` : alias choisi, par exemple `pillbox` ;
+* `ANDROID_KEY_PASSWORD` : mot de passe de la clé.
+
+Le workflow échoue explicitement si un de ces secrets est absent. Le fichier `.jks`,
+les mots de passe et leur représentation Base64 ne doivent jamais être commités.
+
+### Déclencher et télécharger l’APK
+
+1. Fusionner une pull request dans `main`. Il est recommandé de protéger `main` dans
+   les règles GitHub afin d’interdire les push directs.
+2. Ouvrir l’onglet `Actions`, puis le run `Android release APK` correspondant.
+3. Télécharger l’artefact `pillbox-apk-<SHA>` dans la section `Artifacts`. Il est
+   conservé pendant 30 jours et contient `app-release.apk`.
+
+### Installer ou mettre à jour
+
+Pour une première installation, autoriser si nécessaire l’installation d’applications
+inconnues sur Android, puis ouvrir `app-release.apk`. Avec ADB :
+
+```bash
+adb install app-release.apk
+```
+
+Pour une mise à jour, ne pas désinstaller l’application, afin de conserver sa base
+SQLite locale. Installer directement le nouvel APK ou utiliser :
+
+```bash
+adb install -r app-release.apk
+```
+
+Android accepte la mise à jour uniquement si l’identifiant d’application et la clé de
+signature sont identiques et si le `versionCode` n’est pas inférieur. Un APK signé avec
+une autre clé ne peut pas remplacer l’installation existante sans désinstallation et
+perte des données locales de l’application.
+
+### Sauvegarder et restaurer la capacité de signature
+
+Conserver au moins deux sauvegardes chiffrées et indépendantes de
+`pillbox-release.jks`, ainsi que l’alias et les mots de passe dans un gestionnaire de
+secrets. Une copie doit être située hors du poste de développement.
+
+Si le poste est perdu, restaurer le même fichier `.jks`, vérifier son empreinte avec
+`keytool -list -v -keystore pillbox-release.jks`, puis recréer les quatre secrets
+GitHub. Une nouvelle clé, même avec le même alias, ne permet pas de mettre à jour les
+installations existantes.
 
 ## Documentation
 

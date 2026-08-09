@@ -62,6 +62,7 @@ Desktop.ini
 
 # Android
 
+/android/
 android/.gradle/
 android/app/build/
 android/build/
@@ -96,3 +97,7 @@ temp/
 # Local medication data generated during development
 
 data/generated/
+
+*.jks
+*.keystore
+*.base64

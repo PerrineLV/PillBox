@@ -17,7 +17,12 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
-    "build:android:check": "expo export --platform android --clear --output-dir dist"
+    "build:android:check": "expo export --platform android --clear --output-dir dist",
+    "android:release:validate-signing": "node ./scripts/android-signing.mjs --validate",
+    "android:release:prebuild": "expo prebuild --platform android --no-install --clean",
+    "android:release:prepare-signing": "node ./scripts/android-signing.mjs --write-keystore",
+    "android:release:build": "./android/gradlew -p android app:assembleRelease --no-daemon",
+    "android:release:verify": "node ./scripts/verify-android-apk.mjs"
   },
   "dependencies": {
     "expo": "~54.0.35",
