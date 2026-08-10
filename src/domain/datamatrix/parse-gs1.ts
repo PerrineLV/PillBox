@@ -6,7 +6,6 @@ export type Gs1Fields = {
   gtin?: string;
   expiration?: string;
   lot?: string;
-  serialNumber?: string;
 };
 
 export type Gs1ParseResult = {
@@ -16,7 +15,8 @@ export type Gs1ParseResult = {
 };
 
 type AiDefinition = {
-  field: keyof Gs1Fields;
+  /** `null` : la donnée est lue puis ignorée, sans être exposée ni signalée en erreur. */
+  field: keyof Gs1Fields | null;
   fixedLength?: number;
   maximumLength: number;
   numeric: boolean;
@@ -31,7 +31,9 @@ const AI_DEFINITIONS: Record<SupportedApplicationIdentifier, AiDefinition> = {
     numeric: true,
   },
   '10': { field: 'lot', maximumLength: 20, numeric: false },
-  '21': { field: 'serialNumber', maximumLength: 20, numeric: false },
+  // Le numéro de série unitaire n'a aucune valeur métier pour PillBox : il est
+  // consommé pour ne pas interrompre le décodage, puis abandonné.
+  '21': { field: null, maximumLength: 20, numeric: false },
 };
 
 function isSupportedAi(value: string): value is SupportedApplicationIdentifier {
@@ -112,6 +114,8 @@ export function parseGs1DataMatrix(raw: string): Gs1ParseResult {
       errors.push(`AI ${ai} doit contenir uniquement des chiffres.`);
       continue;
     }
+
+    if (definition.field === null) continue;
 
     if (fields[definition.field] !== undefined) {
       errors.push(`AI ${ai} présent plusieurs fois.`);

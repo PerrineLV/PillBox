@@ -1,11 +1,18 @@
 import type { SQLiteDatabase, SQLiteRunResult } from 'expo-sqlite';
 
-import type { PreparationSnapshot } from '@/domain/preparations/preparation';
+import {
+  assertVerificationEvidence,
+  BOX_VERIFICATION_METHODS,
+  type BoxVerificationMethod,
+  type PreparationSnapshot,
+} from '@/domain/preparations/preparation';
 
 export type SavedPreparationProgress = Readonly<{
   specialtyCis: string;
   boxId: number;
-  scanRaw: string;
+  verification: BoxVerificationMethod;
+  /** Chaîne brute du DataMatrix, absente lorsque la boîte a été choisie dans le stock. */
+  scanRaw: string | null;
   nonFefoAcknowledged: boolean;
 }>;
 
@@ -28,8 +35,8 @@ export type PreparationHistoryEntry = Readonly<{
     presentationCip13: string;
     presentationLabel: string;
     lot: string | null;
-    serialNumber: string | null;
     expirationDate: string;
+    verification: BoxVerificationMethod;
   }>[];
 }>;
 
@@ -124,10 +131,11 @@ export async function getLatestDraftPreparation(
   const progress = await database.getAllAsync<{
     specialty_cis: string;
     box_id: number;
+    verification: string;
     scan_raw: string;
     non_fefo_acknowledged: number;
   }>(
-    `SELECT specialty_cis, box_id, scan_raw, non_fefo_acknowledged
+    `SELECT specialty_cis, box_id, verification, scan_raw, non_fefo_acknowledged
      FROM preparation_progress WHERE preparation_id = ?`,
     preparation.id,
   );
@@ -160,7 +168,8 @@ export async function getLatestDraftPreparation(
     progress: progress.map((row) => ({
       specialtyCis: row.specialty_cis,
       boxId: row.box_id,
-      scanRaw: row.scan_raw,
+      verification: toVerificationMethod(row.verification),
+      scanRaw: row.scan_raw === '' ? null : row.scan_raw,
       nonFefoAcknowledged: row.non_fefo_acknowledged === 1,
     })),
   };
@@ -171,19 +180,22 @@ export async function savePreparationProgress(
   preparationId: number,
   progress: SavedPreparationProgress,
 ): Promise<void> {
+  assertVerificationEvidence(progress.verification, progress.scanRaw);
   await database.runAsync(
     `INSERT INTO preparation_progress
-      (preparation_id, specialty_cis, box_id, scan_raw, non_fefo_acknowledged)
-     VALUES (?, ?, ?, ?, ?)
+      (preparation_id, specialty_cis, box_id, verification, scan_raw, non_fefo_acknowledged)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(preparation_id, specialty_cis) DO UPDATE SET
        box_id = excluded.box_id,
+       verification = excluded.verification,
        scan_raw = excluded.scan_raw,
        non_fefo_acknowledged = excluded.non_fefo_acknowledged,
        completed_at = CURRENT_TIMESTAMP`,
     preparationId,
     progress.specialtyCis,
     progress.boxId,
-    progress.scanRaw,
+    progress.verification,
+    progress.scanRaw ?? '',
     progress.nonFefoAcknowledged ? 1 : 0,
   );
 }
@@ -215,19 +227,20 @@ export async function completePreparation(
       specialty_name: string;
       required_half_units: number;
       box_id: number | null;
+      verification: string | null;
       box_specialty_cis: string | null;
       presentation_cip13: string | null;
       presentation_label: string | null;
       lot: string | null;
-      serial_number: string | null;
       expiration_date: string | null;
       remaining_quantity: number | null;
     }>(
       `SELECT requirement.specialty_cis, requirement.specialty_name,
         requirement.required_half_units, progress.box_id,
+        progress.verification,
         box.specialty_cis AS box_specialty_cis,
         box.presentation_cip13, box.presentation_label, box.lot,
-        box.serial_number, box.expiration_date, box.remaining_quantity
+        box.expiration_date, box.remaining_quantity
        FROM preparation_requirements requirement
        LEFT JOIN preparation_progress progress
          ON progress.preparation_id = requirement.preparation_id
@@ -241,6 +254,7 @@ export async function completePreparation(
     for (const usage of usages) {
       if (
         usage.box_id === null ||
+        usage.verification === null ||
         usage.box_specialty_cis === null ||
         usage.presentation_cip13 === null ||
         usage.presentation_label === null ||
@@ -294,8 +308,8 @@ export async function completePreparation(
       await transaction.runAsync(
         `INSERT INTO preparation_box_usages
           (preparation_id, specialty_cis, specialty_name, box_id,
-           presentation_cip13, presentation_label, lot, serial_number,
-           expiration_date, quantity_half_units)
+           presentation_cip13, presentation_label, lot,
+           expiration_date, quantity_half_units, verification)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         preparationId,
         usage.specialty_cis,
@@ -304,9 +318,9 @@ export async function completePreparation(
         usage.presentation_cip13,
         usage.presentation_label,
         usage.lot,
-        usage.serial_number,
         usage.expiration_date,
         usage.required_half_units,
+        toVerificationMethod(usage.verification),
       );
     }
 
@@ -344,11 +358,11 @@ export async function listPreparationHistory(
       presentation_cip13: string;
       presentation_label: string;
       lot: string | null;
-      serial_number: string | null;
       expiration_date: string;
+      verification: string;
     }>(
       `SELECT specialty_cis, specialty_name, quantity_half_units, box_id,
-        presentation_cip13, presentation_label, lot, serial_number, expiration_date
+        presentation_cip13, presentation_label, lot, expiration_date, verification
        FROM preparation_box_usages WHERE preparation_id = ?
        ORDER BY specialty_name`,
       preparation.id,
@@ -366,10 +380,16 @@ export async function listPreparationHistory(
         presentationCip13: item.presentation_cip13,
         presentationLabel: item.presentation_label,
         lot: item.lot,
-        serialNumber: item.serial_number,
         expirationDate: item.expiration_date,
+        verification: toVerificationMethod(item.verification),
       })),
     });
   }
   return result;
+}
+
+function toVerificationMethod(value: string | null): BoxVerificationMethod {
+  if (!(BOX_VERIFICATION_METHODS as readonly (string | null)[]).includes(value))
+    throw new Error('La base locale contient une vérification inconnue.');
+  return value as BoxVerificationMethod;
 }

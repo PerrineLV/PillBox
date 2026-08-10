@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 15;
+export const LATEST_SCHEMA_VERSION = 16;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -469,6 +469,24 @@ export const SCHEMA_MIGRATIONS = [
       await transaction.execute(`
         ALTER TABLE intake_reminder_slot_settings
           ADD COLUMN enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1));
+      `);
+    },
+  },
+  {
+    version: 16,
+    name: 'origine des boîtes et mode de vérification des préparations',
+    async up(transaction) {
+      // Les lignes existantes proviennent toutes d'un scan : le défaut 'SCAN'
+      // décrit exactement l'historique et n'invente aucune donnée.
+      // La colonne serial_number est conservée telle quelle pour ne rien
+      // détruire, mais elle n'intervient plus dans le comportement de l'app.
+      await transaction.execute(`
+        ALTER TABLE medication_boxes
+          ADD COLUMN source TEXT NOT NULL DEFAULT 'SCAN' CHECK (source IN ('SCAN', 'MANUAL'));
+        ALTER TABLE preparation_progress
+          ADD COLUMN verification TEXT NOT NULL DEFAULT 'SCAN' CHECK (verification IN ('SCAN', 'MANUAL'));
+        ALTER TABLE preparation_box_usages
+          ADD COLUMN verification TEXT NOT NULL DEFAULT 'SCAN' CHECK (verification IN ('SCAN', 'MANUAL'));
       `);
     },
   },

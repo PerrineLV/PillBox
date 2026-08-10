@@ -89,6 +89,12 @@ export default function PreparationHistoryScreen() {
                 Présentation : {medication.presentationLabel} (
                 {medication.presentationCip13})
               </Text>
+              <Text>
+                Vérification :{' '}
+                {medication.verification === 'SCAN'
+                  ? 'scan DataMatrix'
+                  : 'boîte choisie dans le stock, sans scan'}
+              </Text>
             </View>
           ))}
         </Card>

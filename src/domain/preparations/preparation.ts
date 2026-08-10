@@ -53,13 +53,43 @@ export type BoxVerification =
 export type ScannedBoxIdentity = Readonly<{
   presentationCip13: string;
   lot: string;
-  serialNumber: string | null;
   expirationDate: string;
 }>;
 
 export type ScannedBoxMatch =
   | Readonly<{ status: 'MATCHED'; box: MedicationBox }>
   | Readonly<{ status: 'UNKNOWN' | 'AMBIGUOUS' }>;
+
+/**
+ * Manière dont la boîte utilisée a été confirmée : lecture du DataMatrix ou
+ * sélection explicite dans le stock déjà enregistré.
+ */
+export const BOX_VERIFICATION_METHODS = ['SCAN', 'MANUAL'] as const;
+
+export type BoxVerificationMethod = (typeof BOX_VERIFICATION_METHODS)[number];
+
+/**
+ * Interdit d'enregistrer une vérification par scan sans sa preuve brute, et
+ * inversement de rattacher un scan à une sélection manuelle.
+ */
+export function assertVerificationEvidence(
+  method: BoxVerificationMethod,
+  scanRaw: string | null,
+): void {
+  if (method === 'SCAN') {
+    if (scanRaw === null || scanRaw.length === 0) {
+      throw new Error(
+        'Une vérification par scan exige la chaîne brute du DataMatrix.',
+      );
+    }
+    return;
+  }
+  if (scanRaw !== null) {
+    throw new Error(
+      'Une sélection dans le stock ne peut pas être enregistrée comme un scan.',
+    );
+  }
+}
 
 /** Exige les données permettant de relier le scan à une boîte précise du stock. */
 export function matchScannedBox(
@@ -70,14 +100,33 @@ export function matchScannedBox(
     (box) =>
       box.presentationCip13 === identity.presentationCip13 &&
       box.lot === identity.lot &&
-      box.expirationDate === identity.expirationDate &&
-      (box.serialNumber === null ||
-        (identity.serialNumber !== null &&
-          box.serialNumber === identity.serialNumber)),
+      box.expirationDate === identity.expirationDate,
   );
   if (matches.length === 0) return { status: 'UNKNOWN' };
   if (matches.length > 1) return { status: 'AMBIGUOUS' };
   return { status: 'MATCHED', box: matches[0] };
+}
+
+/**
+ * Boîtes du stock rattachées à un médicament, du lot à utiliser en premier
+ * (FEFO) vers les boîtes périmées, reléguées à la fin sans être masquées.
+ */
+export function listBoxesForMedication(
+  specialtyCis: string,
+  boxes: readonly MedicationBox[],
+  referenceDate: string,
+): readonly MedicationBox[] {
+  return boxes
+    .filter((box) => box.specialtyCis === specialtyCis)
+    .sort((left, right) => {
+      const leftExpired = isExpired(left.expirationDate, referenceDate);
+      const rightExpired = isExpired(right.expirationDate, referenceDate);
+      if (leftExpired !== rightExpired) return leftExpired ? 1 : -1;
+      return (
+        left.expirationDate.localeCompare(right.expirationDate) ||
+        left.id - right.id
+      );
+    });
 }
 
 /** Vérifie une boîte connue sans jamais accepter une substitution implicite. */

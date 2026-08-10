@@ -8,7 +8,7 @@ Application mobile personnelle pour assister la préparation hebdomadaire d'un p
 - Pas de compte, backend, cloud, analytics ou publicité pour le MVP.
 - La posologie est toujours saisie par l'utilisateur ; l'application ne la déduit jamais.
 - En cas d'incertitude pharmaceutique ou d'identification : ne jamais deviner.
-- Le scan doit vérifier la boîte réellement utilisée pendant la préparation.
+- Le scan sert à vérifier la boîte réellement utilisée pendant la préparation ; lorsqu'il n'est pas disponible, cette boîte est désignée explicitement dans le stock déjà enregistré.
 
 # Stack
 
@@ -24,7 +24,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 
 **Phase de posologie** : période datée, fréquence explicite (quotidienne, tous les N jours avec ancre, ou hebdomadaire avec jour choisi) + créneaux matin/midi/soir/coucher + quantités fractionnaires possibles.
 
-**Boîte** : présentation + lot + numéro de série éventuel + péremption + quantité initiale/restante.
+**Boîte** : présentation + lot + péremption + quantité initiale/restante + origine (scan DataMatrix ou saisie manuelle). Le numéro de série unitaire n'a pas de valeur métier ici et n'intervient dans aucun écran ni aucune règle.
 
 **Préparation** : période de 7 jours + snapshot des traitements + progression + boîtes/lots réellement utilisés + statut.
 
@@ -33,11 +33,11 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 # Parcours principal
 
 1. Saisir les traitements à partir du référentiel réel.
-2. Scanner les boîtes pour constituer le stock.
+2. Constituer le stock : scanner les boîtes, ou les ajouter manuellement depuis le référentiel lorsque le DataMatrix est absent ou illisible.
 3. Recevoir chaque semaine une notification locale configurable.
 4. Lancer « Préparer mon pilulier ».
 5. L'app calcule les besoins pour 7 jours.
-6. Pour chaque médicament : scanner la boîte, vérifier identité/lot/péremption, afficher les cases et quantités, valider.
+6. Pour chaque médicament : désigner la boîte utilisée, par scan ou en la choisissant dans le stock, vérifier identité/lot/péremption, afficher les cases et quantités, valider.
 7. Faire un contrôle final.
 8. Valider transactionnellement la préparation et décrémenter les bons lots.
 9. Conserver l'historique.
@@ -52,6 +52,8 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 - Une préparation conserve un snapshot : modifier ensuite un traitement ne modifie jamais l'historique.
 - Les fractions doivent être calculées sans approximation métier silencieuse.
 - Les données RAW du DataMatrix restent disponibles pour diagnostic lorsque nécessaire.
+- Le scan est une voie de saisie et de vérification, jamais une obligation : une boîte ajoutée manuellement participe au stock et aux préparations avec les mêmes règles de quantité et de péremption.
+- Une saisie manuelle n'est jamais présentée comme une vérification par scan. L'origine d'une boîte et le mode de vérification d'une préparation sont enregistrés et affichés distinctement.
 
 # Hors scope MVP
 
@@ -59,7 +61,7 @@ Conseils médicaux, interactions, diagnostic, lecture automatique d'ordonnance, 
 
 # Definition of Done MVP
 
-Je peux saisir mes traitements, scanner mes boîtes, suivre lots/péremptions/stocks, recevoir mon rappel hebdomadaire, préparer réellement un pilulier de 7 jours avec vérification des boîtes, valider la préparation et retrouver les lots utilisés dans l'historique, sans connexion à un serveur.
+Je peux saisir mes traitements, ajouter mes boîtes par scan ou manuellement, suivre lots/péremptions/stocks, recevoir mon rappel hebdomadaire, préparer réellement un pilulier de 7 jours avec vérification des boîtes, valider la préparation et retrouver les lots utilisés dans l'historique, sans connexion à un serveur.
 
 # Confidentialité locale et durcissement Android
 

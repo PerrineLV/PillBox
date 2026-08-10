@@ -123,7 +123,7 @@ export default function InventoryScreen() {
       {!loading && !error && boxes.length === 0 ? (
         <EmptyState
           title="Aucune boîte enregistrée"
-          description="Scannez le DataMatrix d’une boîte pour suivre son lot, sa péremption et sa quantité."
+          description="Scannez le DataMatrix d’une boîte, ou ajoutez-la sans DataMatrix, pour suivre son lot, sa péremption et sa quantité."
         />
       ) : null}
       {!loading && !error && boxes.length > 0 && groups.length === 0 ? (
@@ -164,9 +164,11 @@ export default function InventoryScreen() {
                           Péremption :{' '}
                           {formatLongFrenchCivilDate(box.expirationDate)}
                         </Text>
-                        {box.serialNumber ? (
-                          <Text>Numéro de série : {box.serialNumber}</Text>
-                        ) : null}
+                        <Text>
+                          {box.origin === 'SCAN'
+                            ? 'Ajoutée par scan DataMatrix'
+                            : 'Ajoutée manuellement, sans scan'}
+                        </Text>
                         {expired ? (
                           <Badge
                             label="Périmée — stock inutilisable"

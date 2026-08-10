@@ -10,29 +10,41 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
+import { ExpirationField } from '@/components/inventory/expiration-field';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import { parseGs1Expiration } from '@/domain/inventory/inventory';
 import { normalizeScannedGtinToCip13 } from '@/domain/medications/normalize-scanned-identifier';
 import { addMedicationBox } from '@/infrastructure/inventory/inventory-repository';
 import {
   findMedicationPresentationByCip13,
+  searchMedicationReference,
   type IdentifiedMedicationPresentation,
+  type MedicationSearchResult,
 } from '@/infrastructure/medications/medication-reference';
 import {
   AppButton,
   AppField,
   Card,
+  EmptyState,
+  LoadingState,
   Message,
+  Screen,
   colors,
+  radii,
   spacing,
   typography,
 } from '@/ui';
+
+type AddBoxMode = 'CHOICE' | 'SCAN' | 'MANUAL';
+
+const SCREEN_TITLE = 'Ajouter une boîte';
 
 export default function AddBoxScreen() {
   const personalDatabase = useSQLiteContext();
@@ -48,6 +60,253 @@ export default function AddBoxScreen() {
 }
 
 function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
+  const [mode, setMode] = useState<AddBoxMode>('CHOICE');
+
+  if (mode === 'SCAN')
+    return (
+      <ScanBox
+        personalDatabase={personalDatabase}
+        onLeave={() => setMode('CHOICE')}
+      />
+    );
+  if (mode === 'MANUAL')
+    return (
+      <ManualBox
+        personalDatabase={personalDatabase}
+        onLeave={() => setMode('CHOICE')}
+      />
+    );
+  return <ModeChoice onSelect={setMode} />;
+}
+
+/** Le scan reste la voie rapide, sans jamais devenir la seule voie possible. */
+function ModeChoice({ onSelect }: { onSelect(mode: AddBoxMode): void }) {
+  return (
+    <Screen>
+      <Stack.Screen options={{ headerShown: true, title: SCREEN_TITLE }} />
+      <Card>
+        <Text style={typography.heading}>Scanner le DataMatrix</Text>
+        <Text style={typography.body}>
+          Préremplit le produit, le lot et la péremption depuis la boîte.
+        </Text>
+        <AppButton
+          label="Scanner le DataMatrix"
+          onPress={() => onSelect('SCAN')}
+        />
+      </Card>
+      <Card>
+        <Text style={typography.heading}>Ajouter sans DataMatrix</Text>
+        <Text style={typography.body}>
+          Pour une boîte sans code lisible : choisissez le médicament dans le
+          référentiel, puis saisissez vous-même le lot et la péremption.
+        </Text>
+        <AppButton
+          label="Ajouter sans DataMatrix"
+          variant="secondary"
+          onPress={() => onSelect('MANUAL')}
+        />
+      </Card>
+    </Screen>
+  );
+}
+
+function ManualBox({
+  personalDatabase,
+  onLeave,
+}: {
+  personalDatabase: SQLiteDatabase;
+  onLeave(): void;
+}) {
+  const referenceDatabase = useSQLiteContext();
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<MedicationSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [medication, setMedication] =
+    useState<IdentifiedMedicationPresentation | null>(null);
+  const [lot, setLot] = useState('');
+  const [expiration, setExpiration] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (medication !== null) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setSearching(query.trim().length > 0);
+      searchMedicationReference(referenceDatabase, query)
+        .then((found) => {
+          if (!cancelled) setResults(found);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setResults([]);
+            setError('Recherche dans le référentiel impossible.');
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [medication, query, referenceDatabase]);
+
+  async function save(): Promise<void> {
+    if (medication === null || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await addMedicationBox(personalDatabase, {
+        specialtyCis: medication.cis,
+        specialtyName: medication.name,
+        pharmaceuticalForm: medication.pharmaceuticalForm,
+        presentationCip13: medication.cip13,
+        presentationLabel: medication.label,
+        lot,
+        expirationDate: expiration,
+        initialQuantity: Number(quantity),
+        origin: 'MANUAL',
+        scanRaw: null,
+      });
+      router.replace('/inventory');
+    } catch (reason: unknown) {
+      setError(
+        reason instanceof Error ? reason.message : 'Enregistrement impossible.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Screen>
+      <Stack.Screen options={{ headerShown: true, title: SCREEN_TITLE }} />
+      <Message tone="info" title="Ajout sans DataMatrix">
+        La boîte sera enregistrée comme saisie manuelle. PillBox ne complétera
+        aucune information absente de la boîte.
+      </Message>
+      {error ? (
+        <Message tone="error" title="Boîte non enregistrée">
+          {error}
+        </Message>
+      ) : null}
+      {medication === null ? (
+        <>
+          <AppField
+            label="Rechercher le médicament"
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={setQuery}
+            placeholder="Nom, dosage ou forme"
+            value={query}
+          />
+          {searching ? <LoadingState label="Recherche en cours…" /> : null}
+          {!searching && query.trim().length > 0 && results.length === 0 ? (
+            <EmptyState
+              title="Aucun médicament trouvé"
+              description="Vérifiez l’orthographe, le dosage ou la forme. PillBox ne propose aucune correspondance incertaine."
+            />
+          ) : null}
+          {results.map((result) => (
+            <Card key={result.cis} style={styles.result}>
+              <Text style={typography.heading}>{result.name}</Text>
+              {result.pharmaceuticalForm === null ? null : (
+                <Text style={typography.caption}>
+                  {result.pharmaceuticalForm}
+                </Text>
+              )}
+              <Text style={typography.caption}>
+                Choisissez la présentation exacte de votre boîte.
+              </Text>
+              {result.presentations.map((presentation) => (
+                <Pressable
+                  accessibilityRole="button"
+                  key={presentation.cip13}
+                  onPress={() =>
+                    setMedication({
+                      cip13: presentation.cip13,
+                      label: presentation.label,
+                      cis: result.cis,
+                      name: result.name,
+                      pharmaceuticalForm: result.pharmaceuticalForm,
+                    })
+                  }
+                  style={styles.presentation}
+                >
+                  <Text style={typography.body}>{presentation.label}</Text>
+                  <Text style={typography.caption}>
+                    CIP13 {presentation.cip13}
+                  </Text>
+                </Pressable>
+              ))}
+            </Card>
+          ))}
+        </>
+      ) : (
+        <>
+          <Card>
+            <Text style={typography.heading}>{medication.name}</Text>
+            <Text>{medication.label}</Text>
+            <Text>CIP13 {medication.cip13}</Text>
+            <AppButton
+              label="Changer de médicament"
+              variant="quiet"
+              onPress={() => setMedication(null)}
+            />
+          </Card>
+          <AppField
+            label="Lot"
+            help="Requis : il identifie la boîte dans les préparations et l’historique."
+            onChangeText={setLot}
+            placeholder="Tel qu’imprimé sur la boîte"
+            value={lot}
+          />
+          <ExpirationField
+            label="Péremption"
+            value={expiration}
+            onChange={setExpiration}
+          />
+          <AppField
+            label="Quantité initiale"
+            help="Nombre d’unités présentes dans la boîte."
+            keyboardType="number-pad"
+            onChangeText={setQuantity}
+            placeholder="Ex. 30"
+            value={quantity}
+          />
+          <AppButton
+            label="Ajouter cette boîte"
+            loading={saving}
+            disabled={
+              saving ||
+              lot.trim() === '' ||
+              expiration === '' ||
+              quantity.trim() === ''
+            }
+            onPress={() => void save()}
+          />
+        </>
+      )}
+      <AppButton
+        label="Revenir au choix"
+        variant="quiet"
+        onPress={onLeave}
+        disabled={saving}
+      />
+    </Screen>
+  );
+}
+
+function ScanBox({
+  personalDatabase,
+  onLeave,
+}: {
+  personalDatabase: SQLiteDatabase;
+  onLeave(): void;
+}) {
   const referenceDatabase = useSQLiteContext();
   const [permission, requestPermission] = useCameraPermissions();
   const [scan, setScan] = useState<BarcodeScanningResult | null>(null);
@@ -55,7 +314,6 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
     useState<IdentifiedMedicationPresentation | null>(null);
   const [identifying, setIdentifying] = useState(false);
   const [lot, setLot] = useState('');
-  const [serial, setSerial] = useState('');
   const [expiration, setExpiration] = useState('');
   const [quantity, setQuantity] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +328,6 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
       };
     const parsed = parseGs1DataMatrix(scan.data);
     setLot(parsed.fields.lot ?? '');
-    setSerial(parsed.fields.serialNumber ?? '');
     setExpiration(
       parsed.fields.expiration
         ? (parseGs1Expiration(parsed.fields.expiration) ?? '')
@@ -129,9 +386,9 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
         presentationCip13: medication.cip13,
         presentationLabel: medication.label,
         lot,
-        serialNumber: serial,
         expirationDate: expiration,
         initialQuantity,
+        origin: 'SCAN',
         scanRaw: scan.data,
       });
       router.replace('/inventory');
@@ -148,10 +405,15 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
     return <Centered text="Vérification de la caméra…" />;
   if (!permission.granted) {
     return (
-      <Centered text="La caméra est nécessaire pour ajouter une boîte.">
+      <Centered text="La caméra est nécessaire pour scanner une boîte.">
         <AppButton
           label="Autoriser la caméra"
           onPress={() => void requestPermission()}
+        />
+        <AppButton
+          label="Ajouter sans DataMatrix"
+          variant="secondary"
+          onPress={onLeave}
         />
       </Centered>
     );
@@ -159,9 +421,7 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen
-        options={{ headerShown: true, title: 'Ajouter une boîte' }}
-      />
+      <Stack.Screen options={{ headerShown: true, title: SCREEN_TITLE }} />
       {!scan ? (
         <CameraView
           style={styles.camera}
@@ -197,23 +457,16 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
               {error}
             </Message>
           ) : null}
-          <Field
+          <AppField
             label="Lot"
-            value={lot}
             onChangeText={setLot}
             placeholder="À saisir si absent du scan"
+            value={lot}
           />
-          <Field
-            label="Péremption (AAAA-MM-JJ)"
+          <ExpirationField
+            label="Péremption"
             value={expiration}
-            onChangeText={setExpiration}
-            placeholder="Ex. 2027-12-31"
-          />
-          <Field
-            label="Numéro de série"
-            value={serial}
-            onChangeText={setSerial}
-            placeholder="Optionnel"
+            onChange={setExpiration}
           />
           <Text style={styles.quantityNotice}>
             Quantité initiale requise : elle ne peut pas être obtenue de façon
@@ -248,22 +501,6 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
   );
 }
 
-function Field(props: {
-  label: string;
-  value: string;
-  onChangeText(value: string): void;
-  placeholder: string;
-}) {
-  return (
-    <AppField
-      label={props.label}
-      value={props.value}
-      onChangeText={props.onChangeText}
-      placeholder={props.placeholder}
-    />
-  );
-}
-
 function Centered({
   text,
   children,
@@ -273,9 +510,7 @@ function Centered({
 }) {
   return (
     <View style={styles.centered}>
-      <Stack.Screen
-        options={{ headerShown: true, title: 'Ajouter une boîte' }}
-      />
+      <Stack.Screen options={{ headerShown: true, title: SCREEN_TITLE }} />
       <Text style={typography.body}>{text}</Text>
       {children}
     </View>
@@ -315,7 +550,17 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   medication: typography.heading,
+  presentation: {
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    gap: spacing.xs,
+    justifyContent: 'center',
+    minHeight: 48,
+    padding: spacing.md,
+  },
   quantityNotice: { fontWeight: '700', marginBottom: 8 },
   raw: { color: '#4b5563', fontSize: 12, marginTop: 18 },
+  result: { marginBottom: spacing.sm },
   secondary: { marginTop: 12 },
 });

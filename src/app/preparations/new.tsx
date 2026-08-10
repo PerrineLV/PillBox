@@ -8,6 +8,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import {
+  isExpired,
   parseGs1Expiration,
   todayIso,
   type MedicationBox,
@@ -15,10 +16,12 @@ import {
 import { normalizeScannedGtinToCip13 } from '@/domain/medications/normalize-scanned-identifier';
 import {
   generatePreparationSnapshot,
+  listBoxesForMedication,
   matchScannedBox,
   preparationStartDate,
   verifyPreparationBox,
   type BoxVerification,
+  type BoxVerificationMethod,
   type PreparationSnapshot,
 } from '@/domain/preparations/preparation';
 import {
@@ -53,8 +56,10 @@ const SLOT_LABELS: Record<IntakeSlot, string> = {
   bedtime: 'coucher',
 };
 
-type PendingScan = Readonly<{
-  raw: string;
+type PendingBox = Readonly<{
+  method: BoxVerificationMethod;
+  /** Preuve brute du DataMatrix, absente lorsque la boîte est choisie dans le stock. */
+  raw: string | null;
   verification: Extract<BoxVerification, { status: 'VALID' }>;
 }>;
 
@@ -65,8 +70,9 @@ export default function NewPreparationScreen() {
   const [preparationId, setPreparationId] = useState<number | null>(null);
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
   const [completed, setCompleted] = useState<Set<string>>(new Set());
-  const [pending, setPending] = useState<PendingScan | null>(null);
+  const [pending, setPending] = useState<PendingBox | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [finalized, setFinalized] = useState(false);
@@ -138,8 +144,51 @@ export default function NewPreparationScreen() {
   function beginScan(): void {
     setError(null);
     setPending(null);
+    setChoosing(false);
     scanLocked.current = false;
     setScanning(true);
+  }
+
+  function beginChoice(): void {
+    setError(null);
+    setPending(null);
+    setChoosing(true);
+  }
+
+  /**
+   * Applique les mêmes contrôles de médicament, de lot et de péremption quelle
+   * que soit la manière dont la boîte a été désignée.
+   */
+  function verifyBox(
+    box: MedicationBox,
+    method: BoxVerificationMethod,
+    raw: string | null,
+  ): void {
+    if (current === null) return;
+    const verification = verifyPreparationBox(
+      current.specialtyCis,
+      current.requiredHalfUnits,
+      box,
+      boxes,
+      todayIso(),
+    );
+    if (verification.status === 'EXPIRED') {
+      rejectBox(
+        `Boîte périmée depuis le ${formatLongFrenchCivilDate(verification.box.expirationDate)} : utilisation bloquée.`,
+      );
+    } else if (verification.status === 'WRONG_MEDICATION') {
+      rejectBox(
+        `Produit différent détecté : ${verification.box.specialtyName}. Boîte refusée.`,
+      );
+    } else if (verification.status === 'INSUFFICIENT') {
+      rejectBox(
+        'Cette boîte ne contient pas assez de médicament pour ce traitement.',
+      );
+    } else {
+      setScanning(false);
+      setChoosing(false);
+      setPending({ method, raw, verification });
+    }
   }
 
   function handleScan(result: BarcodeScanningResult): void {
@@ -158,7 +207,7 @@ export default function NewPreparationScreen() {
       !expirationDate ||
       parsed.errors.length > 0
     ) {
-      rejectScan(
+      rejectBox(
         'Scan incomplet ou invalide : produit, lot et péremption sont requis.',
       );
       return;
@@ -167,46 +216,24 @@ export default function NewPreparationScreen() {
       {
         presentationCip13: cip13,
         lot: parsed.fields.lot,
-        serialNumber: parsed.fields.serialNumber ?? null,
         expirationDate,
       },
       boxes,
     );
     if (match.status !== 'MATCHED') {
-      rejectScan(
+      rejectBox(
         match.status === 'AMBIGUOUS'
           ? 'Plusieurs boîtes correspondent : impossible de savoir laquelle est utilisée.'
           : 'Cette boîte ne correspond exactement à aucune boîte du stock local.',
       );
       return;
     }
-    const verification = verifyPreparationBox(
-      current.specialtyCis,
-      current.requiredHalfUnits,
-      match.box,
-      boxes,
-      todayIso(),
-    );
-    if (verification.status === 'EXPIRED') {
-      rejectScan(
-        `Boîte périmée depuis le ${formatLongFrenchCivilDate(verification.box.expirationDate)} : utilisation bloquée.`,
-      );
-    } else if (verification.status === 'WRONG_MEDICATION') {
-      rejectScan(
-        `Produit différent détecté : ${verification.box.specialtyName}. Scan refusé.`,
-      );
-    } else if (verification.status === 'INSUFFICIENT') {
-      rejectScan(
-        'Cette boîte ne contient pas assez de médicament pour ce traitement.',
-      );
-    } else {
-      setScanning(false);
-      setPending({ raw: result.data, verification });
-    }
+    verifyBox(match.box, 'SCAN', result.data);
   }
 
-  function rejectScan(reason: string): void {
+  function rejectBox(reason: string): void {
     setScanning(false);
+    setChoosing(false);
     setError(reason);
   }
 
@@ -221,6 +248,7 @@ export default function NewPreparationScreen() {
       await savePreparationProgress(database, preparationId, {
         specialtyCis: current.specialtyCis,
         boxId: pending.verification.box.id,
+        verification: pending.method,
         scanRaw: pending.raw,
         nonFefoAcknowledged: acknowledgeNonFefo,
       });
@@ -300,8 +328,15 @@ export default function NewPreparationScreen() {
   return (
     <Screen
       stickyFooter={
-        current && !pending ? (
-          <AppButton label="Scanner la boîte utilisée" onPress={beginScan} />
+        current && !pending && !choosing ? (
+          <View style={styles.footerActions}>
+            <AppButton label="Scanner la boîte utilisée" onPress={beginScan} />
+            <AppButton
+              label="Choisir la boîte dans le stock"
+              variant="secondary"
+              onPress={beginChoice}
+            />
+          </View>
         ) : undefined
       }
     >
@@ -368,11 +403,22 @@ export default function NewPreparationScreen() {
           requiredHalfUnits={current.requiredHalfUnits}
         />
       ) : null}
+      {choosing && current && !pending ? (
+        <StockBoxChoice
+          boxes={listBoxesForMedication(
+            current.specialtyCis,
+            boxes,
+            todayIso(),
+          )}
+          onCancel={() => setChoosing(false)}
+          onSelect={(box) => verifyBox(box, 'MANUAL', null)}
+        />
+      ) : null}
       {pending && current ? (
-        <ScanConfirmation
+        <BoxConfirmation
           pending={pending}
           saving={saving}
-          onRescan={beginScan}
+          onRestart={pending.method === 'SCAN' ? beginScan : beginChoice}
           onValidate={validateMedication}
         />
       ) : null}
@@ -482,30 +528,93 @@ function MedicationStep({
   );
 }
 
-function ScanConfirmation({
+/**
+ * Boîtes déjà enregistrées pour ce médicament. Les boîtes inutilisables restent
+ * visibles mais explicitement signalées : rien n'est masqué silencieusement.
+ */
+function StockBoxChoice({
+  boxes,
+  onCancel,
+  onSelect,
+}: {
+  boxes: readonly MedicationBox[];
+  onCancel(): void;
+  onSelect(box: MedicationBox): void;
+}) {
+  const today = todayIso();
+  return (
+    <Card style={styles.card}>
+      <Text style={styles.casesTitle}>Boîtes enregistrées dans le stock</Text>
+      <Text style={typography.caption}>
+        Aucune lecture de DataMatrix ne sera enregistrée : les contrôles de
+        médicament, de lot et de péremption restent appliqués.
+      </Text>
+      {boxes.length === 0 ? (
+        <Text style={styles.case}>
+          Aucune boîte de ce médicament n’est enregistrée dans le stock.
+        </Text>
+      ) : null}
+      {boxes.map((box) => {
+        const expired = isExpired(box.expirationDate, today);
+        return (
+          <Pressable
+            accessibilityRole="button"
+            key={box.id}
+            onPress={() => onSelect(box)}
+            style={styles.stockOption}
+          >
+            <Text style={styles.stockOptionTitle}>
+              Boîte #{box.id} · lot {box.lot ?? 'non renseigné'}
+            </Text>
+            <Text>
+              Péremption {formatLongFrenchCivilDate(box.expirationDate)} · reste{' '}
+              {box.remainingQuantity}
+            </Text>
+            {expired ? <Badge label="Périmée" tone="danger" /> : null}
+            {box.origin === 'MANUAL' ? (
+              <Badge label="Ajoutée sans DataMatrix" />
+            ) : null}
+          </Pressable>
+        );
+      })}
+      <AppButton label="Annuler" variant="quiet" onPress={onCancel} />
+    </Card>
+  );
+}
+
+function BoxConfirmation({
   pending,
   saving,
-  onRescan,
+  onRestart,
   onValidate,
 }: {
-  pending: PendingScan;
+  pending: PendingBox;
   saving: boolean;
-  onRescan(): void;
+  onRestart(): void;
   onValidate(acknowledgeNonFefo: boolean): Promise<void>;
 }) {
   const { box, isFefo, recommendedBox } = pending.verification;
+  const scanned = pending.method === 'SCAN';
   return (
     <View style={isFefo ? styles.verified : styles.warning}>
       <Text style={styles.warningTitle}>
         {isFefo ? 'Boîte vérifiée' : 'Boîte valide, mais non FEFO'}
       </Text>
+      <Badge
+        label={
+          scanned
+            ? 'Vérifiée par scan DataMatrix'
+            : 'Choisie dans le stock, sans scan'
+        }
+        tone={scanned ? 'success' : 'warning'}
+      />
       <Text>
-        Lot {box.lot} · péremption{' '}
+        Lot {box.lot ?? 'non renseigné'} · péremption{' '}
         {formatLongFrenchCivilDate(box.expirationDate)}
       </Text>
       {!isFefo ? (
         <Text>
-          Lot recommandé : {recommendedBox.lot} · péremption{' '}
+          Lot recommandé : {recommendedBox.lot ?? 'non renseigné'} · péremption{' '}
           {formatLongFrenchCivilDate(recommendedBox.expirationDate)}. Vous
           pouvez continuer en confirmant cet avertissement.
         </Text>
@@ -518,9 +627,9 @@ function ScanConfirmation({
         onPress={() => void onValidate(!isFefo)}
       />
       <AppButton
-        label="Scanner une autre boîte"
+        label={scanned ? 'Scanner une autre boîte' : 'Choisir une autre boîte'}
         variant="secondary"
-        onPress={onRescan}
+        onPress={onRestart}
       />
     </View>
   );
@@ -565,8 +674,18 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   finalCheck: { gap: 12, marginVertical: 12 },
+  footerActions: { gap: 10 },
   day: { borderTopColor: colors.border, borderTopWidth: 1, paddingTop: 8 },
   dayTitle: { fontSize: 16, fontWeight: '800' },
+  stockOption: {
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    gap: 4,
+    marginTop: 10,
+    padding: 12,
+  },
+  stockOptionTitle: { fontWeight: '700' },
   guide: {
     borderColor: '#fff',
     borderWidth: 2,

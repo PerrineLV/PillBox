@@ -6,7 +6,7 @@ L’objectif est de réduire les erreurs pendant le remplissage en combinant :
 
 * un référentiel réel de médicaments français ;
 * la gestion des traitements et posologies ;
-* le scan du DataMatrix des boîtes ;
+* le scan du DataMatrix des boîtes, ou leur ajout manuel lorsqu’il est absent ou illisible ;
 * la vérification du lot et de la date de péremption ;
 * le suivi des stocks ;
 * un assistant de préparation du pilulier ;
@@ -29,7 +29,7 @@ provenant du navigateur ou de GitHub.
 
 * Recherche de médicaments à partir de la Base de données publique des médicaments
 * Gestion des traitements et posologies
-* Scan DataMatrix des boîtes de médicaments
+* Scan DataMatrix des boîtes de médicaments, ou ajout manuel depuis le référentiel
 * Identification du produit, du lot et de la péremption
 * Suivi du stock par boîte et par lot
 * Calcul automatique du contenu d’un pilulier sur 7 jours

@@ -95,6 +95,12 @@ export default function BoxDetailScreen() {
       <Text>{box.presentationLabel}</Text>
       <Text>Lot : {box.lot ?? 'non renseigné'}</Text>
       <Text>Péremption : {formatLongFrenchCivilDate(box.expirationDate)}</Text>
+      <Text>
+        Origine :{' '}
+        {box.origin === 'SCAN'
+          ? 'scan DataMatrix'
+          : 'saisie manuelle, sans scan'}
+      </Text>
       <Text>Quantité initiale : {box.initialQuantity}</Text>
       <Text style={styles.remaining}>
         Quantité restante : {box.remainingQuantity}

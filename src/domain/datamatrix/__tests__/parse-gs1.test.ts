@@ -13,11 +13,18 @@ describe('parseGs1DataMatrix', () => {
         expiration: '271231',
         gtin: '03401234567890',
         lot: 'LOT-42',
-        serialNumber: 'SERIAL-9',
       },
       errors: [],
       isGs1: true,
     });
+  });
+
+  it('ignore le numéro de série sans le signaler comme une erreur', () => {
+    const result = parseGs1DataMatrix(`21SERIAL-9${GS}21AUTRE-SERIE`);
+
+    expect(result.fields).toEqual({});
+    expect(result.errors).toEqual([]);
+    expect(result.isGs1).toBe(true);
   });
 
   it('accepte les champs absents', () => {
@@ -33,7 +40,6 @@ describe('parseGs1DataMatrix', () => {
 
     expect(result.fields).toEqual({
       lot: 'LOT',
-      serialNumber: 'SERIAL',
       expiration: '271231',
     });
     expect(result.errors).toEqual([]);

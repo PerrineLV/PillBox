@@ -7,6 +7,14 @@ export const STOCK_MOVEMENT_TYPES = [
 
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
 
+/**
+ * Origine de la boîte : lue sur un DataMatrix ou saisie à la main. PillBox ne
+ * doit jamais présenter une saisie manuelle comme une vérification par scan.
+ */
+export const MEDICATION_BOX_ORIGINS = ['SCAN', 'MANUAL'] as const;
+
+export type MedicationBoxOrigin = (typeof MEDICATION_BOX_ORIGINS)[number];
+
 export type MedicationBox = {
   id: number;
   specialtyCis: string;
@@ -15,11 +23,12 @@ export type MedicationBox = {
   presentationCip13: string;
   presentationLabel: string;
   lot: string | null;
-  serialNumber: string | null;
   expirationDate: string;
   initialQuantity: number;
   remainingQuantity: number;
-  scanRaw: string;
+  origin: MedicationBoxOrigin;
+  /** Chaîne brute du DataMatrix, absente pour une boîte ajoutée manuellement. */
+  scanRaw: string | null;
 };
 
 export type MedicationBoxDraft = Omit<
@@ -76,8 +85,23 @@ export function assertValidBoxDraft(draft: MedicationBoxDraft): void {
   if (!Number.isInteger(draft.initialQuantity) || draft.initialQuantity <= 0) {
     throw new Error('La quantité initiale doit être un nombre entier positif.');
   }
-  if (draft.scanRaw.length === 0) {
-    throw new Error('Le scan DataMatrix brut est requis.');
+  if (draft.origin === 'SCAN') {
+    if (draft.scanRaw === null || draft.scanRaw.length === 0) {
+      throw new Error('Le scan DataMatrix brut est requis.');
+    }
+    return;
+  }
+  if (draft.scanRaw !== null) {
+    throw new Error(
+      'Une boîte saisie manuellement ne peut pas revendiquer un scan DataMatrix.',
+    );
+  }
+  // Sans DataMatrix, le lot est la seule façon de relier plus tard cette boîte
+  // aux préparations : il est donc exigé plutôt que déduit.
+  if ((draft.lot ?? '').trim() === '') {
+    throw new Error(
+      'Le lot est requis pour une boîte ajoutée sans DataMatrix.',
+    );
   }
 }
 
