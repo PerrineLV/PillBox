@@ -12,7 +12,12 @@ import {
   typography,
 } from '@/ui';
 
-type MenuRoute = '/preparations/history' | '/intakes/history' | '/settings';
+type MenuRoute =
+  | '/preparations/history'
+  | '/intakes/history'
+  | '/settings'
+  // TEMPORAIRE (debug) : à retirer avec l'item « Debug mise à jour » ci-dessous.
+  | '/developer/update-check-state';
 type IconName = 'calendar' | 'check' | 'settings';
 
 const ITEMS: readonly {
@@ -38,6 +43,16 @@ const ITEMS: readonly {
     icon: 'settings',
     title: 'Réglages',
     detail: 'Rappels, confidentialité et sauvegardes',
+  },
+  // TEMPORAIRE (debug jetable) : accès à l'écran de diagnostic de la détection
+  // de mise à jour. À SUPPRIMER avant la prochaine release réelle, en même
+  // temps que src/app/developer/update-check-state.tsx et l'entrée
+  // correspondante de MenuRoute. Ne doit pas atteindre `main`.
+  {
+    href: '/developer/update-check-state',
+    icon: 'settings',
+    title: 'Debug mise à jour',
+    detail: 'Temporaire : file SQLite et cache update_check_settings',
   },
 ];
 
