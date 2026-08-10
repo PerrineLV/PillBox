@@ -24,14 +24,30 @@ import {
   replaceScheduledReminderManifest,
 } from './intake-reminder-repository';
 
+/**
+ * Recalcule l’intégralité des rappels de prise.
+ *
+ * L’ordre des vérifications est une règle de sûreté : rien n’est supprimé avant
+ * de savoir que la suppression est voulue. Seule une désactivation explicite
+ * efface la programmation. Une permission Android retirée laisse les alarmes en
+ * place : elles ne peuvent pas être affichées tant que la permission manque,
+ * mais elles redeviennent utiles dès qu’elle est rendue, alors qu’une
+ * suppression silencieuse serait irrécupérable sans action de l’utilisatrice.
+ */
 export async function synchronizeIntakeReminders(
   database: SQLiteDatabase,
   now = new Date(),
 ): Promise<number> {
+  if (!(await isIntakeRemindersEnabled(database))) {
+    await cancelIntakeReminders();
+    await replaceScheduledReminderManifest(database, []);
+    return 0;
+  }
+  if ((await getLocalNotificationPermission()) !== 'granted') {
+    return (await listScheduledReminderManifest(database)).length;
+  }
   await cancelIntakeReminders();
   await replaceScheduledReminderManifest(database, []);
-  if (!(await isIntakeRemindersEnabled(database))) return 0;
-  if ((await getLocalNotificationPermission()) !== 'granted') return 0;
   const until = new Date(now);
   until.setDate(until.getDate() + INTAKE_REMINDER_HORIZON_DAYS);
   const treatments = await listTreatments(database);
@@ -81,18 +97,11 @@ export async function synchronizeTreatmentIntakeReminders(
     await replaceScheduledReminderManifest(database, []);
     return 0;
   }
+  // Même règle que la synchronisation complète : une permission manquante ne
+  // justifie pas de détruire une programmation encore récupérable. Le prochain
+  // passage au premier plan avec la permission rendue recalculera tout.
   if ((await getLocalNotificationPermission()) !== 'granted') {
-    const affected = existing.filter((item) =>
-      item.treatmentIds.includes(treatmentId),
-    );
-    await cancelScheduledNotifications(
-      affected.map((item) => item.notificationId),
-    );
-    await replaceScheduledReminderManifest(
-      database,
-      existing.filter((item) => !affected.includes(item)),
-    );
-    return 0;
+    return existing.length;
   }
   const until = new Date(now);
   until.setDate(until.getDate() + INTAKE_REMINDER_HORIZON_DAYS);

@@ -32,7 +32,8 @@ Configurer les heures communes **Matin**, **Midi**, **Soir** et **Coucher**, pui
 1. Réinitialiser la permission depuis **Informations sur l'application > Notifications**, ou réinstaller l'application.
 2. Activer le rappel puis refuser la permission : l'interrupteur doit rester désactivé, aucune programmation ne doit être créée et un lien doit proposer les réglages Android.
 3. Autoriser ensuite les notifications dans Android, revenir dans PillBox et activer le rappel.
-4. Retirer à nouveau la permission dans Android puis rouvrir l'écran Réglages : PillBox doit désactiver et supprimer sa programmation locale.
+4. Retirer à nouveau la permission dans Android puis rouvrir l'écran Réglages : PillBox doit désactiver et supprimer sa programmation locale, en l'annonçant.
+5. Retirer la permission, revenir dans PillBox **sans ouvrir les réglages**, puis la rendre : les rappels doivent reprendre sans avoir à réactiver l'interrupteur. Une permission manquante ne supprime jamais silencieusement la programmation ; seule une désactivation explicite le fait.
 
 ### Désactivation
 

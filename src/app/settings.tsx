@@ -165,7 +165,10 @@ export default function SettingsScreen() {
           setAppLockEnabledState(lockEnabled);
           setSlotTimes(globalTimes);
           if (intakeEnabled && permission !== 'granted') {
+            // La désactivation est ici explicite et annoncée : c’est le seul
+            // moment où la programmation locale est supprimée sans permission.
             await setIntakeRemindersEnabled(database, false);
+            await synchronizeIntakeReminders(database);
             setIntakeRemindersEnabledState(false);
             if (active)
               setMessage(
