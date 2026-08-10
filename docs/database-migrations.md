@@ -11,6 +11,29 @@ contenu. Une erreur provoque le rollback de toutes les étapes tentées pendant 
 démarrage : la base reste exactement dans sa version antérieure. L’application ne
 supprime et ne recrée jamais automatiquement la base.
 
+## Accès concurrents au démarrage
+
+Avant les migrations, `initializeSQLiteDatabase`
+(`src/infrastructure/database/sqlite-connection.ts`) active le mode WAL et un
+`busy_timeout`. WAL est persistant dans le fichier : les connexions ouvertes ensuite
+par `withExclusiveTransactionAsync`, qui en crée une par transaction, en héritent. Une
+lecture n’est donc jamais bloquée par une écriture en cours.
+
+Deux écritures transactionnelles simultanées restent en revanche incompatibles. Les
+accès lancés automatiquement au démarrage et au retour au premier plan passent pour
+cette raison par une file d’exécution sérielle
+(`src/infrastructure/database/serial-task-queue.ts`), partagée via
+`useDatabaseTaskQueue()` : synchronisation des rappels, réconciliation des reports,
+action rapide d’une notification et cache de détection de version s’exécutent l’un
+après l’autre. Une action rapide de notification passe devant celles qui attendent.
+
+Restent hors de la file, volontairement :
+
+- la lecture du réglage de verrou, qui conditionne l’affichage et ne doit pas attendre
+  la fin d’une synchronisation ;
+- l’appel réseau de la détection de version, qui ne touche pas la base ;
+- les écritures déclenchées par une action explicite à l’écran.
+
 ## Ajouter une migration
 
 1. Ne jamais modifier une migration déjà livrée.

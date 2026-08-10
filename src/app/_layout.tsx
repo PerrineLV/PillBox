@@ -10,7 +10,10 @@ import { AppState, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { DatabaseProvider } from '@/infrastructure/database/database-provider';
+import {
+  DatabaseProvider,
+  useDatabaseTaskQueue,
+} from '@/infrastructure/database/database-provider';
 import { AppLockGate } from '@/components/privacy/app-lock-gate';
 import { BottomNavigation, colors, typography } from '@/ui';
 import {
@@ -79,21 +82,26 @@ const styles = {
 
 function ReminderCoordinator() {
   const database = useSQLiteContext();
+  const queue = useDatabaseTaskQueue();
   useEffect(() => {
+    const ignore = () => {
+      /* L’UI de réglage signalera une erreur ; aucune donnée médicale n’est journalisée. */
+    };
     const synchronize = () => {
-      void Promise.all([
-        synchronizeIntakeReminders(database),
-        reconcileIntakePostponements(database),
-      ]).catch(() => {
-        /* L’UI de réglage signalera une erreur ; aucune donnée médicale n’est journalisée. */
-      });
+      // Les deux opérations écrivent dans la même base : la file les exécute
+      // l’une après l’autre au lieu de les laisser se chevaucher. Elles restent
+      // indépendantes, l’échec de l’une ne devant pas empêcher l’autre.
+      void queue.run(() => synchronizeIntakeReminders(database)).catch(ignore);
+      void queue
+        .run(() => reconcileIntakePostponements(database))
+        .catch(ignore);
     };
     synchronize();
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') synchronize();
     });
     return () => subscription.remove();
-  }, [database]);
+  }, [database, queue]);
   return null;
 }
 
@@ -111,13 +119,22 @@ function ReminderCoordinator() {
  */
 function IntakeActionCoordinator() {
   const database = useSQLiteContext();
+  const queue = useDatabaseTaskQueue();
   useEffect(() => {
     let released = false;
 
     function handle(response: Notifications.NotificationResponse): void {
       const command = notificationCommandOf(response);
       if (command === null) return;
-      markPendingIntakesTakenForGroups(database, command.groups)
+      // L’écriture passe par la file, comme la synchronisation des rappels, mais
+      // devant celles qui attendent : l’action vient de l’utilisatrice et doit
+      // aboutir même si l’application n’est pas passée au premier plan. Traitée
+      // avant la synchronisation, elle lui fournit en prime des compteurs de
+      // prises en attente déjà à jour.
+      queue
+        .run(() => markPendingIntakesTakenForGroups(database, command.groups), {
+          first: true,
+        })
         .then(() => {
           // La réponse traitée ne doit pas être rejouée au prochain démarrage.
           if (!released) Notifications.clearLastNotificationResponse();
@@ -139,7 +156,7 @@ function IntakeActionCoordinator() {
       released = true;
       responses.remove();
     };
-  }, [database]);
+  }, [database, queue]);
   return null;
 }
 

@@ -7,6 +7,7 @@
  */
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import type { TaskRunner } from '@/infrastructure/database/serial-task-queue';
 import type { PublishedRelease } from '@/domain/updates/github-release';
 import {
   decideUpdateNotice,
@@ -63,16 +64,25 @@ export async function resolveUpdateNotice({
 /**
  * Point d'entrée applicatif : ne lève jamais, afin qu'aucun incident de mise à
  * jour n'empêche l'ouverture ou l'usage de PillBox.
+ *
+ * `runDatabaseTask` permet à l'appelant de sérialiser les seuls accès SQLite
+ * avec les autres opérations de démarrage. L'appel réseau reste en dehors : il
+ * peut durer plusieurs secondes et ne doit retarder aucune autre opération.
  */
 export async function checkForUpdate(
   database: SQLiteDatabase,
-  now: Date = new Date(),
+  {
+    now = new Date(),
+    runDatabaseTask = <T>(task: () => Promise<T>) => task(),
+  }: { now?: Date; runDatabaseTask?: TaskRunner } = {},
 ): Promise<UpdateNotice | null> {
   try {
     return await resolveUpdateNotice({
-      readState: () => readUpdateCheckState(database),
+      readState: () => runDatabaseTask(() => readUpdateCheckState(database)),
       saveResult: (checkedAt, release) =>
-        saveUpdateCheckResult(database, checkedAt, release),
+        runDatabaseTask(() =>
+          saveUpdateCheckResult(database, checkedAt, release),
+        ),
       fetchRelease: () => fetchLatestPublishedRelease(),
       installedVersion: installedAppVersion(),
       now,

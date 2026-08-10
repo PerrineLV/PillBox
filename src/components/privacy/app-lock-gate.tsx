@@ -77,6 +77,10 @@ export function AppLockGate({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // La lecture du réglage reste directe, hors de la file d’exécution sérielle
+  // des accès automatiques : elle conditionne l’affichage et attendre la fin
+  // d’une synchronisation de rappels retarderait d’autant le déverrouillage. En
+  // mode WAL, une lecture n’est jamais bloquée par une écriture en cours.
   useEffect(() => {
     let active = true;
     void isAppLockEnabled(database)

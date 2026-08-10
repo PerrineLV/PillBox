@@ -1,8 +1,19 @@
 import { SQLiteProvider } from 'expo-sqlite';
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import {
+  Component,
+  createContext,
+  useContext,
+  useRef,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { migrateSQLiteDatabase } from './sqlite-migrations';
+import {
+  createSerialTaskQueue,
+  type SerialTaskQueue,
+} from './serial-task-queue';
+import { initializeSQLiteDatabase } from './sqlite-connection';
 
 const DATABASE_NAME = 'pillbox.db';
 
@@ -14,15 +25,34 @@ interface DatabaseErrorBoundaryState {
   error: Error | null;
 }
 
+const DatabaseTaskQueueContext = createContext<SerialTaskQueue | null>(null);
+
+/**
+ * File partagée par les accès SQLite lancés automatiquement (synchronisation
+ * des rappels, réconciliation des reports, actions de notification en attente,
+ * vérification de mise à jour). Une seule de ces opérations s’exécute à la
+ * fois, quel que soit l’ordre de montage des composants.
+ */
+export function useDatabaseTaskQueue(): SerialTaskQueue {
+  const queue = useContext(DatabaseTaskQueueContext);
+  if (queue === null)
+    throw new Error('useDatabaseTaskQueue exige un DatabaseProvider parent.');
+  return queue;
+}
+
 export function DatabaseProvider({ children }: DatabaseProviderProps) {
+  const queue = useRef<SerialTaskQueue | null>(null);
+  queue.current ??= createSerialTaskQueue();
   return (
     <DatabaseErrorBoundary>
-      <SQLiteProvider
-        databaseName={DATABASE_NAME}
-        onInit={migrateSQLiteDatabase}
-      >
-        {children}
-      </SQLiteProvider>
+      <DatabaseTaskQueueContext.Provider value={queue.current}>
+        <SQLiteProvider
+          databaseName={DATABASE_NAME}
+          onInit={initializeSQLiteDatabase}
+        >
+          {children}
+        </SQLiteProvider>
+      </DatabaseTaskQueueContext.Provider>
     </DatabaseErrorBoundary>
   );
 }
