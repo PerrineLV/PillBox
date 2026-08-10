@@ -53,26 +53,40 @@ updates:
           - version-update:semver-minor
           - version-update:semver-major
 
-      # Ces montées majeures exigent une migration dédiée et des essais Android,
-      # particulièrement pour les dépendances natives et la chaîne Expo/Jest.
+      # React, React Native et les dépendances natives restent sur les lignes
+      # validées avec Expo SDK 54. Leurs montées mineures ou majeures exigent un
+      # ticket de migration dédié et des essais sur le téléphone Android cible.
       - dependency-name: react
         update-types:
+          - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: react-dom
         update-types:
+          - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: react-native
         update-types:
+          - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: react-native-safe-area-context
         update-types:
+          - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: react-native-screens
         update-types:
+          - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: '@react-native-community/datetimepicker'
         update-types:
+          - version-update:semver-minor
           - version-update:semver-major
+      - dependency-name: better-sqlite3
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+
+      # Les montées majeures de la chaîne de développement sont traitées dans un
+      # ticket technique séparé plutôt que dans une mise à jour groupée.
       - dependency-name: typescript
         update-types:
           - version-update:semver-major
@@ -86,9 +100,6 @@ updates:
         update-types:
           - version-update:semver-major
       - dependency-name: eslint-config-expo
-        update-types:
-          - version-update:semver-major
-      - dependency-name: better-sqlite3
         update-types:
           - version-update:semver-major
 
