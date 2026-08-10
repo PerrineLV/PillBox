@@ -2,34 +2,99 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /
+    # Les mises à jour de version sont d'abord validées sur dev. GitHub continue
+    # de cibler la branche par défaut pour les correctifs de sécurité.
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
       time: '06:00'
       timezone: Europe/Paris
-    open-pull-requests-limit: 3
+    # Garder une seule mise à jour de version npm en revue à la fois.
+    open-pull-requests-limit: 1
     groups:
-      expo-runtime:
+      expo-sdk-54-patches:
+        # Une migration de SDK Expo est un ticket technique volontaire, réalisé
+        # avec les versions recommandées par Expo et testé sur le téléphone cible.
         patterns:
-          - 'expo*'
+          - 'expo'
+          - 'expo-*'
           - '@expo/*'
+        update-types:
+          - patch
       production-runtime:
         dependency-type: production
         patterns:
           - '*'
+        exclude-patterns:
+          - 'expo'
+          - 'expo-*'
+          - '@expo/*'
       development-tools:
         dependency-type: development
         patterns:
           - '*'
+        exclude-patterns:
+          - 'expo'
+          - 'expo-*'
+          - '@expo/*'
     ignore:
-      # Expo SDK 54 utilise encore la chaîne ESLint 9. Une mise à jour majeure
-      # isolée vers ESLint 10 fait échouer `expo lint` avant l'analyse du code.
+      # Expo 55+ n'est pas compatible avec le téléphone cible. Les modules Expo
+      # restent sur les correctifs de leurs lignes compatibles avec le SDK 54.
+      - dependency-name: expo
+        versions:
+          - '>=55.0.0'
+      - dependency-name: 'expo-*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: '@expo/*'
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+
+      # Ces montées majeures exigent une migration dédiée et des essais Android,
+      # particulièrement pour les dépendances natives et la chaîne Expo/Jest.
+      - dependency-name: react
+        update-types:
+          - version-update:semver-major
+      - dependency-name: react-dom
+        update-types:
+          - version-update:semver-major
+      - dependency-name: react-native
+        update-types:
+          - version-update:semver-major
+      - dependency-name: react-native-safe-area-context
+        update-types:
+          - version-update:semver-major
+      - dependency-name: react-native-screens
+        update-types:
+          - version-update:semver-major
+      - dependency-name: '@react-native-community/datetimepicker'
+        update-types:
+          - version-update:semver-major
+      - dependency-name: typescript
+        update-types:
+          - version-update:semver-major
+      - dependency-name: jest
+        update-types:
+          - version-update:semver-major
+      - dependency-name: jest-expo
+        update-types:
+          - version-update:semver-major
       - dependency-name: eslint
+        update-types:
+          - version-update:semver-major
+      - dependency-name: eslint-config-expo
+        update-types:
+          - version-update:semver-major
+      - dependency-name: better-sqlite3
         update-types:
           - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: monthly
       time: '06:00'
