@@ -57,6 +57,14 @@ export function civilDateToPickerDate(value: string): Date | null {
   return date;
 }
 
+/** Lendemain d’une date civile, ou `null` si la date est inexploitable. */
+export function nextCivilDay(value: string): string | null {
+  const date = civilDateToPickerDate(value);
+  if (date === null) return null;
+  date.setDate(date.getDate() + 1);
+  return pickerDateToCivilDate(date);
+}
+
 /** Convertit le choix local du calendrier vers le format civil SQLite. */
 export function pickerDateToCivilDate(date: Date): string {
   const year = String(date.getFullYear()).padStart(4, '0');

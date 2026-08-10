@@ -56,6 +56,8 @@ const TABLES = [
   },
   {
     name: 'medication_boxes',
+    // serial_number n'a plus d'usage fonctionnel mais reste sauvegardé tant que
+    // la colonne existe, afin qu'aucune donnée déjà enregistrée ne soit perdue.
     columns: [
       'id',
       'specialty_cis',
@@ -68,6 +70,7 @@ const TABLES = [
       'expiration_date',
       'initial_quantity',
       'remaining_quantity',
+      'source',
       'scan_raw',
       'created_at',
       'updated_at',
@@ -115,6 +118,7 @@ const TABLES = [
       'preparation_id',
       'specialty_cis',
       'box_id',
+      'verification',
       'scan_raw',
       'non_fefo_acknowledged',
       'completed_at',
@@ -146,6 +150,7 @@ const TABLES = [
       'serial_number',
       'expiration_date',
       'quantity_half_units',
+      'verification',
     ],
   },
   {
@@ -244,39 +249,39 @@ const LEGACY_INTAKE_SLOT_SETTINGS = {
   ],
 } as const satisfies TableDefinition;
 
-const SCHEMA_10_TABLES = TABLES.filter(
-  (table) =>
-    table.name !== 'privacy_settings' &&
-    table.name !== 'treatment_reminder_settings' &&
-    table.name !== 'intake_reminder_slot_settings' &&
-    table.name !== 'intake_records' &&
-    table.name !== 'intake_postponements',
+/** Colonnes ajoutées par le schéma 16, absentes des sauvegardes antérieures. */
+const COLUMNS_ADDED_IN_16: Readonly<Record<string, string>> = {
+  medication_boxes: 'source',
+  preparation_progress: 'verification',
+  preparation_box_usages: 'verification',
+};
+
+const SCHEMA_15_TABLES: readonly TableDefinition[] = TABLES.map((table) => {
+  const removed = COLUMNS_ADDED_IN_16[table.name];
+  return removed === undefined
+    ? table
+    : {
+        name: table.name,
+        columns: table.columns.filter((column) => column !== removed),
+      };
+});
+const SCHEMA_14_TABLES = SCHEMA_15_TABLES.map((table) =>
+  table.name === 'intake_reminder_slot_settings'
+    ? LEGACY_INTAKE_SLOT_SETTINGS
+    : table,
 );
-const SCHEMA_11_TABLES = TABLES.filter(
-  (table) =>
-    table.name !== 'treatment_reminder_settings' &&
-    table.name !== 'intake_reminder_slot_settings' &&
-    table.name !== 'intake_records' &&
-    table.name !== 'intake_postponements',
-);
-const SCHEMA_12_TABLES = TABLES.filter(
-  (table) =>
-    table.name !== 'intake_reminder_slot_settings' &&
-    table.name !== 'intake_records' &&
-    table.name !== 'intake_postponements',
-);
-const SCHEMA_13_TABLES = TABLES.filter(
+const SCHEMA_13_TABLES = SCHEMA_14_TABLES.filter(
   (table) =>
     table.name !== 'intake_records' && table.name !== 'intake_postponements',
-).map((table) =>
-  table.name === 'intake_reminder_slot_settings'
-    ? LEGACY_INTAKE_SLOT_SETTINGS
-    : table,
 );
-const SCHEMA_14_TABLES = TABLES.map((table) =>
-  table.name === 'intake_reminder_slot_settings'
-    ? LEGACY_INTAKE_SLOT_SETTINGS
-    : table,
+const SCHEMA_12_TABLES = SCHEMA_13_TABLES.filter(
+  (table) => table.name !== 'intake_reminder_slot_settings',
+);
+const SCHEMA_11_TABLES = SCHEMA_12_TABLES.filter(
+  (table) => table.name !== 'treatment_reminder_settings',
+);
+const SCHEMA_10_TABLES = SCHEMA_11_TABLES.filter(
+  (table) => table.name !== 'privacy_settings',
 );
 const SCHEMA_9_TABLES = SCHEMA_10_TABLES.filter(
   (table) => table.name !== 'backup_settings',
@@ -289,6 +294,7 @@ function tableDefinitions(schemaVersion: number): readonly TableDefinition[] {
   if (schemaVersion === 12) return SCHEMA_12_TABLES;
   if (schemaVersion === 13) return SCHEMA_13_TABLES;
   if (schemaVersion === 14) return SCHEMA_14_TABLES;
+  if (schemaVersion === 15) return SCHEMA_15_TABLES;
   return TABLES;
 }
 

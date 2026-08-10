@@ -20,6 +20,67 @@ export type IntakeRecord = Readonly<{
 
 export type IntakeGroupKey = Readonly<{ date: string; slot: IntakeSlot }>;
 
+/**
+ * Une prise « en attente » est une prise non renseignée. Une prise déjà
+ * marquée comme prise ou comme ignorée traduit une décision explicite : la
+ * validation groupée ne la réécrit jamais.
+ */
+export const PENDING_INTAKE_STATUS: IntakeStatus = 'UNSET';
+
+/**
+ * En dessous de deux prises en attente, la validation individuelle suffit et
+ * l'action globale n'apporte rien.
+ */
+export const GROUP_VALIDATION_MINIMUM_PENDING = 2;
+
+export function pendingIntakesOfGroup(
+  records: readonly IntakeRecord[],
+  group: IntakeGroupKey,
+): IntakeRecord[] {
+  return records.filter(
+    (record) =>
+      record.date === group.date &&
+      record.slot === group.slot &&
+      record.status === PENDING_INTAKE_STATUS,
+  );
+}
+
+/** Nombre de prises en attente d'un créneau, tel que compté par la base locale. */
+export type PendingIntakeCount = Readonly<{
+  date: string;
+  slot: IntakeSlot;
+  pending: number;
+}>;
+
+/**
+ * Total des prises en attente sur les créneaux couverts par un même rappel.
+ * Un rappel peut regrouper plusieurs créneaux programmés à la même heure.
+ */
+export function pendingIntakeCountForGroups(
+  counts: readonly PendingIntakeCount[],
+  groups: readonly IntakeGroupKey[],
+): number {
+  return counts.reduce(
+    (total, count) =>
+      groups.some(
+        (group) => group.date === count.date && group.slot === count.slot,
+      )
+        ? total + count.pending
+        : total,
+    0,
+  );
+}
+
+export function canValidateWholeGroup(
+  records: readonly IntakeRecord[],
+  group: IntakeGroupKey,
+): boolean {
+  return (
+    pendingIntakesOfGroup(records, group).length >=
+    GROUP_VALIDATION_MINIMUM_PENDING
+  );
+}
+
 export function intakeRecordKey(
   treatmentId: number,
   date: string,

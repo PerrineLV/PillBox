@@ -6,9 +6,11 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
-import type {
-  IntakeRecord,
-  IntakeStatus,
+import {
+  canValidateWholeGroup,
+  pendingIntakesOfGroup,
+  type IntakeRecord,
+  type IntakeStatus,
 } from '@/domain/intakes/intake-tracking';
 import {
   formatFrenchDateTime,
@@ -22,7 +24,7 @@ import {
 import {
   getIntakePostponement,
   listIntakeRecordsForGroups,
-  updateIntakeGroupStatus,
+  markPendingIntakesTaken,
   updateIntakeStatus,
   type IntakePostponement,
 } from '@/infrastructure/intakes/intake-repository';
@@ -89,6 +91,9 @@ export default function PlannedIntakeScreen() {
     () => resolveGroups({ groups: groupsParameter, date, slot }),
     [date, groupsParameter, slot],
   );
+  const pendingCount = confirmGroup
+    ? pendingIntakesOfGroup(records ?? [], confirmGroup).length
+    : 0;
 
   const load = useCallback(async () => {
     if (groups.length === 0) {
@@ -147,20 +152,21 @@ export default function PlannedIntakeScreen() {
     }
   }
 
-  async function markWholeGroupTaken(): Promise<void> {
+  async function validatePendingIntakes(): Promise<void> {
     if (!confirmGroup) return;
     const key = groupKey(confirmGroup);
     setBusyKey(key);
     setError(null);
     try {
-      await updateIntakeGroupStatus(
+      const validated = await markPendingIntakesTaken(
         database,
         confirmGroup.date,
         confirmGroup.slot,
-        'TAKEN',
       );
       setConfirmGroup(null);
       await load();
+      if (validated === 0)
+        setError('Aucun médicament n’était encore en attente pour ce créneau.');
     } catch (reason: unknown) {
       setError(
         reason instanceof Error
@@ -264,17 +270,10 @@ export default function PlannedIntakeScreen() {
               {SLOT_LABELS[group.slot]} ·{' '}
               {formatFullFrenchCivilDate(group.date)}
             </SectionTitle>
-            {items.length > 0 ? (
+            {canValidateWholeGroup(items, group) ? (
               <AppButton
-                label={
-                  items.every((record) => record.status === 'TAKEN')
-                    ? 'Tous les médicaments sont marqués comme pris'
-                    : 'Marquer toute la prise comme prise'
-                }
-                disabled={
-                  busyKey !== null ||
-                  items.every((record) => record.status === 'TAKEN')
-                }
+                label="Tout valider"
+                disabled={busyKey !== null}
                 onPress={() => setConfirmGroup(group)}
               />
             ) : null}
@@ -390,15 +389,17 @@ export default function PlannedIntakeScreen() {
       })}
       <AppModal
         visible={confirmGroup !== null}
-        title="Confirmer toute la prise ?"
-        primaryLabel="Tout marquer comme pris"
+        title="Tout valider ?"
+        primaryLabel="Tout valider"
         busy={confirmGroup !== null && busyKey === groupKey(confirmGroup)}
         onCancel={() => setConfirmGroup(null)}
-        onPrimary={() => void markWholeGroupTaken()}
+        onPrimary={() => void validatePendingIntakes()}
       >
         <Text style={typography.body}>
-          Tous les médicaments de ce créneau seront marqués comme pris. Vous
-          pourrez ensuite corriger chaque médicament individuellement.
+          Les {pendingCount} médicaments encore en attente de ce créneau seront
+          marqués comme pris à la même heure. Les médicaments déjà renseignés ne
+          sont pas modifiés et chaque médicament reste corrigeable
+          individuellement.
         </Text>
       </AppModal>
     </Screen>

@@ -144,10 +144,6 @@ function DataMatrixScanner() {
           />
           <Result label="Lot (AI 10)" value={parsed?.fields.lot} />
           <Result
-            label="Numéro de série (AI 21)"
-            value={parsed?.fields.serialNumber}
-          />
-          <Result
             label="Erreurs de parsing"
             value={
               parsed?.errors.length === 0 ? 'Aucune' : parsed?.errors.join('\n')

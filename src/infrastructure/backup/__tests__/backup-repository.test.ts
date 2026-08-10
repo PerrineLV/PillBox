@@ -4,7 +4,10 @@ import Database from 'better-sqlite3';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { stableStringify, type PillBoxBackup } from '@/domain/backup/backup';
-import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
+import {
+  LATEST_SCHEMA_VERSION,
+  SCHEMA_MIGRATIONS,
+} from '@/infrastructure/database/schema-migrations';
 
 import {
   createBackup,
@@ -97,6 +100,31 @@ function seed(raw: Database.Database): void {
   `);
 }
 
+/** Reconstitue des tables telles qu'elles étaient avant le schéma 16. */
+function withoutSchema16Columns(
+  tables: PillBoxBackup['tables'],
+): PillBoxBackup['tables'] {
+  const removed: Readonly<Record<string, string>> = {
+    medication_boxes: 'source',
+    preparation_progress: 'verification',
+    preparation_box_usages: 'verification',
+  };
+  return Object.fromEntries(
+    Object.entries(tables).map(([name, rows]) => {
+      const column = removed[name];
+      if (column === undefined) return [name, rows];
+      return [
+        name,
+        rows.map((row) =>
+          Object.fromEntries(
+            Object.entries(row).filter(([key]) => key !== column),
+          ),
+        ),
+      ];
+    }),
+  );
+}
+
 describe('sauvegarde et restauration personnelles', () => {
   it('effectue un round-trip sans perdre de donnée ni les identifiants', async () => {
     const source = await database();
@@ -145,7 +173,7 @@ describe('sauvegarde et restauration personnelles', () => {
       intake_records: _intakeRecords,
       intake_postponements: _postponements,
       ...schema9Tables
-    } = current.tables;
+    } = withoutSchema16Columns(current.tables);
     const contents = {
       metadata: { ...current.metadata, schemaVersion: 9 },
       tables: schema9Tables,
@@ -190,7 +218,7 @@ describe('sauvegarde et restauration personnelles', () => {
       intake_records: _intakeRecords,
       intake_postponements: _postponements,
       ...schema10Tables
-    } = current.tables;
+    } = withoutSchema16Columns(current.tables);
     const contents = {
       metadata: { ...current.metadata, schemaVersion: 10 },
       tables: schema10Tables,
@@ -213,6 +241,42 @@ describe('sauvegarde et restauration personnelles', () => {
     source.raw.close();
   });
 
+  it('restaure un schéma 15 en marquant les boîtes comme scannées', async () => {
+    const source = await database();
+    seed(source.raw);
+    const current = await createBackup(
+      source.database,
+      '2026-08-09T10:00:00.000Z',
+      digest,
+    );
+    const contents = {
+      metadata: { ...current.metadata, schemaVersion: 15 },
+      tables: withoutSchema16Columns(current.tables),
+    };
+    const schema15: PillBoxBackup = {
+      ...contents,
+      integrity: {
+        algorithm: 'SHA-256',
+        checksum: await digest(stableStringify(contents)),
+      },
+    };
+
+    const parsed = await parseAndValidateBackup(
+      JSON.stringify(schema15),
+      digest,
+    );
+    const target = await database();
+    await restoreBackup(target.database, parsed.backup, () =>
+      Promise.resolve(),
+    );
+
+    expect(
+      target.raw.prepare('SELECT id, source FROM medication_boxes').get(),
+    ).toEqual({ id: 30, source: 'SCAN' });
+    target.raw.close();
+    source.raw.close();
+  });
+
   it('refuse les formats trop anciens, trop récents et les fichiers corrompus', async () => {
     const source = await database();
     const backup = await createBackup(
@@ -222,7 +286,10 @@ describe('sauvegarde et restauration personnelles', () => {
     );
     const tooRecent = {
       ...backup,
-      metadata: { ...backup.metadata, schemaVersion: 16 },
+      metadata: {
+        ...backup.metadata,
+        schemaVersion: LATEST_SCHEMA_VERSION + 1,
+      },
     };
     const tooOld = {
       ...backup,

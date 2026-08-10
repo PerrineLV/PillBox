@@ -25,7 +25,6 @@ import {
 } from '@/domain/reminders/preparation-reminder';
 import {
   INTAKE_SLOTS,
-  WEEKDAYS,
   type IntakeSlot,
   type Weekday,
 } from '@/domain/treatments/treatment';
@@ -63,6 +62,7 @@ import {
   shareBackup,
   writeSafetyBackup,
 } from '@/infrastructure/backup/backup-files';
+import { APP_LOCK_GRACE_PERIOD_MS } from '@/domain/privacy/app-lock-policy';
 import {
   isAppLockEnabled,
   setAppLockEnabled,
@@ -74,37 +74,28 @@ import {
 import {
   AppButton,
   AppModal,
+  Badge,
   Card,
   Divider,
+  INTAKE_SLOT_LABELS,
   Message,
   SectionTitle,
+  SelectField,
+  SlotCard,
+  SlotGrid,
+  WEEKDAY_LABELS,
+  WEEKDAY_OPTIONS,
   colors,
-  radii,
-  sizes,
   spacing,
   typography,
 } from '@/ui';
 
-const DAY_LABELS: Record<Weekday, string> = {
-  monday: 'Lundi',
-  tuesday: 'Mardi',
-  wednesday: 'Mercredi',
-  thursday: 'Jeudi',
-  friday: 'Vendredi',
-  saturday: 'Samedi',
-  sunday: 'Dimanche',
-};
+const APP_LOCK_GRACE_SECONDS = Math.round(APP_LOCK_GRACE_PERIOD_MS / 1000);
 
 const DEFAULT_SCHEDULE: PreparationReminderSchedule = {
   weekday: 'sunday',
   hour: 18,
   minute: 0,
-};
-const SLOT_LABELS: Record<IntakeSlot, string> = {
-  morning: 'Matin',
-  noon: 'Midi',
-  evening: 'Soir',
-  bedtime: 'Coucher',
 };
 const DEFAULT_SLOT_TIMES: GlobalIntakeReminderSettings = {
   morning: { hour: 8, minute: 0 },
@@ -119,7 +110,6 @@ export default function SettingsScreen() {
   const [enabled, setEnabled] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [dayPickerOpen, setDayPickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -175,7 +165,10 @@ export default function SettingsScreen() {
           setAppLockEnabledState(lockEnabled);
           setSlotTimes(globalTimes);
           if (intakeEnabled && permission !== 'granted') {
+            // La désactivation est ici explicite et annoncée : c’est le seul
+            // moment où la programmation locale est supprimée sans permission.
             await setIntakeRemindersEnabled(database, false);
+            await synchronizeIntakeReminders(database);
             setIntakeRemindersEnabledState(false);
             if (active)
               setMessage(
@@ -269,7 +262,7 @@ export default function SettingsScreen() {
     setDirty(false);
     setPermissionDenied(false);
     setMessage(
-      `Rappel programmé le ${DAY_LABELS[schedule.weekday].toLowerCase()} à ${formatReminderTime(schedule.hour, schedule.minute)}.`,
+      `Rappel programmé le ${WEEKDAY_LABELS[schedule.weekday].toLowerCase()} à ${formatReminderTime(schedule.hour, schedule.minute)}.`,
     );
   }
 
@@ -551,6 +544,15 @@ export default function SettingsScreen() {
           value={appLockEnabled}
         />
       </View>
+      <Badge
+        label={appLockEnabled ? 'Verrou activé' : 'Verrou désactivé'}
+        tone={appLockEnabled ? 'success' : 'neutral'}
+      />
+      <Text style={styles.help}>
+        {appLockEnabled
+          ? `L’authentification est demandée à chaque ouverture de l’application et après ${APP_LOCK_GRACE_SECONDS} secondes passées en arrière-plan. Un aller-retour rapide vers une autre application ne la redemande pas.`
+          : 'Les données sont accessibles dès l’ouverture de l’application.'}
+      </Text>
       <Text style={styles.help}>
         Ce verrou protège l’accès courant à l’application ; il ne chiffre pas la
         base SQLite ni les fichiers exportés.
@@ -577,15 +579,14 @@ export default function SettingsScreen() {
         Les médicaments prévus ensemble sont regroupés dans une seule
         notification.
       </Text>
-      <View style={styles.slotGrid}>
+      <SlotGrid>
         {INTAKE_SLOTS.map((slot) => {
           const time = slotTimes[slot];
           const value = slotTimePickerDate(time);
           return (
-            <View key={slot} style={styles.slotTimeField}>
-              <Text style={styles.label}>{SLOT_LABELS[slot]}</Text>
+            <SlotCard key={slot} label={INTAKE_SLOT_LABELS[slot]}>
               <Pressable
-                accessibilityLabel={`${SLOT_LABELS[slot]}, ${formatReminderTime(time.hour, time.minute)}`}
+                accessibilityLabel={`${INTAKE_SLOT_LABELS[slot]}, ${formatReminderTime(time.hour, time.minute)}`}
                 accessibilityHint="Ouvre le sélecteur d’heure"
                 accessibilityRole="button"
                 onPress={() => setActiveIntakeSlot(slot)}
@@ -615,10 +616,10 @@ export default function SettingsScreen() {
                   ) : null}
                 </>
               ) : null}
-            </View>
+            </SlotCard>
           );
         })}
-      </View>
+      </SlotGrid>
       {slotTimesDirty ? (
         <AppButton
           label="Enregistrer les heures de prise"
@@ -644,48 +645,13 @@ export default function SettingsScreen() {
         />
       </View>
 
-      <Text style={styles.label}>Jour</Text>
-      <Pressable
-        accessibilityLabel={`Jour de préparation, ${DAY_LABELS[schedule.weekday]}`}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: dayPickerOpen }}
-        onPress={() => setDayPickerOpen((open) => !open)}
-        style={styles.selectButton}
-      >
-        <Text style={styles.selectText}>{DAY_LABELS[schedule.weekday]}</Text>
-        <Text accessibilityElementsHidden style={styles.selectChevron}>
-          {dayPickerOpen ? '⌃' : '⌄'}
-        </Text>
-      </Pressable>
-      {dayPickerOpen ? (
-        <Card style={styles.dayMenu}>
-          {WEEKDAYS.map((weekday) => {
-            const selected = schedule.weekday === weekday;
-            return (
-              <Pressable
-                accessibilityRole="menuitem"
-                accessibilityState={{ selected }}
-                key={weekday}
-                onPress={() => {
-                  chooseDay(weekday);
-                  setDayPickerOpen(false);
-                }}
-                style={[styles.dayOption, selected && styles.dayOptionSelected]}
-              >
-                <Text
-                  style={[
-                    styles.dayOptionText,
-                    selected && styles.dayOptionTextSelected,
-                  ]}
-                >
-                  {DAY_LABELS[weekday]}
-                </Text>
-                {selected ? <Text style={styles.check}>✓</Text> : null}
-              </Pressable>
-            );
-          })}
-        </Card>
-      ) : null}
+      <SelectField
+        accessibilityLabel="Jour de préparation"
+        label="Jour"
+        onChange={chooseDay}
+        options={WEEKDAY_OPTIONS}
+        value={schedule.weekday}
+      />
 
       <Text style={styles.label}>Heure</Text>
       <Pressable
@@ -843,41 +809,6 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     padding: spacing.lg,
   },
-  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  slotTimeField: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    gap: spacing.sm,
-    minWidth: 140,
-    padding: spacing.md,
-    width: '48%',
-  },
-  selectButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    flexDirection: 'row',
-    minHeight: sizes.touch,
-    paddingHorizontal: spacing.lg,
-  },
-  selectText: { ...typography.body, flex: 1, fontWeight: '700' },
-  selectChevron: { color: colors.brand, fontSize: 22 },
-  dayMenu: { gap: 0, padding: spacing.xs },
-  dayOption: {
-    alignItems: 'center',
-    borderRadius: radii.md,
-    flexDirection: 'row',
-    minHeight: sizes.touch,
-    paddingHorizontal: spacing.md,
-  },
-  dayOptionSelected: { backgroundColor: colors.brandSoft },
-  dayOptionText: { ...typography.body, flex: 1 },
-  dayOptionTextSelected: { color: colors.brand, fontWeight: '700' },
-  check: { color: colors.success, fontSize: 18, fontWeight: '800' },
   help: { ...typography.caption, marginTop: 4 },
   label: typography.label,
   linkText: { color: '#0F6F70', fontWeight: '600', paddingVertical: 8 },

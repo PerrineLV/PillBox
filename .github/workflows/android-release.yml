@@ -19,6 +19,8 @@ jobs:
     name: Signed release APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      app-version: ${{ steps.app-version.outputs.value }}
     env:
       ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android/app/release.keystore
       ANDROID_VERSION_CODE: ${{ github.run_number }}
@@ -47,6 +49,15 @@ jobs:
       - name: Install dependencies from lockfile
         run: npm ci --no-audit --no-fund
 
+      - name: Resolve published application version
+        id: app-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(npm run --silent app:version)"
+          printf 'value=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          echo "Version publiée : $version (versionCode $ANDROID_VERSION_CODE)"
+
       - name: Check formatting
         run: npm run format:check
 
@@ -61,6 +72,16 @@ jobs:
 
       - name: Generate native Android project
         run: npm run android:release:prebuild
+
+      # Le versionName Android et le tag GitHub doivent décrire la même version.
+      - name: Check Android version metadata
+        shell: bash
+        env:
+          APP_VERSION: ${{ steps.app-version.outputs.value }}
+        run: |
+          set -euo pipefail
+          grep -Fq "versionName \"$APP_VERSION\"" android/app/build.gradle
+          grep -Fq "versionCode $ANDROID_VERSION_CODE" android/app/build.gradle
 
       - name: Prepare and validate release keystore
         env:
@@ -117,7 +138,11 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: android-${{ github.sha }}
+      # Le tag porte la version publiée : `v<MAJEUR.MINEUR.versionCode>`. Le
+      # versionCode étant le numéro de run, un re-run publie le même tag pour le
+      # même commit et reste donc idempotent.
+      APP_VERSION: ${{ needs.release-apk.outputs.app-version }}
+      RELEASE_TAG: v${{ needs.release-apk.outputs.app-version }}
 
     steps:
       - name: Download signed APK artifact
@@ -140,11 +165,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version publiée invalide : « $APP_VERSION »." >&2
+            exit 1
+          fi
+
           readonly apk_name="pillbox-latest.apk"
           readonly checksum_name="pillbox-latest.apk.sha256"
           readonly apk_path="release/$apk_name"
           readonly checksum_path="release/$checksum_name"
-          readonly release_title="PillBox Android $GITHUB_SHA"
+          readonly release_title="PillBox $APP_VERSION"
           readonly release_notes="APK Android release signé pour le commit $GITHUB_SHA."
           readonly temporary_directory="$(mktemp -d)"
           readonly existing_directory="$temporary_directory/existing"

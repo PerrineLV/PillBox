@@ -43,4 +43,35 @@ describe('HomeScreen', () => {
     expect(rendered).toContain('Stock insuffisant');
     expect(rendered).toContain('LOT-B');
   });
+
+  it('n’affiche aucune information de mise à jour quand l’app est à jour', () => {
+    const screen = HomeContent({ alerts: null, loading: false, error: null });
+    expect(JSON.stringify(screen)).not.toContain('Mise à jour');
+  });
+
+  it('affiche la mise à jour disponible sans masquer le parcours principal', () => {
+    const rendered = JSON.stringify(
+      HomeContent({
+        alerts: null,
+        loading: false,
+        error: null,
+        updateNotice: {
+          version: '1.0.42',
+          installedVersion: '1.0.41',
+          downloadUrl:
+            'https://github.com/PerrineLV/PillBox/releases/download/v1.0.42/pillbox-latest.apk',
+          fallbackToReleasePage: false,
+        },
+        onDownloadUpdate: jest.fn(),
+        onPostponeUpdate: jest.fn(),
+      }),
+    );
+
+    // Le contenu de la carte est vérifié par son propre test ; ici seule sa
+    // présence sur l’accueil compte.
+    expect(rendered).toContain('"version":"1.0.42"');
+    expect(rendered).toContain('"installedVersion":"1.0.41"');
+    // La préparation du pilulier reste accessible : l’alerte ne bloque rien.
+    expect(rendered).toContain('Commencer');
+  });
 });

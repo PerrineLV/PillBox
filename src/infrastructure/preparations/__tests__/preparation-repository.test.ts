@@ -5,7 +5,9 @@ import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 
 import {
   completePreparation,
+  getLatestDraftPreparation,
   listPreparationHistory,
+  savePreparationProgress,
 } from '../preparation-repository';
 
 type SqlParameters = readonly (string | number | null)[];
@@ -92,7 +94,11 @@ async function createDatabase(
   return { raw, database: expoAdapter(raw, failOnSecondPreparationMovement) };
 }
 
-function seedPreparation(raw: Database.Database, medicationCount = 1): number {
+function seedPreparation(
+  raw: Database.Database,
+  medicationCount = 1,
+  verification: 'SCAN' | 'MANUAL' = 'SCAN',
+): number {
   const preparationId = Number(
     raw
       .prepare(
@@ -122,10 +128,16 @@ function seedPreparation(raw: Database.Database, medicationCount = 1): number {
     raw
       .prepare(
         `INSERT INTO preparation_progress
-       (preparation_id, specialty_cis, box_id, scan_raw)
-       VALUES (?, ?, ?, 'scan')`,
+       (preparation_id, specialty_cis, box_id, verification, scan_raw)
+       VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(preparationId, cis, boxId);
+      .run(
+        preparationId,
+        cis,
+        boxId,
+        verification,
+        verification === 'SCAN' ? 'scan' : '',
+      );
   }
   return preparationId;
 }
@@ -160,6 +172,57 @@ describe('validation transactionnelle d’une préparation', () => {
       quantityHalfUnits: 7,
       lot: 'LOT-1',
       presentationCip13: '3400000000001',
+      verification: 'SCAN',
+    });
+    raw.close();
+  });
+
+  it('distingue dans l’historique une boîte choisie sans scan', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw, 1, 'MANUAL');
+
+    await completePreparation(database, id, '2026-08-09');
+
+    const history = await listPreparationHistory(database);
+    expect(history[0].medications[0]).toMatchObject({
+      lot: 'LOT-1',
+      verification: 'MANUAL',
+    });
+    raw.close();
+  });
+
+  it('refuse d’enregistrer une vérification par scan sans chaîne brute', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+
+    await expect(
+      savePreparationProgress(database, id, {
+        specialtyCis: '60000001',
+        boxId: 1,
+        verification: 'SCAN',
+        scanRaw: null,
+        nonFefoAcknowledged: false,
+      }),
+    ).rejects.toThrow('brute');
+    raw.close();
+  });
+
+  it('reprend une progression sans scan sans inventer de preuve de lecture', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId: 1,
+      verification: 'MANUAL',
+      scanRaw: null,
+      nonFefoAcknowledged: false,
+    });
+
+    const saved = await getLatestDraftPreparation(database);
+    expect(saved?.progress[0]).toMatchObject({
+      verification: 'MANUAL',
+      scanRaw: null,
     });
     raw.close();
   });

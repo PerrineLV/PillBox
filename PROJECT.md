@@ -8,7 +8,7 @@ Application mobile personnelle pour assister la préparation hebdomadaire d'un p
 - Pas de compte, backend, cloud, analytics ou publicité pour le MVP.
 - La posologie est toujours saisie par l'utilisateur ; l'application ne la déduit jamais.
 - En cas d'incertitude pharmaceutique ou d'identification : ne jamais deviner.
-- Le scan doit vérifier la boîte réellement utilisée pendant la préparation.
+- Le scan sert à vérifier la boîte réellement utilisée pendant la préparation ; lorsqu'il n'est pas disponible, cette boîte est désignée explicitement dans le stock déjà enregistré.
 
 # Stack
 
@@ -24,7 +24,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 
 **Phase de posologie** : période datée, fréquence explicite (quotidienne, tous les N jours avec ancre, ou hebdomadaire avec jour choisi) + créneaux matin/midi/soir/coucher + quantités fractionnaires possibles.
 
-**Boîte** : présentation + lot + numéro de série éventuel + péremption + quantité initiale/restante.
+**Boîte** : présentation + lot + péremption + quantité initiale/restante + origine (scan DataMatrix ou saisie manuelle). Le numéro de série unitaire n'a pas de valeur métier ici et n'intervient dans aucun écran ni aucune règle.
 
 **Préparation** : période de 7 jours + snapshot des traitements + progression + boîtes/lots réellement utilisés + statut.
 
@@ -33,11 +33,11 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 # Parcours principal
 
 1. Saisir les traitements à partir du référentiel réel.
-2. Scanner les boîtes pour constituer le stock.
+2. Constituer le stock : scanner les boîtes, ou les ajouter manuellement depuis le référentiel lorsque le DataMatrix est absent ou illisible.
 3. Recevoir chaque semaine une notification locale configurable.
 4. Lancer « Préparer mon pilulier ».
 5. L'app calcule les besoins pour 7 jours.
-6. Pour chaque médicament : scanner la boîte, vérifier identité/lot/péremption, afficher les cases et quantités, valider.
+6. Pour chaque médicament : désigner la boîte utilisée, par scan ou en la choisissant dans le stock, vérifier identité/lot/péremption, afficher les cases et quantités, valider.
 7. Faire un contrôle final.
 8. Valider transactionnellement la préparation et décrémenter les bons lots.
 9. Conserver l'historique.
@@ -52,6 +52,8 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 - Une préparation conserve un snapshot : modifier ensuite un traitement ne modifie jamais l'historique.
 - Les fractions doivent être calculées sans approximation métier silencieuse.
 - Les données RAW du DataMatrix restent disponibles pour diagnostic lorsque nécessaire.
+- Le scan est une voie de saisie et de vérification, jamais une obligation : une boîte ajoutée manuellement participe au stock et aux préparations avec les mêmes règles de quantité et de péremption.
+- Une saisie manuelle n'est jamais présentée comme une vérification par scan. L'origine d'une boîte et le mode de vérification d'une préparation sont enregistrés et affichés distinctement.
 
 # Hors scope MVP
 
@@ -59,11 +61,13 @@ Conseils médicaux, interactions, diagnostic, lecture automatique d'ordonnance, 
 
 # Definition of Done MVP
 
-Je peux saisir mes traitements, scanner mes boîtes, suivre lots/péremptions/stocks, recevoir mon rappel hebdomadaire, préparer réellement un pilulier de 7 jours avec vérification des boîtes, valider la préparation et retrouver les lots utilisés dans l'historique, sans connexion à un serveur.
+Je peux saisir mes traitements, ajouter mes boîtes par scan ou manuellement, suivre lots/péremptions/stocks, recevoir mon rappel hebdomadaire, préparer réellement un pilulier de 7 jours avec vérification des boîtes, valider la préparation et retrouver les lots utilisés dans l'historique, sans connexion à un serveur.
 
 # Confidentialité locale et durcissement Android
 
 - La base SQLite et les réglages locaux sont explicitement exclus de la sauvegarde automatique et du transfert d’appareil Android (`android.allowBackup: false`). Les caches sont privés et exclus par Android ; les fichiers intermédiaires d’export/import y sont supprimés après utilisation. Les copies de sécurité créées avant restauration sont, elles, conservées volontairement dans le dossier privé de documents de PillBox.
 - Le verrou optionnel délègue l’authentification à Android via `expo-local-authentication`. PillBox ne stocke aucun PIN, mot de passe, secret ou gabarit biométrique. Ce verrou contrôle l’accès à l’interface mais ne chiffre pas SQLite ni les exports.
+- Le comportement du verrou suit le cycle de vie Android et est décrit par une politique unique (`src/domain/privacy/app-lock-policy.ts`) : toute ouverture à froid exige une authentification ; un aller-retour bref vers une autre application n’en redemande pas ; au-delà de `APP_LOCK_GRACE_PERIOD_MS` (60 secondes d’absence, temporisation courante pour des données sensibles), PillBox se reverrouille. L’état n’est jamais persisté : si Android tue le processus, le lancement suivant est une ouverture à froid. Tant que le verrou est activé, le contenu est masqué dès que l’application quitte le premier plan, y compris pendant la boîte de dialogue d’authentification, laquelle ne doit jamais provoquer un second prompt.
 - Les notifications ont un contenu neutre et une visibilité privée sur l’écran verrouillé. Aucun réglage de contenu détaillé n’est proposé.
+- La détection de nouvelle version est le seul appel réseau de PillBox. Elle interroge l’API publique `api.github.com` pour lire la dernière GitHub Release du dépôt, sans jeton, sans compte et sans envoyer la moindre donnée : ni identifiant d’appareil, ni donnée de santé, ni télémétrie. La requête est anonyme et sortante uniquement. Elle est limitée à une fois toutes les six heures grâce à un cache local, n’a lieu qu’au lancement et au retour au premier plan, et son échec est silencieux : hors ligne, PillBox fonctionne exactement comme avant. Le cache local ne contient que des informations publiques (version, URL de release) et la version reportée par l’utilisatrice ; il est volontairement exclu des sauvegardes afin qu’une restauration ne masque pas une mise à jour. Aucune mise à jour automatique ni silencieuse n’existe : le téléchargement puis l’installation restent des actions explicites soumises aux protections Android habituelles.
 - Les captures d’écran ne sont pas bloquées. `expo-screen-capture` fournit une API Expo stable, mais un blocage sur les écrans de traitements, posologies, stock et historique empêcherait des usages légitimes (montrer ponctuellement une information à un professionnel ou demander de l’aide). Le verrou au passage en arrière-plan limite l’exposition dans le sélecteur d’applications lorsque l’option est activée. Cette décision est à réévaluer si PillBox ajoute un mode confidentialité distinct et explicite.

@@ -14,10 +14,10 @@ const box: MedicationBox = {
   presentationCip13: '3400000000000',
   presentationLabel: 'Boîte test',
   lot: 'LOT',
-  serialNumber: null,
   expirationDate: '2027-12-31',
   initialQuantity: 30,
   remainingQuantity: 12,
+  origin: 'SCAN',
   scanRaw: 'raw',
 };
 
@@ -52,5 +52,67 @@ describe('inventaire', () => {
         initialQuantity: 0,
       }),
     ).toThrow('quantité initiale');
+  });
+
+  it('accepte une boîte saisie manuellement, sans donnée de scan', () => {
+    expect(() =>
+      assertValidBoxDraft({ ...box, origin: 'MANUAL', scanRaw: null }),
+    ).not.toThrow();
+    expect(() => assertValidBoxDraft({ ...box, origin: 'MANUAL' })).toThrow(
+      'manuellement',
+    );
+  });
+
+  it('exige le lot d’une boîte ajoutée sans DataMatrix', () => {
+    expect(() =>
+      assertValidBoxDraft({
+        ...box,
+        origin: 'MANUAL',
+        scanRaw: null,
+        lot: null,
+      }),
+    ).toThrow('lot est requis');
+    expect(() =>
+      assertValidBoxDraft({
+        ...box,
+        origin: 'MANUAL',
+        scanRaw: null,
+        lot: '   ',
+      }),
+    ).toThrow('lot est requis');
+  });
+
+  it('accepte encore une boîte scannée dont le DataMatrix ne porte aucun lot', () => {
+    expect(() =>
+      assertValidBoxDraft({ ...box, origin: 'SCAN', lot: null }),
+    ).not.toThrow();
+  });
+
+  it('exige toujours la chaîne brute d’une boîte déclarée scannée', () => {
+    expect(() =>
+      assertValidBoxDraft({ ...box, origin: 'SCAN', scanRaw: null }),
+    ).toThrow('scan DataMatrix brut');
+    expect(() =>
+      assertValidBoxDraft({ ...box, origin: 'SCAN', scanRaw: '' }),
+    ).toThrow('scan DataMatrix brut');
+  });
+
+  it('exige une péremption valide, y compris en saisie manuelle', () => {
+    expect(() =>
+      assertValidBoxDraft({
+        ...box,
+        origin: 'MANUAL',
+        scanRaw: null,
+        expirationDate: '2027-02-31',
+      }),
+    ).toThrow('invalide');
+    expect(() =>
+      assertValidBoxDraft({
+        ...box,
+        origin: 'MANUAL',
+        scanRaw: null,
+        expirationDate: '',
+      }),
+    ).toThrow('AAAA-MM-JJ');
   });
 });

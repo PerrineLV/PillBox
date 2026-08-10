@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { installedAppVersion } from '@/infrastructure/updates/installed-version';
 import {
   Screen,
   colors,
@@ -59,7 +60,20 @@ export default function MoreScreen() {
           <MenuCard key={item.href} {...item} />
         ))}
       </View>
+      <InstalledVersion />
     </Screen>
+  );
+}
+
+/** Version réellement installée, utile pour vérifier une mise à jour. */
+function InstalledVersion() {
+  const version = installedAppVersion();
+  return (
+    <Text style={styles.version}>
+      {version === null
+        ? 'Version installée indisponible'
+        : `PillBox version ${version}`}
+    </Text>
   );
 }
 
@@ -199,6 +213,11 @@ const styles = StyleSheet.create({
     width: 36,
   },
   privacyText: { ...typography.caption, color: colors.text, flex: 1 },
+  version: {
+    ...typography.caption,
+    marginTop: spacing.lg,
+    textAlign: 'center',
+  },
   chevron: {
     borderRightColor: colors.brand,
     borderRightWidth: 2,

@@ -2,7 +2,9 @@ import type { MedicationBox } from '@/domain/inventory/inventory';
 import type { Treatment } from '@/domain/treatments/treatment';
 
 import {
+  assertVerificationEvidence,
   generatePreparationSnapshot,
+  listBoxesForMedication,
   matchScannedBox,
   preparationStartDate,
   verifyPreparationBox,
@@ -38,10 +40,10 @@ function box(overrides: Partial<MedicationBox> = {}): MedicationBox {
     presentationCip13: '3400000000000',
     presentationLabel: 'Boîte',
     lot: 'LOT',
-    serialNumber: null,
     expirationDate: '2027-01-01',
     initialQuantity: 30,
     remainingQuantity: 10,
+    origin: 'SCAN',
     scanRaw: 'raw',
     ...overrides,
   };
@@ -217,7 +219,6 @@ describe('vérification des boîtes pendant la préparation', () => {
         {
           presentationCip13: stored.presentationCip13,
           lot: 'LOT',
-          serialNumber: null,
           expirationDate: '2027-01-01',
         },
         [stored],
@@ -228,7 +229,6 @@ describe('vérification des boîtes pendant la préparation', () => {
         {
           presentationCip13: stored.presentationCip13,
           lot: 'AUTRE',
-          serialNumber: null,
           expirationDate: '2027-01-01',
         },
         [stored],
@@ -239,11 +239,48 @@ describe('vérification des boîtes pendant la préparation', () => {
         {
           presentationCip13: stored.presentationCip13,
           lot: 'LOT',
-          serialNumber: null,
           expirationDate: '2027-01-01',
         },
         [stored, { ...stored, id: 2 }],
       ),
     ).toEqual({ status: 'AMBIGUOUS' });
+  });
+
+  it('vérifie une boîte ajoutée manuellement comme une boîte scannée', () => {
+    const manual = box({ origin: 'MANUAL', scanRaw: null });
+    expect(
+      verifyPreparationBox('60000001', 14, manual, [manual], '2026-08-03'),
+    ).toMatchObject({ status: 'VALID', isFefo: true });
+    expect(
+      verifyPreparationBox(
+        '60000001',
+        14,
+        { ...manual, expirationDate: '2026-08-02' },
+        [manual],
+        '2026-08-03',
+      ).status,
+    ).toBe('EXPIRED');
+  });
+
+  it('propose les boîtes du stock du lot FEFO vers les boîtes périmées', () => {
+    const expired = box({ id: 1, expirationDate: '2026-08-01' });
+    const later = box({ id: 2, expirationDate: '2027-01-01' });
+    const soonest = box({ id: 3, expirationDate: '2026-09-01' });
+    const other = box({ id: 4, specialtyCis: 'AUTRE' });
+    expect(
+      listBoxesForMedication(
+        '60000001',
+        [expired, later, soonest, other],
+        '2026-08-03',
+      ).map((item) => item.id),
+    ).toEqual([3, 2, 1]);
+  });
+
+  it('refuse de présenter une sélection manuelle comme une vérification par scan', () => {
+    expect(() => assertVerificationEvidence('SCAN', 'raw')).not.toThrow();
+    expect(() => assertVerificationEvidence('MANUAL', null)).not.toThrow();
+    expect(() => assertVerificationEvidence('SCAN', null)).toThrow('brute');
+    expect(() => assertVerificationEvidence('SCAN', '')).toThrow('brute');
+    expect(() => assertVerificationEvidence('MANUAL', 'raw')).toThrow('scan');
   });
 });

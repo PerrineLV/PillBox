@@ -2,9 +2,11 @@ import type { SQLiteDatabase, SQLiteRunResult } from 'expo-sqlite';
 
 import {
   assertValidBoxDraft,
+  MEDICATION_BOX_ORIGINS,
   STOCK_MOVEMENT_TYPES,
   type MedicationBox,
   type MedicationBoxDraft,
+  type MedicationBoxOrigin,
   type StockMovement,
   type StockMovementType,
 } from '@/domain/inventory/inventory';
@@ -17,10 +19,10 @@ type BoxRow = {
   presentation_cip13: string;
   presentation_label: string;
   lot: string | null;
-  serial_number: string | null;
   expiration_date: string;
   initial_quantity: number;
   remaining_quantity: number;
+  source: string;
   scan_raw: string;
 };
 
@@ -64,8 +66,8 @@ export async function addMedicationBox(
     insert = await transaction.runAsync(
       `INSERT INTO medication_boxes
        (specialty_cis, specialty_name, pharmaceutical_form, presentation_cip13,
-        presentation_label, lot, serial_number, expiration_date, initial_quantity,
-        remaining_quantity, scan_raw)
+        presentation_label, lot, expiration_date, initial_quantity,
+        remaining_quantity, source, scan_raw)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       draft.specialtyCis,
       draft.specialtyName,
@@ -73,11 +75,11 @@ export async function addMedicationBox(
       draft.presentationCip13,
       draft.presentationLabel,
       emptyToNull(draft.lot),
-      emptyToNull(draft.serialNumber),
       draft.expirationDate,
       draft.initialQuantity,
       draft.initialQuantity,
-      draft.scanRaw,
+      draft.origin,
+      draft.scanRaw ?? '',
     );
     await transaction.runAsync(
       `INSERT INTO stock_movements
@@ -86,7 +88,9 @@ export async function addMedicationBox(
       insert.lastInsertRowId,
       draft.initialQuantity,
       draft.initialQuantity,
-      'Ajout de la boîte au stock',
+      draft.origin === 'SCAN'
+        ? 'Ajout de la boîte au stock après scan'
+        : 'Ajout manuel de la boîte au stock',
     );
   });
   if (insert === null) throw new Error('La boîte n’a pas pu être ajoutée.');
@@ -163,6 +167,9 @@ export async function listStockMovements(
 }
 
 function hydrateBox(row: BoxRow): MedicationBox {
+  if (!isBoxOrigin(row.source)) {
+    throw new Error('La base locale contient une origine de boîte inconnue.');
+  }
   return {
     id: row.id,
     specialtyCis: row.specialty_cis,
@@ -171,11 +178,11 @@ function hydrateBox(row: BoxRow): MedicationBox {
     presentationCip13: row.presentation_cip13,
     presentationLabel: row.presentation_label,
     lot: row.lot,
-    serialNumber: row.serial_number,
     expirationDate: row.expiration_date,
     initialQuantity: row.initial_quantity,
     remainingQuantity: row.remaining_quantity,
-    scanRaw: row.scan_raw,
+    origin: row.source,
+    scanRaw: row.scan_raw === '' ? null : row.scan_raw,
   };
 }
 
@@ -188,6 +195,10 @@ function isMovementType(value: string): value is StockMovementType {
   return (STOCK_MOVEMENT_TYPES as readonly string[]).includes(value);
 }
 
+function isBoxOrigin(value: string): value is MedicationBoxOrigin {
+  return (MEDICATION_BOX_ORIGINS as readonly string[]).includes(value);
+}
+
 const BOX_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form,
-  presentation_cip13, presentation_label, lot, serial_number, expiration_date,
-  initial_quantity, remaining_quantity, scan_raw FROM medication_boxes`;
+  presentation_cip13, presentation_label, lot, expiration_date,
+  initial_quantity, remaining_quantity, source, scan_raw FROM medication_boxes`;

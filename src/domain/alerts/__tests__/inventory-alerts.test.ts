@@ -32,10 +32,10 @@ const box = (overrides: Partial<MedicationBox> = {}): MedicationBox => ({
   presentationCip13: '3400000000001',
   presentationLabel: 'Boîte',
   lot: 'LOT-A',
-  serialNumber: null,
   expirationDate: '2027-01-01',
   initialQuantity: 30,
   remainingQuantity: 30,
+  origin: 'SCAN',
   scanRaw: 'raw',
   ...overrides,
 });
