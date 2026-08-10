@@ -51,6 +51,19 @@ Les optimisations batterie propres à certains constructeurs peuvent retarder un
 
 Une notification est une aide de ponctualité. Elle ne prouve ni n'enregistre la prise du médicament.
 
+## Ouverture de l'application depuis une notification
+
+Ces trois états doivent être vérifiés séparément sur un APK réel : le comportement diffère selon que le processus Android est vivant ou non, et une notification de prise se déclenche justement le plus souvent après que le système a arrêté PillBox.
+
+1. **Application au premier plan** : toucher la notification doit afficher immédiatement **Prise prévue** pour le créneau concerné.
+2. **Application en arrière-plan** : revenir à l'écran d'accueil Android, attendre la notification, la toucher. PillBox doit revenir au premier plan sur **Prise prévue**.
+3. **Application complètement arrêtée** : la fermer depuis le sélecteur d'applications récentes, attendre la notification, la toucher. PillBox doit démarrer et arriver sur **Prise prévue** sans écran blanc ni fermeture immédiate.
+4. Refaire le scénario 3 **avec le verrou local activé** : l'authentification Android doit s'afficher d'abord, puis **Prise prévue** doit apparaître une fois déverrouillé, pas l'accueil.
+5. Refaire le scénario 3 avec une notification **reportée**, puis avec le rappel hebdomadaire de préparation : celui-ci doit ouvrir **Préparer mon pilulier**.
+6. Vérifier enfin qu'un lancement manuel ordinaire, juste après ces essais, ouvre bien l'accueil et ne rejoue pas la dernière notification.
+
+Le contenu visible de la notification reste neutre : l'identification du créneau voyage dans les données techniques de la notification, jamais dans le texte affiché par Android.
+
 ## Confirmation, historique et report
 
 1. Ouvrir une notification et vérifier que les médicaments sont séparés par créneau lorsque deux créneaux partagent la même heure globale.

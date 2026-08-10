@@ -2,16 +2,21 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import {
+  INTAKE_REMINDER_KIND,
+  notificationTarget,
+  POSTPONED_INTAKE_KIND,
+  PREPARATION_REMINDER_KIND,
+  PREPARATION_ROUTE,
+  serializeIntakeGroups,
+  type NotificationTarget,
+} from '@/domain/reminders/notification-navigation';
+import {
   assertValidReminderSchedule,
   expoWeekday,
   type PreparationReminderSchedule,
 } from '@/domain/reminders/preparation-reminder';
-import { isIntakeSlot, type IntakeSlot } from '@/domain/treatments/treatment';
+import type { IntakeSlot } from '@/domain/treatments/treatment';
 
-export const PREPARATION_ROUTE = '/preparations/new' as const;
-const REMINDER_KIND = 'pillbox-preparation-reminder';
-const INTAKE_REMINDER_KIND = 'pillbox-intake-reminder';
-const POSTPONED_INTAKE_KIND = 'pillbox-postponed-intake-reminder';
 const ANDROID_CHANNEL_ID = 'pillbox-preparation-reminders';
 const ANDROID_INTAKE_CHANNEL_ID = 'pillbox-intake-reminders';
 
@@ -54,7 +59,7 @@ export async function scheduleIntakeReminder(
       data: {
         kind: INTAKE_REMINDER_KIND,
         scheduledAt: scheduledAt.toISOString(),
-        groups: groups.map((group) => `${group.date}:${group.slot}`).join(','),
+        groups: serializeIntakeGroups(groups),
       },
       sound: 'default',
     },
@@ -66,19 +71,11 @@ export async function scheduleIntakeReminder(
   });
 }
 
-export function intakeReminderGroups(
+/** Écran à ouvrir pour la notification touchée, ou `null` si elle n’est pas la nôtre. */
+export function notificationTargetOf(
   notification: Notifications.Notification,
-): { date: string; slot: IntakeSlot }[] {
-  const raw = notification.request.content.data?.groups;
-  if (typeof raw !== 'string') return [];
-  return raw.split(',').flatMap((item) => {
-    const match = /^(\d{4}-\d{2}-\d{2}):(morning|noon|evening|bedtime)$/.exec(
-      item,
-    );
-    return match && isIntakeSlot(match[2])
-      ? [{ date: match[1], slot: match[2] }]
-      : [];
-  });
+): NotificationTarget | null {
+  return notificationTarget(notification.request.content.data);
 }
 
 export async function schedulePostponedIntakeReminder(
@@ -133,28 +130,6 @@ export async function cancelScheduledNotifications(
   );
 }
 
-export function intakeReminderDate(
-  notification: Notifications.Notification,
-): string | null {
-  const data = notification.request.content.data;
-  return data?.kind === INTAKE_REMINDER_KIND &&
-    typeof data.scheduledAt === 'string'
-    ? data.scheduledAt
-    : null;
-}
-
-export function postponedIntakeGroup(
-  notification: Notifications.Notification,
-): { date: string; slot: IntakeSlot } | null {
-  const data = notification.request.content.data;
-  return data?.kind === POSTPONED_INTAKE_KIND &&
-    typeof data.date === 'string' &&
-    typeof data.slot === 'string' &&
-    isIntakeSlot(data.slot)
-    ? { date: data.date, slot: data.slot }
-    : null;
-}
-
 export async function replacePreparationReminder(
   schedule: PreparationReminderSchedule,
 ): Promise<string> {
@@ -164,7 +139,7 @@ export async function replacePreparationReminder(
   return Notifications.scheduleNotificationAsync({
     content: {
       ...NEUTRAL_REMINDER_CONTENT,
-      data: { kind: REMINDER_KIND, url: PREPARATION_ROUTE },
+      data: { kind: PREPARATION_REMINDER_KIND, url: PREPARATION_ROUTE },
       sound: 'default',
     },
     trigger: {
@@ -180,21 +155,12 @@ export async function replacePreparationReminder(
 export async function cancelPreparationReminders(): Promise<void> {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const ours = scheduled.filter(
-    (request) => request.content.data?.kind === REMINDER_KIND,
+    (request) => request.content.data?.kind === PREPARATION_REMINDER_KIND,
   );
   await Promise.all(
     ours.map((request) =>
       Notifications.cancelScheduledNotificationAsync(request.identifier),
     ),
-  );
-}
-
-export function isPreparationReminder(
-  notification: Notifications.Notification,
-): boolean {
-  return (
-    notification.request.content.data?.kind === REMINDER_KIND &&
-    notification.request.content.data?.url === PREPARATION_ROUTE
   );
 }
 

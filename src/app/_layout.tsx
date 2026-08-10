@@ -1,5 +1,10 @@
 import * as Notifications from 'expo-notifications';
-import { router, Stack, usePathname } from 'expo-router';
+import {
+  router,
+  Stack,
+  useNavigationContainerRef,
+  usePathname,
+} from 'expo-router';
 import { useEffect } from 'react';
 import { AppState, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -9,12 +14,13 @@ import { DatabaseProvider } from '@/infrastructure/database/database-provider';
 import { AppLockGate } from '@/components/privacy/app-lock-gate';
 import { BottomNavigation, colors, typography } from '@/ui';
 import {
-  isPreparationReminder,
-  intakeReminderDate,
-  intakeReminderGroups,
-  postponedIntakeGroup,
+  createDeferredNotificationNavigation,
+  PLANNED_INTAKE_ROUTE,
   PREPARATION_ROUTE,
-} from '@/infrastructure/reminders/local-notifications';
+  serializeIntakeGroups,
+  type NotificationTarget,
+} from '@/domain/reminders/notification-navigation';
+import { notificationTargetOf } from '@/infrastructure/reminders/local-notifications';
 import { synchronizeIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
 import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 
@@ -28,7 +34,7 @@ Notifications.setNotificationHandler({
 });
 
 export default function RootLayout() {
-  usePreparationNotificationNavigation();
+  useNotificationNavigation();
   const pathname = usePathname();
   const rootScreen = ['/', '/treatments', '/inventory', '/more'].includes(
     pathname,
@@ -85,44 +91,66 @@ function ReminderCoordinator() {
   return null;
 }
 
-function usePreparationNotificationNavigation(): void {
+function openNotificationTarget(target: NotificationTarget): void {
+  switch (target.kind) {
+    case 'preparation':
+      router.push(PREPARATION_ROUTE);
+      return;
+    case 'planned-intake':
+      router.push({
+        pathname: PLANNED_INTAKE_ROUTE,
+        params: { at: target.at, groups: serializeIntakeGroups(target.groups) },
+      });
+      return;
+    case 'postponed-intake':
+      router.push({
+        pathname: PLANNED_INTAKE_ROUTE,
+        params: { date: target.date, slot: target.slot },
+      });
+  }
+}
+
+/**
+ * Ouvre l’écran correspondant à la notification touchée.
+ *
+ * L’appui est enregistré dès le premier rendu, mais la navigation n’a lieu
+ * qu’une fois l’arbre de navigation monté. Sur un démarrage à froid déclenché
+ * par une notification, la base SQLite s’ouvre encore et le verrou local peut
+ * masquer le contenu : le `<Stack>` n’est pas encore rendu et Expo Router lève
+ * alors une erreur fatale, ce qui empêchait l’application de s’ouvrir.
+ */
+function useNotificationNavigation(): void {
+  const navigationRef = useNavigationContainerRef();
   useEffect(() => {
-    function openPreparation(notification: Notifications.Notification): void {
-      if (isPreparationReminder(notification)) {
-        router.push(PREPARATION_ROUTE);
-        Notifications.clearLastNotificationResponse();
-        return;
-      }
-      const scheduledAt = intakeReminderDate(notification);
-      if (scheduledAt !== null) {
-        const groups = intakeReminderGroups(notification);
-        router.push({
-          pathname: '/intakes/planned',
-          params: {
-            at: scheduledAt,
-            groups: groups
-              .map((group) => `${group.date}:${group.slot}`)
-              .join(','),
-          },
-        });
-        Notifications.clearLastNotificationResponse();
-        return;
-      }
-      const postponed = postponedIntakeGroup(notification);
-      if (postponed !== null) {
-        router.push({
-          pathname: '/intakes/planned',
-          params: { date: postponed.date, slot: postponed.slot },
-        });
-        Notifications.clearLastNotificationResponse();
-      }
+    const navigation = createDeferredNotificationNavigation({
+      isReady: () => navigationRef.isReady(),
+      navigate: openNotificationTarget,
+      acknowledge: () => Notifications.clearLastNotificationResponse(),
+    });
+
+    function handle(notification: Notifications.Notification): void {
+      const target = notificationTargetOf(notification);
+      if (target !== null) navigation.request(target);
     }
 
+    // Cas de l’application complètement arrêtée : la réponse est déjà connue
+    // du module natif avant même le premier rendu JavaScript.
     const lastResponse = Notifications.getLastNotificationResponse();
-    if (lastResponse !== null) openPreparation(lastResponse.notification);
-    const subscription = Notifications.addNotificationResponseReceivedListener(
-      (response) => openPreparation(response.notification),
+    if (lastResponse !== null) handle(lastResponse.notification);
+
+    const responses = Notifications.addNotificationResponseReceivedListener(
+      (response) => handle(response.notification),
     );
-    return () => subscription.remove();
-  }, []);
+    const unsubscribeReady = navigationRef.addListener('ready', () =>
+      navigation.flush(),
+    );
+    const unsubscribeState = navigationRef.addListener('state', () =>
+      navigation.flush(),
+    );
+    return () => {
+      responses.remove();
+      unsubscribeReady();
+      unsubscribeState();
+    };
+  }, [navigationRef]);
 }
