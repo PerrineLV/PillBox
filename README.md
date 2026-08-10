@@ -93,19 +93,43 @@ npx expo start
 Vérifications :
 
 ```bash
+npx expo install --check
+npm run format:check
 npm run lint
 npm run typecheck
 npm test
+npm run build:android:check
 ```
 
 ## CI
 
-À chaque push sur `dev`, GitHub Actions vérifie automatiquement :
+Le pipeline conserve trois responsabilités distinctes :
 
+| Événement | Contrôle | Publication signée |
+| --- | --- | --- |
+| Push direct sur `dev` | CI complète de feedback | Non |
+| Pull request vers `dev` ou `main` | CI complète avant fusion | Non |
+| Push effectif sur `main` | Contrôles du SHA fusionné, build et publication | Oui |
+
+La CI complète exécute :
+
+* la cohérence des dépendances avec le SDK Expo (`expo install --check`) ;
+* le formatage ;
 * le lint ;
 * le typage TypeScript ;
 * les tests ;
 * la génération du bundle Android Expo.
+
+Une branche `dev` ayant déjà été contrôlée par un push peut être contrôlée une seconde
+fois dans le contexte de sa pull request vers `main`. Cette redondance est volontaire :
+le premier run fournit un retour de développement, le second valide le contenu proposé
+à la fusion. Après fusion, la release recontrôle encore le SHA final de `main` avant
+d'accéder aux secrets de signature.
+
+Les mises à jour de version Dependabot ciblent `dev`. Une mise à jour de sécurité peut
+viser directement la branche par défaut `main` et bénéficie alors de la même CI de pull
+request. Aucun workflow déclenché par une pull request ne référence les secrets de
+signature et aucune mise à jour Dependabot n'est fusionnée automatiquement.
 
 Les workflows utilisent uniquement les permissions GitHub minimales : lecture du
 dépôt pour les jobs de vérification et de build, puis écriture du contenu uniquement
@@ -116,8 +140,19 @@ des SHA de commit complets.
 
 Le workflow `Android release APK` se déclenche uniquement lors d’un push sur `main`.
 Dans le fonctionnement attendu du dépôt, ce push est produit par la fusion d’une pull
-request. Le workflow exécute le lint, le typecheck et les tests, génère le projet
-Android avec Expo Prebuild, puis construit un APK release signé.
+request. Le workflow exécute le formatage, le lint, le typecheck et les tests, génère
+le projet Android avec Expo Prebuild, puis construit un APK release signé. Le vrai
+build Gradle tient lieu de contrôle Android final : le workflow de release ne répète
+pas l'export Expo utilisé par la CI.
+
+Les runs de release sont sérialisés sans interrompre celui qui construit ou publie
+déjà. Si plusieurs pushes attendent, GitHub conserve le plus récent dans la file. Le
+tag déterministe `android-<SHA complet>` permet de relancer le même workflow sans créer
+une seconde release. La publication vérifie la cible du tag, compare tout asset déjà
+présent octet par octet, complète uniquement un asset absent et refuse tout écrasement
+ou checksum incohérent. Une ancienne relance ne peut pas remplacer une release plus
+récente comme « latest » ; le lien permanent reste associé au SHA réussi le plus
+récent de l'historique de `main`.
 
 L’identifiant Android est fixé à `com.perrinelv.pillbox`. Ne pas le modifier après la
 première installation : Android considérerait l’application comme une autre
@@ -228,13 +263,27 @@ le permet :
 
 * les alertes Dependabot et les mises à jour de sécurité Dependabot ;
 * le secret scanning et la push protection ;
-* les règles de protection de `main`, notamment l’interdiction des pushs directs.
+* les règles de protection de `dev` et `main`, avec la CI requise avant fusion ;
+* l’interdiction des pushs directs sur `main` ;
+* les permissions du `GITHUB_TOKEN` : lecture par défaut et écriture du contenu
+  effective uniquement pour le job de publication ;
+* la présence des trois secrets de signature uniquement dans les réglages Actions.
 
 Ces options dépendent de la configuration GitHub distante et ne peuvent pas être
 garanties par les fichiers du dépôt. Le fichier `.github/dependabot.yml` limite les
 mises à jour npm à un passage hebdomadaire et celles des GitHub Actions à un passage
 mensuel. Les mises à jour de version ciblent `dev` ; les mises à jour de sécurité
 continuent de cibler la branche par défaut et sont contrôlées par la CI sur `main`.
+
+Expo, React, React Native et les modules natifs du SDK 54 sont entièrement exclus des
+mises à jour de version Dependabot, correctifs compris : leurs versions forment un
+ensemble imposé par le SDK et ne se choisissent pas dépendance par dépendance. Ces
+paquets évoluent seulement lors d'un ticket de migration de SDK, avec les versions
+rendues par `expo install` et un essai sur le téléphone Android cible. En contrepartie,
+une alerte de sécurité portant sur l'un d'eux ne produira pas de pull request
+automatique : elle doit être traitée par ce ticket de migration. La CI exécute
+`expo install --check` et échoue si une mise à jour, Dependabot ou manuelle, écarte une
+dépendance des versions attendues par le SDK.
 
 Traiter une seule pull request Dependabot à la fois et ne jamais l'auto-fusionner. Un
 correctif compatible peut être fusionné après une CI verte et un test rapide sur le
