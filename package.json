@@ -17,6 +17,7 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
+    "app:version": "tsx scripts/print-app-version.ts",
     "medications:import": "tsx scripts/medications/import-bdpm-cli.ts",
     "build:android:check": "expo export --platform android --clear --output-dir dist",
     "android:release:validate-signing": "node ./scripts/android-signing.mjs --validate",

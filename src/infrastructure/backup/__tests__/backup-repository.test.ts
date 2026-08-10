@@ -4,7 +4,10 @@ import Database from 'better-sqlite3';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { stableStringify, type PillBoxBackup } from '@/domain/backup/backup';
-import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
+import {
+  LATEST_SCHEMA_VERSION,
+  SCHEMA_MIGRATIONS,
+} from '@/infrastructure/database/schema-migrations';
 
 import {
   createBackup,
@@ -283,7 +286,10 @@ describe('sauvegarde et restauration personnelles', () => {
     );
     const tooRecent = {
       ...backup,
-      metadata: { ...backup.metadata, schemaVersion: 17 },
+      metadata: {
+        ...backup.metadata,
+        schemaVersion: LATEST_SCHEMA_VERSION + 1,
+      },
     };
     const tooOld = {
       ...backup,

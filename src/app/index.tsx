@@ -12,6 +12,9 @@ import { todayIso } from '@/domain/inventory/inventory';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
+import { UpdateNoticeCard } from '@/components/updates/update-notice-card';
+import { useUpdateNotice } from '@/components/updates/use-update-notice';
+import type { UpdateNotice } from '@/domain/updates/update-notice';
 import {
   getLatestDraftPreparation,
   listPreparationHistory,
@@ -40,6 +43,7 @@ export default function HomeScreen() {
   const [draft, setDraft] = useState<SavedPreparation | null>(null);
   const [lastPreparation, setLastPreparation] =
     useState<PreparationHistoryEntry | null>(null);
+  const update = useUpdateNotice();
 
   useFocusEffect(
     useCallback(() => {
@@ -82,6 +86,9 @@ export default function HomeScreen() {
       error={error}
       draft={draft}
       lastPreparation={lastPreparation}
+      updateNotice={update.notice}
+      onDownloadUpdate={update.download}
+      onPostponeUpdate={update.postpone}
     />
   );
 }
@@ -92,12 +99,18 @@ export function HomeContent({
   error,
   draft = null,
   lastPreparation = null,
+  updateNotice = null,
+  onDownloadUpdate,
+  onPostponeUpdate,
 }: Readonly<{
   alerts: InventoryAlerts | null;
   loading: boolean;
   error: string | null;
   draft?: SavedPreparation | null;
   lastPreparation?: PreparationHistoryEntry | null;
+  updateNotice?: UpdateNotice | null;
+  onDownloadUpdate?: () => void;
+  onPostponeUpdate?: () => void;
 }>) {
   const completedCount = draft?.progress.length ?? 0;
   const totalCount = draft?.snapshot.requirements.length ?? 0;
@@ -210,6 +223,15 @@ export function HomeContent({
       {lastPreparation ? (
         <LastPreparationCard
           detail={`Validée le ${formatDateTime(lastPreparation.completedAt)} · semaine du ${formatDate(lastPreparation.startDate)}`}
+        />
+      ) : null}
+      {updateNotice !== null &&
+      onDownloadUpdate !== undefined &&
+      onPostponeUpdate !== undefined ? (
+        <UpdateNoticeCard
+          notice={updateNotice}
+          onDownload={onDownloadUpdate}
+          onPostpone={onPostponeUpdate}
         />
       ) : null}
     </Screen>

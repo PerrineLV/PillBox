@@ -1,27 +1,38 @@
+// Ce fichier est évalué par Expo sans résolution des imports relatifs :
+// toute la logique de version doit rester ici, sans module externe.
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 const DEFAULT_ANDROID_VERSION_CODE = 1;
 const MAX_ANDROID_VERSION_CODE = 2_100_000_000;
+const VERSION_LINE_PATTERN = /^(\d+)\.(\d+)\.0$/;
 
-export default ({ config }: ConfigContext): ExpoConfig => ({
-  ...config,
-  name: config.name ?? 'PillBox',
-  slug: config.slug ?? 'pillbox',
-  android: {
-    ...config.android,
-    allowBackup: false,
-    package: 'com.perrinelv.pillbox',
-    permissions: appendValue(
-      config.android?.permissions,
-      'android.permission.SCHEDULE_EXACT_ALARM',
+export default ({ config }: ConfigContext): ExpoConfig => {
+  const versionCode = resolveAndroidVersionCode(
+    process.env.ANDROID_VERSION_CODE,
+  );
+  return {
+    ...config,
+    name: config.name ?? 'PillBox',
+    slug: config.slug ?? 'pillbox',
+    // Version publiée = ligne produit de app.json + versionCode Android.
+    // Cette valeur alimente le versionName Android et le tag GitHub Release.
+    version: resolveAppVersion(config.version, versionCode),
+    android: {
+      ...config.android,
+      allowBackup: false,
+      package: 'com.perrinelv.pillbox',
+      permissions: appendValue(
+        config.android?.permissions,
+        'android.permission.SCHEDULE_EXACT_ALARM',
+      ),
+      versionCode,
+    },
+    plugins: appendPlugin(
+      appendPlugin(config.plugins, 'expo-notifications'),
+      'expo-local-authentication',
     ),
-    versionCode: resolveAndroidVersionCode(process.env.ANDROID_VERSION_CODE),
-  },
-  plugins: appendPlugin(
-    appendPlugin(config.plugins, 'expo-notifications'),
-    'expo-local-authentication',
-  ),
-});
+  };
+};
 
 function appendValue(
   values: readonly string[] | undefined,
@@ -40,6 +51,44 @@ function appendPlugin(
   )
     ? configured
     : [...configured, plugin];
+}
+
+/**
+ * Convention de version PillBox.
+ *
+ * `app.json` déclare la ligne produit sous la forme `MAJEUR.MINEUR.0`. Le numéro
+ * de build est le `versionCode` Android, lui-même égal au numéro de run GitHub
+ * Actions. La version publiée vaut donc `MAJEUR.MINEUR.<versionCode>` :
+ *
+ * - `expo.version` → versionName Android → tag GitHub `v<version>` ;
+ * - le patch de la version est toujours le `versionCode` Android.
+ *
+ * Seuls `MAJEUR` et `MINEUR` se saisissent à la main ; le patch de `app.json`
+ * reste `0` afin qu'aucune version ne soit dupliquée dans deux fichiers.
+ */
+export function resolveAppVersion(
+  declaredVersion: string | undefined,
+  androidVersionCode: number,
+): string {
+  if (declaredVersion === undefined) {
+    throw new Error('La version de l’application est absente de app.json.');
+  }
+
+  const versionLine = VERSION_LINE_PATTERN.exec(declaredVersion);
+  if (versionLine === null) {
+    throw new Error(
+      `La version déclarée « ${declaredVersion} » doit suivre la forme MAJEUR.MINEUR.0 : ` +
+        'le patch est toujours le versionCode Android et ne se saisit pas à la main.',
+    );
+  }
+
+  if (!Number.isSafeInteger(androidVersionCode) || androidVersionCode < 1) {
+    throw new Error(
+      'Le versionCode Android doit être un entier positif pour composer la version publiée.',
+    );
+  }
+
+  return `${versionLine[1]}.${versionLine[2]}.${androidVersionCode}`;
 }
 
 export function resolveAndroidVersionCode(value: string | undefined): number {

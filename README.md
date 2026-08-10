@@ -25,6 +25,37 @@ Le projet est développé avant tout pour un usage personnel.
 Lors de l’installation, Android peut demander d’autoriser l’installation d’applications
 provenant du navigateur ou de GitHub.
 
+PillBox vérifie discrètement, au lancement et au retour au premier plan, si une version
+plus récente a été publiée. Le cas échéant, l’accueil affiche une carte proposant
+« Télécharger » et « Plus tard ». Cette information ne bloque jamais l’application : hors
+ligne ou en cas de panne de GitHub, elle n’apparaît simplement pas. Le téléchargement et
+l’installation restent des actions explicites : PillBox ouvre le lien GitHub dans le
+navigateur et n’installe jamais rien elle-même. La version installée est rappelée en bas
+de l’onglet « Plus ».
+
+## Convention de version
+
+Une seule version circule dans tout le projet, sous la forme `MAJEUR.MINEUR.BUILD` :
+
+| Élément | Valeur | Origine |
+| --- | --- | --- |
+| Ligne produit | `MAJEUR.MINEUR` | `expo.version` dans `app.json`, dont le patch reste toujours `0` |
+| Build | `BUILD` | `versionCode` Android = `github.run_number` du workflow de release |
+| Version Expo | `MAJEUR.MINEUR.BUILD` | composée par `app.config.ts`, devient le `versionName` Android |
+| Tag GitHub Release | `v<MAJEUR.MINEUR.BUILD>` | calculé par le workflow avec `npm run app:version` |
+| Asset APK | `pillbox-latest.apk` | nom stable imposé par le lien permanent du README |
+
+Le patch d’une version publiée est donc toujours égal au `versionCode` Android, ce qui
+garantit une progression strictement croissante sans intervention manuelle. Un re-run du
+même workflow conserve son `run_number` : il republie le même tag pour le même commit et
+reste idempotent.
+
+Pour passer à une nouvelle ligne produit, il suffit de modifier `expo.version` dans
+`app.json` (par exemple `1.1.0`) ; aucune autre version n’est à saisir ailleurs. La
+commande `npm run app:version` affiche la version qui serait publiée, et le workflow
+vérifie après `prebuild` que le `versionName` et le `versionCode` du projet Android
+correspondent bien à cette valeur.
+
 ## Fonctionnalités prévues
 
 * Recherche de médicaments à partir de la Base de données publique des médicaments

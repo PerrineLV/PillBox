@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 16;
+export const LATEST_SCHEMA_VERSION = 17;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -487,6 +487,30 @@ export const SCHEMA_MIGRATIONS = [
           ADD COLUMN verification TEXT NOT NULL DEFAULT 'SCAN' CHECK (verification IN ('SCAN', 'MANUAL'));
         ALTER TABLE preparation_box_usages
           ADD COLUMN verification TEXT NOT NULL DEFAULT 'SCAN' CHECK (verification IN ('SCAN', 'MANUAL'));
+      `);
+    },
+  },
+  {
+    version: 17,
+    name: 'cache local de la détection de nouvelle version',
+    async up(transaction) {
+      // Ces colonnes ne contiennent aucune donnée de santé : uniquement la
+      // dernière release publique connue et le report choisi par l'utilisatrice.
+      // Cache propre à l'installation, volontairement absent des sauvegardes du
+      // ticket 11b : une restauration ne doit pas masquer une mise à jour.
+      await transaction.execute(`
+        CREATE TABLE update_check_settings (
+          singleton_id INTEGER PRIMARY KEY NOT NULL DEFAULT 1 CHECK (singleton_id = 1),
+          last_checked_at TEXT,
+          latest_version TEXT,
+          latest_release_url TEXT,
+          latest_apk_url TEXT,
+          postponed_version TEXT,
+          postponed_at TEXT,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        INSERT INTO update_check_settings (singleton_id) VALUES (1);
       `);
     },
   },
