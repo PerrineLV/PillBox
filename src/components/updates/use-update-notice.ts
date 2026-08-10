@@ -3,6 +3,7 @@ import { AppState, Linking } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import type { UpdateNotice } from '@/domain/updates/update-notice';
+import { useDatabaseTaskQueue } from '@/infrastructure/database/database-provider';
 import {
   checkForUpdate,
   postponeUpdate,
@@ -19,12 +20,17 @@ export function useUpdateNotice(): {
   postpone(): void;
 } {
   const database = useSQLiteContext();
+  const queue = useDatabaseTaskQueue();
   const [notice, setNotice] = useState<UpdateNotice | null>(null);
 
   useEffect(() => {
     let active = true;
     const check = () => {
-      void checkForUpdate(database).then((result) => {
+      // Seules la lecture et l'écriture du cache passent par la file : l'appel
+      // à GitHub ne doit jamais retenir les autres opérations de démarrage.
+      void checkForUpdate(database, {
+        runDatabaseTask: (task) => queue.run(task),
+      }).then((result) => {
         if (active) setNotice(result);
       });
     };
@@ -37,7 +43,7 @@ export function useUpdateNotice(): {
       active = false;
       subscription.remove();
     };
-  }, [database]);
+  }, [database, queue]);
 
   const download = useCallback(() => {
     if (notice === null) return;
