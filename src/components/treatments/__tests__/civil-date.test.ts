@@ -1,5 +1,6 @@
 import {
   civilDateToPickerDate,
+  formatFrenchCivilPeriod,
   formatFullFrenchCivilDate,
   formatFrenchCivilDate,
   formatLongFrenchCivilDate,
@@ -39,6 +40,24 @@ describe('dates civiles du formulaire', () => {
     expect(nextCivilDay('2026-12-31')).toBe('2027-01-01');
     expect(nextCivilDay('2024-02-28')).toBe('2024-02-29');
     expect(nextCivilDay('2026-02-28')).toBe('2026-03-01');
+  });
+
+  it('affiche une période de sept jours sans répéter le mois inutilement', () => {
+    expect(formatFrenchCivilPeriod('2026-08-17', '2026-08-23')).toBe(
+      'du 17 au 23 août',
+    );
+    expect(formatFrenchCivilPeriod('2026-08-30', '2026-09-05')).toBe(
+      'du 30 août au 5 septembre',
+    );
+    expect(formatFrenchCivilPeriod('2026-12-28', '2027-01-03')).toBe(
+      'du 28 décembre 2026 au 3 janvier 2027',
+    );
+  });
+
+  it('conserve les dates brutes lorsqu’une borne est inexploitable', () => {
+    expect(formatFrenchCivilPeriod('2026-02-30', '2026-03-08')).toBe(
+      'du 2026-02-30 au 2026-03-08',
+    );
   });
 
   it('ne calcule aucun lendemain pour une date inexploitable', () => {

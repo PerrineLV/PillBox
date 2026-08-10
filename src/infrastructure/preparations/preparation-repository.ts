@@ -4,6 +4,7 @@ import {
   assertVerificationEvidence,
   BOX_VERIFICATION_METHODS,
   type BoxVerificationMethod,
+  type KnownPreparation,
   type PreparationSnapshot,
 } from '@/domain/preparations/preparation';
 
@@ -40,13 +41,55 @@ export type PreparationHistoryEntry = Readonly<{
   }>[];
 }>;
 
-/** Persiste uniquement un nouveau snapshot ; aucune mise à jour de son contenu n'est exposée. */
+/**
+ * Semaines déjà connues localement. Sert à empêcher un doublon et à proposer la
+ * reprise d'une préparation incomplète plutôt qu'une nouvelle.
+ */
+export async function listPreparationWeeks(
+  database: SQLiteDatabase,
+): Promise<KnownPreparation[]> {
+  const rows = await database.getAllAsync<{
+    id: number;
+    start_date: string;
+    status: string;
+  }>(
+    `SELECT id, start_date, status FROM preparations
+     ORDER BY start_date DESC, id DESC`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    startDate: row.start_date,
+    status: toPreparationStatus(row.status),
+  }));
+}
+
+/**
+ * Persiste uniquement un nouveau snapshot ; aucune mise à jour de son contenu
+ * n'est exposée. La transaction refuse un doublon pour une semaine déjà validée
+ * ainsi qu'une seconde préparation en cours : l'annulation ou la validation de
+ * la préparation existante reste un geste explicite.
+ */
 export async function createPreparation(
   database: SQLiteDatabase,
   snapshot: PreparationSnapshot,
 ): Promise<number> {
   let insert: SQLiteRunResult | null = null;
   await database.withExclusiveTransactionAsync(async (transaction) => {
+    const completed = await transaction.getFirstAsync<{ id: number }>(
+      `SELECT id FROM preparations WHERE start_date = ? AND status = 'COMPLETED'`,
+      snapshot.startDate,
+    );
+    if (completed !== null) {
+      throw new Error('Cette semaine a déjà été préparée et validée.');
+    }
+    const draft = await transaction.getFirstAsync<{ id: number }>(
+      `SELECT id FROM preparations WHERE status = 'DRAFT' ORDER BY id DESC LIMIT 1`,
+    );
+    if (draft !== null) {
+      throw new Error(
+        'Une préparation est déjà en cours. Reprenez-la ou annulez-la avant d’en démarrer une autre.',
+      );
+    }
     insert = await transaction.runAsync(
       `INSERT INTO preparations (start_date, end_date) VALUES (?, ?)`,
       snapshot.startDate,
@@ -198,6 +241,58 @@ export async function savePreparationProgress(
     progress.scanRaw ?? '',
     progress.nonFefoAcknowledged ? 1 : 0,
   );
+}
+
+/**
+ * Abandonne une préparation en cours. Le snapshot et la progression sont
+ * effacés : une préparation jamais validée n'a produit aucun mouvement de stock
+ * et ne doit rien laisser dans l'historique. L'appel est idempotent et refuse
+ * catégoriquement de toucher une préparation déjà validée.
+ */
+export async function cancelPreparation(
+  database: SQLiteDatabase,
+  preparationId: number,
+): Promise<void> {
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const preparation = await transaction.getFirstAsync<{ status: string }>(
+      'SELECT status FROM preparations WHERE id = ?',
+      preparationId,
+    );
+    if (preparation === null) return;
+    if (preparation.status !== 'DRAFT') {
+      throw new Error(
+        'Cette préparation est déjà terminée : elle ne peut plus être annulée.',
+      );
+    }
+    const movements = await transaction.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM stock_movements WHERE preparation_id = ?',
+      preparationId,
+    );
+    if (movements !== null && movements.count > 0) {
+      throw new Error(
+        'Des mouvements de stock existent pour cette préparation : annulation refusée.',
+      );
+    }
+    await transaction.runAsync(
+      'DELETE FROM preparation_progress WHERE preparation_id = ?',
+      preparationId,
+    );
+    await transaction.runAsync(
+      'DELETE FROM preparation_requirements WHERE preparation_id = ?',
+      preparationId,
+    );
+    await transaction.runAsync(
+      'DELETE FROM preparation_items WHERE preparation_id = ?',
+      preparationId,
+    );
+    const deleted = await transaction.runAsync(
+      `DELETE FROM preparations WHERE id = ? AND status = 'DRAFT'`,
+      preparationId,
+    );
+    if (deleted.changes !== 1) {
+      throw new Error('La préparation n’a pas pu être annulée.');
+    }
+  });
 }
 
 /**
@@ -386,6 +481,14 @@ export async function listPreparationHistory(
     });
   }
   return result;
+}
+
+function toPreparationStatus(value: string): KnownPreparation['status'] {
+  if (value !== 'DRAFT' && value !== 'COMPLETED')
+    throw new Error(
+      'La base locale contient un statut de préparation inconnu.',
+    );
+  return value;
 }
 
 function toVerificationMethod(value: string | null): BoxVerificationMethod {

@@ -78,11 +78,17 @@ describe('appel de l’API publique GitHub', () => {
   });
 
   it('retourne null lorsque fetch n’existe pas dans l’environnement', async () => {
-    await expect(
-      fetchLatestPublishedRelease({
-        fetchImpl: undefined as unknown as typeof fetch,
-      }),
-    ).resolves.toBeNull();
+    // `fetchImpl: undefined` retomberait sur le paramètre par défaut, donc sur
+    // le fetch global : le seul moyen de décrire cet environnement est de
+    // retirer réellement `globalThis.fetch` le temps du test. Sans cela, la
+    // suite partirait sur le réseau au lieu de vérifier la garde.
+    const globalFetch = globalThis.fetch;
+    Reflect.deleteProperty(globalThis, 'fetch');
+    try {
+      await expect(fetchLatestPublishedRelease()).resolves.toBeNull();
+    } finally {
+      globalThis.fetch = globalFetch;
+    }
   });
 
   it('retourne null sur une réponse GitHub structurellement invalide', async () => {

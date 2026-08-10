@@ -2,11 +2,18 @@ import Database from 'better-sqlite3';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
+import {
+  preparationEndDate,
+  type PreparationSnapshot,
+} from '@/domain/preparations/preparation';
 
 import {
+  cancelPreparation,
   completePreparation,
+  createPreparation,
   getLatestDraftPreparation,
   listPreparationHistory,
+  listPreparationWeeks,
   savePreparationProgress,
 } from '../preparation-repository';
 
@@ -141,6 +148,166 @@ function seedPreparation(
   }
   return preparationId;
 }
+
+function weekSnapshot(startDate: string): PreparationSnapshot {
+  return {
+    startDate,
+    endDate: preparationEndDate(startDate),
+    items: [
+      {
+        treatmentId: 1,
+        specialtyCis: '60000001',
+        specialtyName: 'Médicament 1',
+        pharmaceuticalForm: 'comprimé',
+        date: startDate,
+        slot: 'morning',
+        quantityHalfUnits: 1,
+      },
+    ],
+    requirements: [
+      {
+        specialtyCis: '60000001',
+        specialtyName: 'Médicament 1',
+        requiredHalfUnits: 7,
+        usableStockHalfUnits: 20,
+        missingHalfUnits: 0,
+      },
+    ],
+    hasShortages: false,
+  };
+}
+
+function countOf(raw: Database.Database, table: string): number {
+  return (
+    raw.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as {
+      count: number;
+    }
+  ).count;
+}
+
+describe('annulation d’une préparation en cours', () => {
+  it('efface la préparation sans mouvement de stock ni trace dans l’historique', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+
+    await cancelPreparation(database, id);
+
+    expect(countOf(raw, 'preparations')).toBe(0);
+    expect(countOf(raw, 'preparation_progress')).toBe(0);
+    expect(countOf(raw, 'preparation_requirements')).toBe(0);
+    expect(countOf(raw, 'preparation_items')).toBe(0);
+    expect(countOf(raw, 'stock_movements')).toBe(0);
+    expect(
+      raw.prepare('SELECT remaining_quantity FROM medication_boxes').get(),
+    ).toEqual({ remaining_quantity: 10 });
+    expect(await listPreparationHistory(database)).toEqual([]);
+    expect(await getLatestDraftPreparation(database)).toBeNull();
+    raw.close();
+  });
+
+  it('refuse d’annuler une préparation déjà validée', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+    await completePreparation(database, id, '2026-08-09');
+
+    await expect(cancelPreparation(database, id)).rejects.toThrow(
+      'déjà terminée',
+    );
+
+    expect(countOf(raw, 'preparations')).toBe(1);
+    expect(countOf(raw, 'stock_movements')).toBe(1);
+    expect(
+      raw.prepare('SELECT remaining_quantity FROM medication_boxes').get(),
+    ).toEqual({ remaining_quantity: 6.5 });
+    expect(await listPreparationHistory(database)).toHaveLength(1);
+    raw.close();
+  });
+
+  it('refuse d’annuler une préparation qui a déjà touché au stock', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+    raw
+      .prepare(
+        `INSERT INTO stock_movements
+          (box_id, preparation_id, type, quantity_delta, quantity_after, explanation)
+         VALUES (1, ?, 'PILLBOX_PREPARATION', -3.5, 6.5, 'mouvement incohérent')`,
+      )
+      .run(id);
+
+    await expect(cancelPreparation(database, id)).rejects.toThrow(
+      'mouvements de stock',
+    );
+
+    expect(countOf(raw, 'preparations')).toBe(1);
+    expect(countOf(raw, 'stock_movements')).toBe(1);
+    raw.close();
+  });
+
+  it('reste sans effet lorsque la préparation a déjà été annulée', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+
+    await cancelPreparation(database, id);
+    await expect(cancelPreparation(database, id)).resolves.toBeUndefined();
+
+    expect(countOf(raw, 'preparations')).toBe(0);
+    raw.close();
+  });
+});
+
+describe('choix de la semaine préparée', () => {
+  it('crée la préparation demandée et la liste comme semaine en cours', async () => {
+    const { raw, database } = await createDatabase();
+
+    const id = await createPreparation(database, weekSnapshot('2026-08-17'));
+
+    expect(await listPreparationWeeks(database)).toEqual([
+      { id, startDate: '2026-08-17', status: 'DRAFT' },
+    ]);
+    raw.close();
+  });
+
+  it('refuse un doublon pour une semaine déjà validée', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+    await completePreparation(database, id, '2026-08-09');
+
+    await expect(
+      createPreparation(database, weekSnapshot('2026-08-10')),
+    ).rejects.toThrow('déjà été préparée');
+
+    expect(countOf(raw, 'preparations')).toBe(1);
+    raw.close();
+  });
+
+  it('refuse une seconde préparation en cours pour une autre semaine', async () => {
+    const { raw, database } = await createDatabase();
+    seedPreparation(raw);
+
+    await expect(
+      createPreparation(database, weekSnapshot('2026-08-17')),
+    ).rejects.toThrow('déjà en cours');
+
+    expect(countOf(raw, 'preparations')).toBe(1);
+    raw.close();
+  });
+
+  it('libère la semaine après une annulation', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+    await cancelPreparation(database, id);
+
+    const recreated = await createPreparation(
+      database,
+      weekSnapshot('2026-08-10'),
+    );
+
+    expect(await listPreparationWeeks(database)).toEqual([
+      { id: recreated, startDate: '2026-08-10', status: 'DRAFT' },
+    ]);
+    raw.close();
+  });
+});
 
 describe('validation transactionnelle d’une préparation', () => {
   it('décrémente exactement le lot utilisé, crée le mouvement et complète la préparation', async () => {

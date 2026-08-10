@@ -6,7 +6,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
-import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
+import {
+  formatFrenchCivilPeriod,
+  formatLongFrenchCivilDate,
+} from '@/components/treatments/civil-date';
 import {
   isExpired,
   parseGs1Expiration,
@@ -18,11 +21,16 @@ import {
   generatePreparationSnapshot,
   listBoxesForMedication,
   matchScannedBox,
-  preparationStartDate,
+  preparationWeeks,
+  preparationWeekState,
   verifyPreparationBox,
   type BoxVerification,
   type BoxVerificationMethod,
+  type KnownPreparation,
   type PreparationSnapshot,
+  type PreparationWeek,
+  type PreparationWeekChoice,
+  type PreparationWeekState,
 } from '@/domain/preparations/preparation';
 import {
   formatHalfUnits,
@@ -30,9 +38,11 @@ import {
 } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
+  cancelPreparation,
   createPreparation,
   completePreparation,
   getLatestDraftPreparation,
+  listPreparationWeeks,
   savePreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
@@ -44,10 +54,17 @@ import {
   LoadingState,
   Message,
   Screen,
+  SectionTitle,
   colors,
   radii,
+  spacing,
   typography,
 } from '@/ui';
+
+const WEEK_LABELS: Record<PreparationWeekChoice, string> = {
+  CURRENT: 'Semaine à venir',
+  NEXT: 'Semaine suivante',
+};
 
 const SLOT_LABELS: Record<IntakeSlot, string> = {
   morning: 'matin',
@@ -69,6 +86,8 @@ export default function NewPreparationScreen() {
   const [snapshot, setSnapshot] = useState<PreparationSnapshot | null>(null);
   const [preparationId, setPreparationId] = useState<number | null>(null);
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
+  const [weeks, setWeeks] = useState<KnownPreparation[]>([]);
+  const [choice, setChoice] = useState<PreparationWeekChoice>('CURRENT');
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<PendingBox | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -78,25 +97,36 @@ export default function NewPreparationScreen() {
   const [finalized, setFinalized] = useState(false);
   const [finalConfirmationVisible, setFinalConfirmationVisible] =
     useState(false);
+  const [cancelConfirmationVisible, setCancelConfirmationVisible] =
+    useState(false);
   const [error, setError] = useState<string | null>(null);
   const scanLocked = useRef(false);
+  const options = useMemo(() => preparationWeeks(todayIso()), []);
 
   useEffect(() => {
     let active = true;
     Promise.all([
       getLatestDraftPreparation(database),
       listMedicationBoxes(database),
+      listPreparationWeeks(database),
     ])
-      .then(([saved, inventory]) => {
+      .then(([saved, inventory, knownWeeks]) => {
         if (!active) return;
         setBoxes(inventory);
+        setWeeks(knownWeeks);
         if (saved) {
           setSnapshot(saved.snapshot);
           setPreparationId(saved.id);
           setCompleted(
             new Set(saved.progress.map((item) => item.specialtyCis)),
           );
+          return;
         }
+        const available = options.find(
+          (option) =>
+            preparationWeekState(option.startDate, knownWeeks) === 'AVAILABLE',
+        );
+        setChoice(available?.choice ?? 'CURRENT');
       })
       .catch((reason: unknown) => {
         if (active)
@@ -108,7 +138,7 @@ export default function NewPreparationScreen() {
     return () => {
       active = false;
     };
-  }, [database]);
+  }, [database, options]);
 
   const current = useMemo(
     () =>
@@ -118,8 +148,13 @@ export default function NewPreparationScreen() {
     [completed, snapshot],
   );
 
+  const selectedWeek =
+    options.find((week) => week.choice === choice) ?? options[0];
+  const selectedWeekState = preparationWeekState(selectedWeek.startDate, weeks);
+
   async function generate(): Promise<void> {
     if (loading || preparationId !== null) return;
+    if (selectedWeekState !== 'AVAILABLE') return;
     setLoading(true);
     setError(null);
     try {
@@ -128,7 +163,7 @@ export default function NewPreparationScreen() {
       const generated = generatePreparationSnapshot(
         treatments,
         boxes,
-        preparationStartDate(referenceDate),
+        selectedWeek.startDate,
         referenceDate,
       );
       const id = await createPreparation(database, generated);
@@ -138,6 +173,71 @@ export default function NewPreparationScreen() {
       setError(message(reason, 'Génération impossible.'));
     } finally {
       setLoading(false);
+    }
+    // Après une création comme après un refus de doublon, l'écran doit refléter
+    // l'état réel de la base locale.
+    try {
+      setWeeks(await listPreparationWeeks(database));
+    } catch {
+      // Les semaines déjà chargées restent affichées.
+    }
+  }
+
+  /** Ramène l'écran au choix de la semaine sans toucher au stock. */
+  function resetToWeekChoice(): void {
+    setSnapshot(null);
+    setPreparationId(null);
+    setCompleted(new Set());
+    setPending(null);
+    setChoosing(false);
+    setScanning(false);
+    setFinalized(false);
+    setError(null);
+  }
+
+  /** La semaine à venir reste le défaut tant qu'elle n'est pas déjà préparée. */
+  function selectFirstAvailableWeek(known: readonly KnownPreparation[]): void {
+    const available = options.find(
+      (option) => preparationWeekState(option.startDate, known) === 'AVAILABLE',
+    );
+    setChoice(available?.choice ?? 'CURRENT');
+  }
+
+  function requestCancel(): void {
+    if (preparationId === null || saving) return;
+    if (completed.size > 0 || pending !== null) {
+      setCancelConfirmationVisible(true);
+      return;
+    }
+    void cancelCurrentPreparation();
+  }
+
+  async function cancelCurrentPreparation(): Promise<void> {
+    if (preparationId === null || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await cancelPreparation(database, preparationId);
+      setCancelConfirmationVisible(false);
+      resetToWeekChoice();
+      const known = await listPreparationWeeks(database);
+      setWeeks(known);
+      selectFirstAvailableWeek(known);
+    } catch (reason: unknown) {
+      setError(message(reason, 'Annulation impossible.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function prepareAnotherWeek(): Promise<void> {
+    resetToWeekChoice();
+    try {
+      const known = await listPreparationWeeks(database);
+      setWeeks(known);
+      selectFirstAvailableWeek(known);
+    } catch (reason: unknown) {
+      setError(message(reason, 'Chargement des semaines impossible.'));
     }
   }
 
@@ -314,6 +414,12 @@ export default function NewPreparationScreen() {
             <Text style={styles.guideText}>
               Scannez la boîte réellement utilisée
             </Text>
+            {snapshot ? (
+              <Text style={styles.guideText}>
+                Semaine{' '}
+                {formatFrenchCivilPeriod(snapshot.startDate, snapshot.endDate)}
+              </Text>
+            ) : null}
           </View>
         </CameraView>
         <AppButton
@@ -327,6 +433,20 @@ export default function NewPreparationScreen() {
 
   return (
     <Screen
+      fixedHeader={
+        snapshot ? (
+          <View style={styles.periodHeader}>
+            <Badge
+              label={finalized ? 'Semaine validée' : 'Semaine en préparation'}
+              tone={finalized ? 'success' : 'warning'}
+            />
+            <Text accessibilityRole="header" style={styles.period}>
+              Semaine{' '}
+              {formatFrenchCivilPeriod(snapshot.startDate, snapshot.endDate)}
+            </Text>
+          </View>
+        ) : undefined
+      }
       stickyFooter={
         current && !pending && !choosing ? (
           <View style={styles.footerActions}>
@@ -348,15 +468,14 @@ export default function NewPreparationScreen() {
         médicament. Aucun stock n’est encore décrémenté.
       </Text>
       {preparationId === null ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => void generate()}
-          style={styles.primary}
-        >
-          <Text style={styles.primaryText}>
-            Générer la préparation de 7 jours
-          </Text>
-        </Pressable>
+        <WeekChoice
+          options={options}
+          weeks={weeks}
+          choice={choice}
+          selectedState={selectedWeekState}
+          onChoose={setChoice}
+          onStart={() => void generate()}
+        />
       ) : null}
       {error ? (
         <Message tone="error" title="Action impossible">
@@ -365,7 +484,7 @@ export default function NewPreparationScreen() {
       ) : null}
       {snapshot ? (
         <>
-          <Text style={styles.period}>
+          <Text style={styles.periodDetail}>
             Du {formatLongFrenchCivilDate(snapshot.startDate)} au{' '}
             {formatLongFrenchCivilDate(snapshot.endDate)}
           </Text>
@@ -442,10 +561,50 @@ export default function NewPreparationScreen() {
         </Card>
       ) : null}
       {finalized ? (
-        <Message tone="success" title="Préparation validée">
-          Le stock et les lots utilisés ont été enregistrés dans l’historique.
-        </Message>
+        <>
+          <Message tone="success" title="Préparation validée">
+            Le stock et les lots utilisés ont été enregistrés dans l’historique.
+          </Message>
+          <AppButton
+            label="Préparer une autre semaine"
+            variant="secondary"
+            onPress={() => void prepareAnotherWeek()}
+          />
+        </>
       ) : null}
+      {preparationId !== null && !finalized ? (
+        <View style={styles.cancelArea}>
+          <AppButton
+            label="Annuler la préparation"
+            variant="quiet"
+            disabled={saving}
+            onPress={requestCancel}
+            accessibilityHint="Abandonne la préparation en cours sans modifier le stock"
+          />
+          <Text style={typography.caption}>
+            L’annulation n’enregistre rien : aucun stock n’est modifié et aucune
+            préparation n’apparaît dans l’historique.
+          </Text>
+        </View>
+      ) : null}
+      <AppModal
+        visible={cancelConfirmationVisible}
+        title="Annuler cette préparation ?"
+        primaryLabel="Annuler la préparation"
+        destructive
+        busy={saving}
+        onCancel={() => setCancelConfirmationVisible(false)}
+        onPrimary={() => void cancelCurrentPreparation()}
+      >
+        <Text style={styles.intro}>
+          {completed.size === 0
+            ? 'La boîte désignée mais pas encore validée sera oubliée.'
+            : completed.size > 1
+              ? `Les ${completed.size} médicaments déjà vérifiés seront oubliés.`
+              : 'Le médicament déjà vérifié sera oublié.'}{' '}
+          Aucun stock n’est décrémenté et rien n’est ajouté à l’historique.
+        </Text>
+      </AppModal>
       <AppModal
         visible={finalConfirmationVisible}
         title="Valider la préparation ?"
@@ -460,6 +619,79 @@ export default function NewPreparationScreen() {
         </Text>
       </AppModal>
     </Screen>
+  );
+}
+
+/**
+ * Choix explicite de la semaine à préparer. La semaine à venir reste
+ * sélectionnée par défaut ; une semaine déjà validée ne peut pas être relancée.
+ */
+function WeekChoice({
+  options,
+  weeks,
+  choice,
+  selectedState,
+  onChoose,
+  onStart,
+}: {
+  options: readonly PreparationWeek[];
+  weeks: readonly KnownPreparation[];
+  choice: PreparationWeekChoice;
+  selectedState: PreparationWeekState;
+  onChoose(choice: PreparationWeekChoice): void;
+  onStart(): void;
+}) {
+  return (
+    <Card style={styles.card}>
+      <SectionTitle>Quelle semaine préparer ?</SectionTitle>
+      <View accessibilityRole="radiogroup" style={styles.weekOptions}>
+        {options.map((option) => {
+          const state = preparationWeekState(option.startDate, weeks);
+          const selected = option.choice === choice;
+          return (
+            <Pressable
+              accessibilityLabel={`${WEEK_LABELS[option.choice]}, semaine ${formatFrenchCivilPeriod(option.startDate, option.endDate)}`}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+              key={option.choice}
+              onPress={() => onChoose(option.choice)}
+              style={[styles.weekOption, selected && styles.weekOptionSelected]}
+            >
+              <Text style={styles.weekOptionTitle}>
+                {WEEK_LABELS[option.choice]}
+              </Text>
+              <Text style={styles.weekOptionPeriod}>
+                Semaine{' '}
+                {formatFrenchCivilPeriod(option.startDate, option.endDate)}
+              </Text>
+              {state === 'ALREADY_PREPARED' ? (
+                <Badge label="Déjà préparée" tone="success" />
+              ) : null}
+              {state === 'IN_PROGRESS' ? (
+                <Badge label="Préparation en cours" tone="warning" />
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </View>
+      {selectedState === 'ALREADY_PREPARED' ? (
+        <Message tone="warning" title="Semaine déjà préparée">
+          Une préparation validée existe déjà pour cette période. Choisissez une
+          autre semaine plutôt que de créer un doublon.
+        </Message>
+      ) : null}
+      {selectedState === 'IN_PROGRESS' ? (
+        <Message tone="warning" title="Préparation déjà commencée">
+          Une préparation incomplète existe pour cette période. Reprenez-la
+          depuis l’accueil plutôt que d’en créer une nouvelle.
+        </Message>
+      ) : null}
+      <AppButton
+        label="Générer la préparation de 7 jours"
+        disabled={selectedState !== 'AVAILABLE'}
+        onPress={onStart}
+      />
+    </Card>
   );
 }
 
@@ -703,14 +935,25 @@ const styles = StyleSheet.create({
   },
   intro: typography.body,
   name: typography.title,
-  period: { fontSize: 19, fontWeight: '800', marginTop: 18 },
-  primary: {
-    backgroundColor: '#0F6F70',
-    borderRadius: 8,
-    marginTop: 20,
-    padding: 14,
+  period: typography.heading,
+  periodHeader: { gap: spacing.xs },
+  periodDetail: { ...typography.caption, marginTop: spacing.sm },
+  cancelArea: { gap: spacing.xs, marginTop: spacing.lg },
+  weekOptions: { gap: spacing.sm },
+  weekOption: {
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    gap: spacing.xs,
+    padding: spacing.md,
   },
-  primaryText: { color: '#fff', fontWeight: '700', textAlign: 'center' },
+  weekOptionSelected: {
+    backgroundColor: colors.brandSoft,
+    borderColor: colors.brand,
+    borderWidth: 2,
+  },
+  weekOptionTitle: typography.label,
+  weekOptionPeriod: { fontSize: 17, fontWeight: '800' },
   progress: { marginBottom: 16, marginTop: 4 },
   success: { backgroundColor: colors.surface },
   successTitle: {

@@ -6,7 +6,10 @@ import {
   generatePreparationSnapshot,
   listBoxesForMedication,
   matchScannedBox,
+  preparationEndDate,
   preparationStartDate,
+  preparationWeeks,
+  preparationWeekState,
   verifyPreparationBox,
 } from '../preparation';
 
@@ -156,6 +159,43 @@ describe('génération d’une préparation de sept jours', () => {
     expect(snapshot.items).toEqual([]);
     expect(snapshot.requirements).toEqual([]);
     expect(snapshot.hasShortages).toBe(false);
+  });
+});
+
+describe('choix de la semaine à préparer', () => {
+  it('propose la semaine à venir puis la suivante, sans chevauchement', () => {
+    expect(preparationWeeks('2026-08-09')).toEqual([
+      { choice: 'CURRENT', startDate: '2026-08-10', endDate: '2026-08-16' },
+      { choice: 'NEXT', startDate: '2026-08-17', endDate: '2026-08-23' },
+    ]);
+  });
+
+  it('traverse les mois sans décaler la durée de sept jours', () => {
+    expect(preparationWeeks('2026-08-29')).toEqual([
+      { choice: 'CURRENT', startDate: '2026-08-30', endDate: '2026-09-05' },
+      { choice: 'NEXT', startDate: '2026-09-06', endDate: '2026-09-12' },
+    ]);
+    expect(preparationEndDate('2026-12-28')).toBe('2027-01-03');
+  });
+
+  it('bloque une semaine déjà validée et signale une préparation à reprendre', () => {
+    const known = [
+      { id: 1, startDate: '2026-08-10', status: 'COMPLETED' as const },
+      { id: 2, startDate: '2026-08-17', status: 'DRAFT' as const },
+    ];
+    expect(preparationWeekState('2026-08-10', known)).toBe('ALREADY_PREPARED');
+    expect(preparationWeekState('2026-08-17', known)).toBe('IN_PROGRESS');
+    expect(preparationWeekState('2026-08-24', known)).toBe('AVAILABLE');
+    expect(preparationWeekState('2026-08-10', [])).toBe('AVAILABLE');
+  });
+
+  it('considère une semaine validée comme préparée même après une nouvelle tentative', () => {
+    expect(
+      preparationWeekState('2026-08-10', [
+        { id: 2, startDate: '2026-08-10', status: 'DRAFT' },
+        { id: 1, startDate: '2026-08-10', status: 'COMPLETED' },
+      ]),
+    ).toBe('ALREADY_PREPARED');
   });
 });
 

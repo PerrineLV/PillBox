@@ -16,6 +16,32 @@ export function formatLongFrenchCivilDate(value: string): string {
   }).format(date);
 }
 
+/**
+ * Affiche une période civile de façon compacte, par exemple « du 17 au 23 août ».
+ * Le mois n'est répété que lorsque la période le traverse, et l'année seulement
+ * lorsqu'elle change.
+ */
+export function formatFrenchCivilPeriod(start: string, end: string): string {
+  const startDate = civilDateToPickerDate(start);
+  const endDate = civilDateToPickerDate(end);
+  if (startDate === null || endDate === null) return `du ${start} au ${end}`;
+  const sameYear = startDate.getFullYear() === endDate.getFullYear();
+  const sameMonth = sameYear && startDate.getMonth() === endDate.getMonth();
+  const startOptions: Intl.DateTimeFormatOptions = sameMonth
+    ? { day: 'numeric' }
+    : sameYear
+      ? { day: 'numeric', month: 'long' }
+      : { day: 'numeric', month: 'long', year: 'numeric' };
+  const endOptions: Intl.DateTimeFormatOptions = sameYear
+    ? { day: 'numeric', month: 'long' }
+    : { day: 'numeric', month: 'long', year: 'numeric' };
+  const startLabel = new Intl.DateTimeFormat('fr-FR', startOptions).format(
+    startDate,
+  );
+  const endLabel = new Intl.DateTimeFormat('fr-FR', endOptions).format(endDate);
+  return `du ${startLabel} au ${endLabel}`;
+}
+
 /** Ajoute le jour de la semaine pour les écrans centrés sur une prise. */
 export function formatFullFrenchCivilDate(value: string): string {
   const date = civilDateToPickerDate(value);
