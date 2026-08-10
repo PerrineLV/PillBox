@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -206,6 +206,103 @@ export function SectionTitle({ children }: { children: ReactNode }) {
     <Text accessibilityRole="header" style={styles.sectionTitle}>
       {children}
     </Text>
+  );
+}
+
+/**
+ * Liste déroulante à choix unique. Centralisée pour que le jour du rappel
+ * hebdomadaire et le jour d’une prise hebdomadaire se choisissent de la même
+ * manière.
+ */
+export function SelectField<Value extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  placeholder = 'Choisir',
+  accessibilityLabel,
+}: {
+  label: string;
+  value: Value | null;
+  options: readonly { value: Value; label: string }[];
+  onChange(value: Value): void;
+  placeholder?: string;
+  accessibilityLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value) ?? null;
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      <Pressable
+        accessibilityLabel={`${accessibilityLabel ?? label}, ${selected?.label ?? placeholder}`}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
+        style={styles.selectButton}
+      >
+        <Text
+          style={[styles.selectText, selected === null && styles.selectMuted]}
+        >
+          {selected?.label ?? placeholder}
+        </Text>
+        <Text accessibilityElementsHidden style={styles.selectChevron}>
+          {open ? '⌃' : '⌄'}
+        </Text>
+      </Pressable>
+      {open ? (
+        <Card style={styles.selectMenu}>
+          {options.map((option) => {
+            const isSelected = option.value === value;
+            return (
+              <Pressable
+                accessibilityRole="menuitem"
+                accessibilityState={{ selected: isSelected }}
+                key={option.value}
+                onPress={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                style={[
+                  styles.selectOption,
+                  isSelected && styles.selectOptionSelected,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.selectOptionText,
+                    isSelected && styles.selectOptionTextSelected,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+                {isSelected ? <Text style={styles.selectCheck}>✓</Text> : null}
+              </Pressable>
+            );
+          })}
+        </Card>
+      ) : null}
+    </View>
+  );
+}
+
+/** Grille des quatre temps de prise : matin, midi, soir, coucher. */
+export function SlotGrid({ children }: { children: ReactNode }) {
+  return <View style={styles.slotGrid}>{children}</View>;
+}
+
+export function SlotCard({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.slotCard}>
+      <Text style={styles.label}>{label}</Text>
+      {children}
+    </View>
   );
 }
 
@@ -535,6 +632,42 @@ const styles = StyleSheet.create({
     marginVertical: spacing.sm,
   },
   sectionTitle: typography.heading,
+  selectButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: sizes.touch,
+    paddingHorizontal: spacing.lg,
+  },
+  selectText: { ...typography.body, flex: 1, fontWeight: '700' },
+  selectMuted: { color: colors.textMuted, fontWeight: '400' },
+  selectChevron: { color: colors.brand, fontSize: 22 },
+  selectMenu: { gap: 0, padding: spacing.xs },
+  selectOption: {
+    alignItems: 'center',
+    borderRadius: radii.md,
+    flexDirection: 'row',
+    minHeight: sizes.touch,
+    paddingHorizontal: spacing.md,
+  },
+  selectOptionSelected: { backgroundColor: colors.brandSoft },
+  selectOptionText: { ...typography.body, flex: 1 },
+  selectOptionTextSelected: { color: colors.brand, fontWeight: '700' },
+  selectCheck: { color: colors.success, fontSize: 18, fontWeight: '800' },
+  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
+  slotCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    gap: spacing.sm,
+    minWidth: 140,
+    padding: spacing.md,
+    width: '48%',
+  },
   modalOverlay: {
     backgroundColor: colors.overlay,
     flex: 1,

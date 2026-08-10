@@ -14,7 +14,6 @@ import {
 
 import {
   INTAKE_SLOTS,
-  WEEKDAYS,
   assertValidTreatmentPhases,
   formatHalfUnits,
   isLegacyTreatmentPhase,
@@ -22,12 +21,17 @@ import {
   type ScheduledTreatmentPhase,
   type TreatmentDraft,
   type TreatmentPhase,
-  type Weekday,
 } from '@/domain/treatments/treatment';
 import {
   AppButton,
   AppField,
+  INTAKE_SLOT_LABELS,
   Message,
+  SelectField,
+  SlotCard,
+  SlotGrid,
+  WEEKDAY_LABELS,
+  WEEKDAY_OPTIONS,
   colors,
   radii,
   sizes,
@@ -38,24 +42,9 @@ import {
 import {
   civilDateToPickerDate,
   formatFrenchCivilDate,
+  nextCivilDay,
   pickerDateToCivilDate,
 } from './civil-date';
-
-const DAY_LABELS: Record<Weekday, string> = {
-  monday: 'Lundi',
-  tuesday: 'Mardi',
-  wednesday: 'Mercredi',
-  thursday: 'Jeudi',
-  friday: 'Vendredi',
-  saturday: 'Samedi',
-  sunday: 'Dimanche',
-};
-const SLOT_LABELS: Record<IntakeSlot, string> = {
-  morning: 'Matin',
-  noon: 'Midi',
-  evening: 'Soir',
-  bedtime: 'Coucher',
-};
 
 type Props = {
   initialValue: TreatmentDraft;
@@ -64,7 +53,9 @@ type Props = {
 };
 
 export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
-  const [phases, setPhases] = useState<TreatmentPhase[]>(initialValue.phases);
+  const [phases, setPhases] = useState<TreatmentPhase[]>(() =>
+    initialPhases(initialValue.phases),
+  );
   const [included, setIncluded] = useState(initialValue.includedInPillbox);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -125,7 +116,8 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
               </Text>
               {phase.dosage.map((item) => (
                 <Text key={`${item.weekday}-${item.slot}`}>
-                  {DAY_LABELS[item.weekday]} · {SLOT_LABELS[item.slot]} :{' '}
+                  {WEEKDAY_LABELS[item.weekday]} ·{' '}
+                  {INTAKE_SLOT_LABELS[item.slot]} :{' '}
                   {formatHalfUnits(item.quantityHalfUnits)}
                 </Text>
               ))}
@@ -154,7 +146,7 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
       <AppButton
         label="Ajouter une phase"
         variant="secondary"
-        onPress={() => setPhases([...phases, emptyPhase()])}
+        onPress={() => setPhases([...phases, nextPhase(phases)])}
       />
       <Toggle
         label="Inclure dans le pilulier"
@@ -175,7 +167,34 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
   );
 }
 
-function PhaseEditor({
+/**
+ * Une phase 1 vide est proposée d’emblée : la posologie se saisit sans étape
+ * préalable. Les phases suivantes restent ajoutées explicitement.
+ */
+export function initialPhases(
+  phases: readonly TreatmentPhase[],
+): TreatmentPhase[] {
+  return phases.length > 0 ? [...phases] : [emptyPhase()];
+}
+
+/**
+ * Une phase ajoutée démarre par défaut le lendemain de la dernière fin de
+ * phase saisie : les phases ne peuvent pas se chevaucher. Sans date de fin
+ * connue, la date reste à saisir — elle n’est jamais devinée.
+ */
+export function nextPhase(
+  phases: readonly TreatmentPhase[],
+): ScheduledTreatmentPhase {
+  const lastEndDate = phases.reduce<string | null>((latest, phase) => {
+    const endDate = isLegacyTreatmentPhase(phase) ? null : phase.endDate;
+    if (endDate === null || endDate === '') return latest;
+    return latest === null || endDate > latest ? endDate : latest;
+  }, null);
+  const startDate = lastEndDate === null ? null : nextCivilDay(lastEndDate);
+  return { ...emptyPhase(), startDate: startDate ?? '' };
+}
+
+export function PhaseEditor({
   number,
   phase,
   onChange,
@@ -256,43 +275,45 @@ function PhaseEditor({
         </>
       ) : null}
       {frequency.type === 'weekly' ? (
-        <View style={styles.row}>
-          {WEEKDAYS.map((day) => (
-            <Choice
-              key={day}
-              label={DAY_LABELS[day]}
-              selected={frequency.weekday === day}
-              onPress={() =>
-                onChange({
-                  ...phase,
-                  frequency: { type: 'weekly', weekday: day },
-                })
-              }
-            />
-          ))}
-        </View>
+        <SelectField
+          accessibilityLabel={`Jour de la prise hebdomadaire, phase ${number}`}
+          label="Jour de la prise"
+          onChange={(weekday) =>
+            onChange({ ...phase, frequency: { type: 'weekly', weekday } })
+          }
+          options={WEEKDAY_OPTIONS}
+          placeholder="Choisir un jour"
+          value={frequency.weekday}
+        />
       ) : null}
-      <Text style={styles.label}>Quantité par créneau</Text>
-      {INTAKE_SLOTS.map((slot) => {
-        const item = phase.dosage.find((dosage) => dosage.slot === slot);
-        return (
-          <View key={slot} style={styles.fieldRow}>
-            <AppField
-              label={`Quantité ${SLOT_LABELS[slot]}`}
-              accessibilityLabel={`Quantité ${SLOT_LABELS[slot]} phase ${number}`}
-              inputMode="decimal"
-              placeholder="0"
-              style={styles.compactInput}
-              value={
-                item ? String(item.quantityHalfUnits / 2).replace('.', ',') : ''
-              }
-              onChangeText={(value) =>
-                onChange({ ...phase, dosage: updateDosage(phase, slot, value) })
-              }
-            />
-          </View>
-        );
-      })}
+      <Text style={styles.label}>Posologie</Text>
+      <SlotGrid>
+        {INTAKE_SLOTS.map((slot) => {
+          const item = phase.dosage.find((dosage) => dosage.slot === slot);
+          return (
+            <SlotCard key={slot} label={INTAKE_SLOT_LABELS[slot]}>
+              <TextInput
+                accessibilityLabel={`Posologie ${INTAKE_SLOT_LABELS[slot]}, phase ${number}`}
+                inputMode="decimal"
+                placeholder="0"
+                placeholderTextColor={colors.textMuted}
+                style={styles.slotInput}
+                value={
+                  item
+                    ? String(item.quantityHalfUnits / 2).replace('.', ',')
+                    : ''
+                }
+                onChangeText={(value) =>
+                  onChange({
+                    ...phase,
+                    dosage: updateDosage(phase, slot, value),
+                  })
+                }
+              />
+            </SlotCard>
+          );
+        })}
+      </SlotGrid>
       <Text style={styles.hint}>
         Saisissez explicitement chaque créneau. Multiples de 0,5 acceptés.
       </Text>
@@ -496,6 +517,18 @@ const styles = StyleSheet.create({
   },
   datePlaceholder: { color: '#6b7280' },
   compactInput: { width: 100 },
+  slotInput: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    color: colors.text,
+    fontSize: 20,
+    fontVariant: ['tabular-nums'],
+    minHeight: sizes.touch,
+    paddingHorizontal: spacing.md,
+    textAlign: 'center',
+  },
   fieldRow: { alignItems: 'center', flexDirection: 'row', marginTop: 8 },
   form: { gap: spacing.md },
   heading: { ...typography.heading, marginTop: 12 },
