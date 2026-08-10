@@ -12,7 +12,9 @@ import {
   deleteIntakePostponement,
   getIntakePostponement,
   listIntakeHistory,
+  listPendingIntakeCounts,
   markPendingIntakesTaken,
+  markPendingIntakesTakenForGroups,
   materializeIntakeSnapshots,
   saveIntakePostponement,
   updateIntakeStatus,
@@ -330,6 +332,106 @@ describe('suivi local des prises', () => {
     expect(
       await getIntakePostponement(database, '2026-08-10', 'noon'),
     ).not.toBeNull();
+    raw.close();
+  });
+
+  it('valide plusieurs créneaux d’un même rappel à une heure unique', async () => {
+    const { raw, database } = await setup();
+    const noon = {
+      ...snapshot,
+      key: intakeRecordKey(1, '2026-08-10', 'noon'),
+      slot: 'noon' as const,
+    };
+    const nextDay = {
+      ...snapshot,
+      key: intakeRecordKey(1, '2026-08-11', 'morning'),
+      date: '2026-08-11',
+    };
+    await materializeIntakeSnapshots(database, [snapshot, beta, noon, nextDay]);
+    raw.exec(`UPDATE intake_records SET updated_at = '2020-01-01 00:00:00'`);
+
+    expect(
+      await markPendingIntakesTakenForGroups(database, [
+        { date: '2026-08-10', slot: 'morning' },
+        { date: '2026-08-10', slot: 'noon' },
+        // Un créneau répété ne doit pas compter deux fois.
+        { date: '2026-08-10', slot: 'noon' },
+      ]),
+    ).toBe(3);
+
+    const validated = raw
+      .prepare(
+        `SELECT DISTINCT updated_at FROM intake_records WHERE status = 'TAKEN'`,
+      )
+      .all() as { updated_at: string }[];
+    expect(validated).toHaveLength(1);
+    expect(validated[0].updated_at).not.toBe('2020-01-01 00:00:00');
+    expect(
+      raw
+        .prepare(
+          `SELECT status, updated_at FROM intake_records WHERE intake_key = ?`,
+        )
+        .get(nextDay.key),
+    ).toEqual({ status: 'UNSET', updated_at: '2020-01-01 00:00:00' });
+    raw.close();
+  });
+
+  it('rejoue une action de notification sans créer de doublon ni réécrire une prise validée', async () => {
+    const { raw, database } = await setup();
+    await materializeIntakeSnapshots(database, [snapshot, beta]);
+    const groups = [{ date: '2026-08-10', slot: 'morning' as const }];
+
+    expect(await markPendingIntakesTakenForGroups(database, groups)).toBe(2);
+    const after = raw
+      .prepare('SELECT intake_key, status, updated_at FROM intake_records')
+      .all();
+    // Deuxième réception de la même action : plus rien n'est en attente.
+    expect(await markPendingIntakesTakenForGroups(database, groups)).toBe(0);
+    expect(
+      raw
+        .prepare('SELECT intake_key, status, updated_at FROM intake_records')
+        .all(),
+    ).toEqual(after);
+    expect(
+      raw.prepare('SELECT COUNT(*) count FROM intake_records').get(),
+    ).toEqual({ count: 2 });
+    raw.close();
+  });
+
+  it('ne valide rien lorsque le rappel ne désigne aucun créneau', async () => {
+    const { raw, database } = await setup();
+    await materializeIntakeSnapshots(database, [snapshot]);
+    expect(await markPendingIntakesTakenForGroups(database, [])).toBe(0);
+    expect(raw.prepare('SELECT status FROM intake_records').get()).toEqual({
+      status: 'UNSET',
+    });
+    raw.close();
+  });
+
+  it('compte les prises en attente par créneau sur la période demandée', async () => {
+    const { raw, database } = await setup();
+    await materializeIntakeSnapshots(database, [
+      snapshot,
+      beta,
+      {
+        ...snapshot,
+        key: intakeRecordKey(1, '2026-08-10', 'noon'),
+        slot: 'noon',
+      },
+      {
+        ...snapshot,
+        key: intakeRecordKey(1, '2026-08-12', 'morning'),
+        date: '2026-08-12',
+      },
+    ]);
+    await updateIntakeStatus(database, beta.key, 'SKIPPED');
+
+    expect(
+      await listPendingIntakeCounts(database, '2026-08-10', '2026-08-11'),
+    ).toEqual([
+      { date: '2026-08-10', slot: 'morning', pending: 1 },
+      { date: '2026-08-10', slot: 'noon', pending: 1 },
+    ]);
     raw.close();
   });
 });

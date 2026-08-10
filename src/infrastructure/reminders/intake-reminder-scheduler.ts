@@ -6,10 +6,16 @@ import {
   planIntakeReminders,
   type PlannedIntakeReminder,
 } from '@/domain/reminders/intake-reminder';
-import { snapshotGeneratedIntake } from '@/domain/intakes/intake-tracking';
+import {
+  pendingIntakeCountForGroups,
+  snapshotGeneratedIntake,
+} from '@/domain/intakes/intake-tracking';
 import { generateIntakes } from '@/domain/treatments/generate-intakes';
 import type { Treatment } from '@/domain/treatments/treatment';
-import { materializeIntakeSnapshots } from '@/infrastructure/intakes/intake-repository';
+import {
+  listPendingIntakeCounts,
+  materializeIntakeSnapshots,
+} from '@/infrastructure/intakes/intake-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
   cancelIntakeReminders,
@@ -58,6 +64,11 @@ export async function synchronizeIntakeReminders(
     until,
   );
   await materializePlannedIntakes(database, treatments, planned, now, until);
+  const pending = await listPendingIntakeCounts(
+    database,
+    localCivilDate(now),
+    localCivilDate(until),
+  );
   const manifest: {
     notificationId: string;
     scheduledAt: string;
@@ -69,6 +80,7 @@ export async function synchronizeIntakeReminders(
         notificationId: await scheduleIntakeReminder(
           reminder.scheduledAt,
           reminder.groups,
+          pendingIntakeCountForGroups(pending, reminder.groups),
         ),
         scheduledAt: reminder.scheduledAt.toISOString(),
         treatmentIds: reminder.treatmentIds,
@@ -113,6 +125,11 @@ export async function synchronizeTreatmentIntakeReminders(
     until,
   );
   await materializePlannedIntakes(database, treatments, desired, now, until);
+  const pending = await listPendingIntakeCounts(
+    database,
+    localCivilDate(now),
+    localCivilDate(until),
+  );
   const affectedTimes = new Set<string>();
   for (const item of existing)
     if (item.treatmentIds.includes(treatmentId))
@@ -136,6 +153,7 @@ export async function synchronizeTreatmentIntakeReminders(
       notificationId: await scheduleIntakeReminder(
         reminder.scheduledAt,
         reminder.groups,
+        pendingIntakeCountForGroups(pending, reminder.groups),
       ),
       scheduledAt: reminder.scheduledAt.toISOString(),
       treatmentIds: reminder.treatmentIds,

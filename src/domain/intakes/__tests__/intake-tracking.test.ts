@@ -1,6 +1,7 @@
 import {
   canValidateWholeGroup,
   intakeRecordKey,
+  pendingIntakeCountForGroups,
   pendingIntakesOfGroup,
   type IntakeRecord,
   type IntakeStatus,
@@ -65,5 +66,31 @@ describe('validation groupée d’un temps de prise', () => {
         MORNING,
       ),
     ).toBe(false);
+  });
+});
+
+describe('prises en attente couvertes par un même rappel', () => {
+  const counts = [
+    { date: '2026-08-10', slot: 'morning', pending: 3 },
+    { date: '2026-08-10', slot: 'noon', pending: 2 },
+    { date: '2026-08-11', slot: 'morning', pending: 5 },
+  ] as const;
+
+  it('additionne les créneaux du rappel et ignore les autres', () => {
+    expect(
+      pendingIntakeCountForGroups(counts, [
+        MORNING,
+        { date: '2026-08-10', slot: 'noon' },
+      ]),
+    ).toBe(5);
+  });
+
+  it('compte zéro lorsque le rappel ne couvre aucun créneau en attente', () => {
+    expect(
+      pendingIntakeCountForGroups(counts, [
+        { date: '2026-08-12', slot: 'evening' },
+      ]),
+    ).toBe(0);
+    expect(pendingIntakeCountForGroups([], [MORNING])).toBe(0);
   });
 });

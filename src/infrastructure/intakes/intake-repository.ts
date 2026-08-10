@@ -3,8 +3,10 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import {
   isIntakeStatus,
   PENDING_INTAKE_STATUS,
+  type IntakeGroupKey,
   type IntakeRecord,
   type IntakeStatus,
+  type PendingIntakeCount,
 } from '@/domain/intakes/intake-tracking';
 import { isIntakeSlot, type IntakeSlot } from '@/domain/treatments/treatment';
 
@@ -112,8 +114,7 @@ export async function updateIntakeStatus(
 
 /**
  * Valide en une seule opération les médicaments encore en attente d'un
- * créneau, sans toucher à ceux déjà renseignés. L'unique instruction UPDATE
- * garantit la même heure de validation pour toutes les prises concernées.
+ * créneau, sans toucher à ceux déjà renseignés.
  * Retourne le nombre de prises réellement validées.
  */
 export async function markPendingIntakesTaken(
@@ -121,18 +122,79 @@ export async function markPendingIntakesTaken(
   date: string,
   slot: IntakeSlot,
 ): Promise<number> {
+  return markPendingIntakesTakenForGroups(database, [{ date, slot }]);
+}
+
+/**
+ * Même validation, étendue à plusieurs créneaux traités ensemble : c'est le cas
+ * d'un rappel qui couvre deux créneaux programmés à la même heure.
+ *
+ * L'horodatage est lu une seule fois dans la transaction puis appliqué tel quel
+ * à chaque instruction, de sorte que toutes les prises validées ensemble
+ * portent la même heure de validation. La condition `status = 'UNSET'` rend
+ * l'opération idempotente : rejouer la même action ne revalide rien et ne
+ * réécrit pas l'heure des prises déjà renseignées.
+ */
+export async function markPendingIntakesTakenForGroups(
+  database: SQLiteDatabase,
+  groups: readonly IntakeGroupKey[],
+): Promise<number> {
+  const unique = [
+    ...new Map(
+      groups.map((group) => [`${group.date}:${group.slot}`, group]),
+    ).values(),
+  ];
+  if (unique.length === 0) return 0;
   let validated = 0;
   await database.withExclusiveTransactionAsync(async (transaction) => {
-    const result = await transaction.runAsync(
-      `UPDATE intake_records SET status = 'TAKEN', updated_at = CURRENT_TIMESTAMP
-       WHERE intake_date = ? AND slot = ? AND status = ?`,
-      date,
-      slot,
-      PENDING_INTAKE_STATUS,
+    const stamp = await transaction.getFirstAsync<{ value: string }>(
+      'SELECT CURRENT_TIMESTAMP AS value',
     );
-    validated = result.changes;
+    if (stamp === null)
+      throw new Error('Validation impossible : horodatage indisponible.');
+    let total = 0;
+    for (const group of unique) {
+      const result = await transaction.runAsync(
+        `UPDATE intake_records SET status = 'TAKEN', updated_at = ?
+         WHERE intake_date = ? AND slot = ? AND status = ?`,
+        stamp.value,
+        group.date,
+        group.slot,
+        PENDING_INTAKE_STATUS,
+      );
+      total += result.changes;
+    }
+    validated = total;
   });
   return validated;
+}
+
+/**
+ * Prises encore en attente, regroupées par créneau, sur une période. Sert à
+ * choisir le libellé de l'action rapide au moment de programmer un rappel.
+ */
+export async function listPendingIntakeCounts(
+  database: SQLiteDatabase,
+  startDate: string,
+  endDate: string,
+): Promise<PendingIntakeCount[]> {
+  const rows = await database.getAllAsync<{
+    intake_date: string;
+    slot: string;
+    pending: number;
+  }>(
+    `SELECT intake_date, slot, COUNT(*) AS pending FROM intake_records
+     WHERE status = ? AND intake_date BETWEEN ? AND ?
+     GROUP BY intake_date, slot`,
+    PENDING_INTAKE_STATUS,
+    startDate,
+    endDate,
+  );
+  return rows.map((row) => {
+    if (!isIntakeSlot(row.slot))
+      throw new Error('La base locale contient un créneau invalide.');
+    return { date: row.intake_date, slot: row.slot, pending: row.pending };
+  });
 }
 
 export type IntakePostponement = Readonly<{

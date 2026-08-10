@@ -2,6 +2,13 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import {
+  INTAKE_ACTION_CATEGORIES,
+  intakeActionCategory,
+  notificationCommand,
+  VALIDATE_INTAKES_ACTION,
+  type NotificationCommand,
+} from '@/domain/reminders/notification-actions';
+import {
   INTAKE_REMINDER_KIND,
   notificationTarget,
   POSTPONED_INTAKE_KIND,
@@ -51,11 +58,14 @@ export async function requestLocalNotificationPermission(): Promise<LocalNotific
 export async function scheduleIntakeReminder(
   scheduledAt: Date,
   groups: readonly { date: string; slot: IntakeSlot }[],
+  pendingCount: number,
 ): Promise<string> {
   await ensureAndroidIntakeChannel();
+  await ensureIntakeActionCategories();
   return Notifications.scheduleNotificationAsync({
     content: {
       ...NEUTRAL_REMINDER_CONTENT,
+      ...intakeActionCategoryContent(pendingCount),
       data: {
         kind: INTAKE_REMINDER_KIND,
         scheduledAt: scheduledAt.toISOString(),
@@ -78,15 +88,38 @@ export function notificationTargetOf(
   return notificationTarget(notification.request.content.data);
 }
 
+/**
+ * Vrai lorsque la notification a été touchée normalement, et non via un bouton
+ * d’action : seul cet appui ouvre l’application.
+ */
+export function isDefaultNotificationTap(
+  response: Notifications.NotificationResponse,
+): boolean {
+  return response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER;
+}
+
+/** Commande demandée par un bouton d’action, ou `null` pour toute autre réponse. */
+export function notificationCommandOf(
+  response: Notifications.NotificationResponse,
+): NotificationCommand | null {
+  return notificationCommand(
+    response.actionIdentifier,
+    response.notification.request.content.data,
+  );
+}
+
 export async function schedulePostponedIntakeReminder(
   scheduledAt: Date,
   date: string,
   slot: IntakeSlot,
+  pendingCount: number,
 ): Promise<string> {
   await ensureAndroidIntakeChannel();
+  await ensureIntakeActionCategories();
   return Notifications.scheduleNotificationAsync({
     content: {
       ...NEUTRAL_REMINDER_CONTENT,
+      ...intakeActionCategoryContent(pendingCount),
       data: { kind: POSTPONED_INTAKE_KIND, date, slot },
       sound: 'default',
     },
@@ -96,6 +129,36 @@ export async function schedulePostponedIntakeReminder(
       channelId: ANDROID_INTAKE_CHANNEL_ID,
     },
   });
+}
+
+function intakeActionCategoryContent(pendingCount: number): {
+  categoryIdentifier?: string;
+} {
+  const categoryIdentifier = intakeActionCategory(pendingCount);
+  return categoryIdentifier === null ? {} : { categoryIdentifier };
+}
+
+/**
+ * Déclare les deux catégories d’action, une par libellé possible.
+ *
+ * `opensAppToForeground: false` est le cœur du comportement attendu : Android
+ * délivre la réponse au code JavaScript sans passer l’application au premier
+ * plan, y compris lorsqu’elle est en arrière-plan. Le périmètre est Android
+ * uniquement, comme les canaux de notification.
+ */
+async function ensureIntakeActionCategories(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Promise.all(
+    INTAKE_ACTION_CATEGORIES.map((category) =>
+      Notifications.setNotificationCategoryAsync(category.identifier, [
+        {
+          identifier: VALIDATE_INTAKES_ACTION,
+          buttonTitle: category.buttonTitle,
+          options: { opensAppToForeground: false },
+        },
+      ]),
+    ),
+  );
 }
 
 export async function cancelIntakeReminders(): Promise<void> {

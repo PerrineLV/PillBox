@@ -65,6 +65,27 @@ Ces trois états doivent être vérifiés séparément sur un APK réel : le com
 
 Le contenu visible de la notification reste neutre : l'identification du créneau voyage dans les données techniques de la notification, jamais dans le texte affiché par Android.
 
+## Actions rapides depuis la notification
+
+La notification de prise porte un bouton unique, dont le libellé dépend du nombre de médicaments encore en attente **au moment où le rappel a été programmé** : **Valider** pour un seul, **Tout valider** à partir de deux. Aucun bouton n'apparaît lorsque plus rien n'est en attente. Le comportement, lui, est toujours le même : valider les prises encore en attente du ou des créneaux concernés, sans jamais toucher une prise déjà renseignée. Un libellé devenu inexact entre la programmation et le déclenchement n'a donc aucune conséquence sur les données ; il se corrige à la prochaine ouverture de PillBox, qui reprogramme tout l'horizon.
+
+1. **Un seul médicament en attente** : le bouton doit s'appeler **Valider**. L'actionner, puis ouvrir PillBox : la prise doit être **Pris**.
+2. **Plusieurs médicaments en attente** : le bouton doit s'appeler **Tout valider**. L'actionner, puis vérifier dans l'historique que **chaque médicament** possède son propre enregistrement, tous à la **même heure de validation**, et qu'un médicament déjà marqué **Pris** ou **Ignoré** avant l'action est resté inchangé.
+3. **Application au premier plan** : l'action doit enregistrer la validation sans changer d'écran.
+4. **Application en arrière-plan** : mettre PillBox en arrière-plan, actionner le bouton. PillBox **ne doit pas** passer au premier plan ; la validation doit néanmoins être enregistrée, visible à la réouverture.
+5. **Application complètement arrêtée** : fermer PillBox depuis les applications récentes, attendre la notification, actionner le bouton, puis rouvrir PillBox. Voir la limite ci-dessous.
+6. **Idempotence** : actionner le bouton deux fois de suite, ou l'actionner puis valider à nouveau le créneau depuis l'écran **Prise prévue**. Aucun doublon ne doit apparaître dans l'historique et l'heure de validation initiale ne doit pas être réécrite.
+7. **Appui standard** : toucher le corps de la notification, et non le bouton, doit toujours ouvrir PillBox sur **Prise prévue** sans rien valider.
+8. **Verrou local activé** : l'action rapide fonctionne sans authentification, car elle n'affiche aucune donnée. Vérifier qu'elle n'ouvre ni ne déverrouille l'application.
+
+### Limite connue lorsque l'application est complètement arrêtée
+
+Avec `expo-notifications`, un bouton déclaré `opensAppToForeground: false` fait parvenir la réponse au code JavaScript de PillBox. Lorsque le processus est vivant — application au premier plan ou en arrière-plan — la validation est enregistrée immédiatement. Lorsque le processus a été arrêté, Android le réveille pour le seul récepteur natif : la réponse est mise de côté en mémoire et rejouée au prochain démarrage de PillBox, mais elle est perdue si Android recycle le processus avant. Le seul chemin garanti serait une tâche d'arrière-plan `expo-task-manager` ; elle n'a délibérément pas été ajoutée pour ce ticket.
+
+La conséquence d'une perte est bornée et sans danger : la prise reste **Non renseigné**, statut qui ne conclut jamais qu'un médicament n'a pas été pris, et qui reste corrigeable depuis l'écran **Prise prévue**. Aucune donnée fausse n'est écrite.
+
+Sur l'écran verrouillé, les notifications de PillBox sont en visibilité privée : Android masque leur contenu et leurs boutons tant que le téléphone n'est pas déverrouillé. Les libellés **Valider** et **Tout valider** ne nomment ni médicament, ni dose, ni créneau.
+
 ## Confirmation, historique et report
 
 1. Ouvrir une notification et vérifier que les médicaments sont séparés par créneau lorsque deux créneaux partagent la même heure globale.

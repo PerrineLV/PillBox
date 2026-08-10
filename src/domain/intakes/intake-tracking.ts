@@ -45,6 +45,32 @@ export function pendingIntakesOfGroup(
   );
 }
 
+/** Nombre de prises en attente d'un créneau, tel que compté par la base locale. */
+export type PendingIntakeCount = Readonly<{
+  date: string;
+  slot: IntakeSlot;
+  pending: number;
+}>;
+
+/**
+ * Total des prises en attente sur les créneaux couverts par un même rappel.
+ * Un rappel peut regrouper plusieurs créneaux programmés à la même heure.
+ */
+export function pendingIntakeCountForGroups(
+  counts: readonly PendingIntakeCount[],
+  groups: readonly IntakeGroupKey[],
+): number {
+  return counts.reduce(
+    (total, count) =>
+      groups.some(
+        (group) => group.date === count.date && group.slot === count.slot,
+      )
+        ? total + count.pending
+        : total,
+    0,
+  );
+}
+
 export function canValidateWholeGroup(
   records: readonly IntakeRecord[],
   group: IntakeGroupKey,

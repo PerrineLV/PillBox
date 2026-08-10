@@ -1,10 +1,12 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import { pendingIntakeCountForGroups } from '@/domain/intakes/intake-tracking';
 import type { IntakeSlot } from '@/domain/treatments/treatment';
 import {
   deleteIntakePostponement,
   getIntakePostponement,
   listIntakePostponements,
+  listPendingIntakeCounts,
   saveIntakePostponement,
 } from './intake-repository';
 import {
@@ -28,6 +30,7 @@ export async function replaceIntakePostponement(
     scheduledAt,
     date,
     slot,
+    await countPendingIntakes(database, date, slot),
   );
   try {
     await saveIntakePostponement(database, {
@@ -67,7 +70,20 @@ export async function reconcileIntakePostponements(
       new Date(value.scheduledAt),
       value.date,
       value.slot,
+      await countPendingIntakes(database, value.date, value.slot),
     );
     await saveIntakePostponement(database, { ...value, notificationId });
   }
+}
+
+/** Prises encore en attente d'un créneau, pour choisir le libellé de l'action rapide. */
+async function countPendingIntakes(
+  database: SQLiteDatabase,
+  date: string,
+  slot: IntakeSlot,
+): Promise<number> {
+  return pendingIntakeCountForGroups(
+    await listPendingIntakeCounts(database, date, date),
+    [{ date, slot }],
+  );
 }
