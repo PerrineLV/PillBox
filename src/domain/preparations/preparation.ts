@@ -13,6 +13,71 @@ export function preparationStartDate(referenceDate: string): string {
   return addCivilDays(referenceDate, 1);
 }
 
+/** Dernier jour couvert par une préparation démarrée à cette date. */
+export function preparationEndDate(startDate: string): string {
+  return addCivilDays(startDate, PREPARATION_DURATION_DAYS - 1);
+}
+
+export const PREPARATION_WEEK_CHOICES = ['CURRENT', 'NEXT'] as const;
+
+export type PreparationWeekChoice = (typeof PREPARATION_WEEK_CHOICES)[number];
+
+export type PreparationWeek = Readonly<{
+  choice: PreparationWeekChoice;
+  startDate: string;
+  endDate: string;
+}>;
+
+/**
+ * Semaines proposées au démarrage : celle qui commence demain, toujours par
+ * défaut, et la suivante. Aucune autre période n'est proposée afin de garder
+ * un choix explicite et lisible.
+ */
+export function preparationWeeks(
+  referenceDate: string,
+): readonly PreparationWeek[] {
+  const currentStart = preparationStartDate(referenceDate);
+  const nextStart = addCivilDays(currentStart, PREPARATION_DURATION_DAYS);
+  return Object.freeze([
+    Object.freeze({
+      choice: 'CURRENT' as const,
+      startDate: currentStart,
+      endDate: preparationEndDate(currentStart),
+    }),
+    Object.freeze({
+      choice: 'NEXT' as const,
+      startDate: nextStart,
+      endDate: preparationEndDate(nextStart),
+    }),
+  ]);
+}
+
+/** Préparation déjà enregistrée localement, réduite à ce qui distingue une semaine. */
+export type KnownPreparation = Readonly<{
+  id: number;
+  startDate: string;
+  status: 'DRAFT' | 'COMPLETED';
+}>;
+
+/**
+ * `ALREADY_PREPARED` interdit un doublon pour une semaine déjà validée ;
+ * `IN_PROGRESS` signale qu'une préparation incomplète existe déjà et doit être
+ * reprise plutôt que recréée.
+ */
+export type PreparationWeekState =
+  'AVAILABLE' | 'IN_PROGRESS' | 'ALREADY_PREPARED';
+
+export function preparationWeekState(
+  startDate: string,
+  known: readonly KnownPreparation[],
+): PreparationWeekState {
+  const sameWeek = known.filter((item) => item.startDate === startDate);
+  if (sameWeek.some((item) => item.status === 'COMPLETED'))
+    return 'ALREADY_PREPARED';
+  if (sameWeek.some((item) => item.status === 'DRAFT')) return 'IN_PROGRESS';
+  return 'AVAILABLE';
+}
+
 export type PreparationItemSnapshot = Readonly<{
   treatmentId: number;
   specialtyCis: string;
@@ -177,7 +242,7 @@ export function generatePreparationSnapshot(
   startDate: string,
   stockReferenceDate: string,
 ): PreparationSnapshot {
-  const endDate = addCivilDays(startDate, PREPARATION_DURATION_DAYS - 1);
+  const endDate = preparationEndDate(startDate);
   // Valide aussi la date de référence, même lorsque le stock est vide.
   addCivilDays(stockReferenceDate, 0);
   const treatmentsById = new Map(treatments.map((item) => [item.id, item]));

@@ -41,7 +41,9 @@ de l’onglet « Plus ».
 * Identification du produit, du lot et de la péremption
 * Suivi du stock par boîte et par lot
 * Calcul automatique du contenu d’un pilulier sur 7 jours
+* Choix de la semaine préparée, sans doublon possible pour une semaine déjà validée
 * Assistance au remplissage médicament par médicament
+* Annulation d’une préparation en cours, sans aucun effet sur le stock
 * Vérification de la boîte utilisée pendant la préparation
 * Décrémentation automatique des stocks
 * Historique des préparations et des lots utilisés
