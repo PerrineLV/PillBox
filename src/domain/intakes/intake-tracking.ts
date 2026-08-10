@@ -20,6 +20,41 @@ export type IntakeRecord = Readonly<{
 
 export type IntakeGroupKey = Readonly<{ date: string; slot: IntakeSlot }>;
 
+/**
+ * Une prise « en attente » est une prise non renseignée. Une prise déjà
+ * marquée comme prise ou comme ignorée traduit une décision explicite : la
+ * validation groupée ne la réécrit jamais.
+ */
+export const PENDING_INTAKE_STATUS: IntakeStatus = 'UNSET';
+
+/**
+ * En dessous de deux prises en attente, la validation individuelle suffit et
+ * l'action globale n'apporte rien.
+ */
+export const GROUP_VALIDATION_MINIMUM_PENDING = 2;
+
+export function pendingIntakesOfGroup(
+  records: readonly IntakeRecord[],
+  group: IntakeGroupKey,
+): IntakeRecord[] {
+  return records.filter(
+    (record) =>
+      record.date === group.date &&
+      record.slot === group.slot &&
+      record.status === PENDING_INTAKE_STATUS,
+  );
+}
+
+export function canValidateWholeGroup(
+  records: readonly IntakeRecord[],
+  group: IntakeGroupKey,
+): boolean {
+  return (
+    pendingIntakesOfGroup(records, group).length >=
+    GROUP_VALIDATION_MINIMUM_PENDING
+  );
+}
+
 export function intakeRecordKey(
   treatmentId: number,
   date: string,

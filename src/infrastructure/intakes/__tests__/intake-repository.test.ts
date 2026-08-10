@@ -12,9 +12,9 @@ import {
   deleteIntakePostponement,
   getIntakePostponement,
   listIntakeHistory,
+  markPendingIntakesTaken,
   materializeIntakeSnapshots,
   saveIntakePostponement,
-  updateIntakeGroupStatus,
   updateIntakeStatus,
 } from '../intake-repository';
 
@@ -76,6 +76,13 @@ const snapshot = {
   pharmaceuticalForm: 'comprimé',
   quantityHalfUnits: 2,
 };
+const beta = {
+  ...snapshot,
+  key: intakeRecordKey(2, '2026-08-10', 'morning'),
+  treatmentId: 2,
+  specialtyCis: 'cis-2',
+  specialtyName: 'Beta',
+};
 
 describe('suivi local des prises', () => {
   it('distingue les trois statuts et permet une correction ultérieure sans toucher au stock', async () => {
@@ -108,17 +115,11 @@ describe('suivi local des prises', () => {
     raw.close();
   });
 
-  it('valide transactionnellement tous les médicaments d’un créneau', async () => {
+  it('valide en une seule action tous les médicaments en attente d’un créneau, à la même heure', async () => {
     const { raw, database } = await setup();
     await materializeIntakeSnapshots(database, [
       snapshot,
-      {
-        ...snapshot,
-        key: intakeRecordKey(2, '2026-08-10', 'morning'),
-        treatmentId: 2,
-        specialtyCis: 'cis-2',
-        specialtyName: 'Beta',
-      },
+      beta,
       {
         ...snapshot,
         key: intakeRecordKey(1, '2026-08-10', 'noon'),
@@ -126,7 +127,24 @@ describe('suivi local des prises', () => {
       },
     ]);
 
-    await updateIntakeGroupStatus(database, '2026-08-10', 'morning', 'TAKEN');
+    // Les deux prises partent d'heures différentes : seule une validation
+    // simultanée peut les ramener à une heure commune.
+    raw
+      .prepare(
+        `UPDATE intake_records SET updated_at = '2020-01-01 00:00:00'
+         WHERE intake_key = ?`,
+      )
+      .run(snapshot.key);
+    raw
+      .prepare(
+        `UPDATE intake_records SET updated_at = '2020-01-02 00:00:00'
+         WHERE intake_key = ?`,
+      )
+      .run(beta.key);
+
+    expect(
+      await markPendingIntakesTaken(database, '2026-08-10', 'morning'),
+    ).toBe(2);
 
     expect(
       raw
@@ -140,11 +158,96 @@ describe('suivi local des prises', () => {
       { specialty_name: 'Beta', status: 'TAKEN' },
       { specialty_name: 'Alpha', status: 'UNSET' },
     ]);
+    const morningTimes = raw
+      .prepare(
+        `SELECT DISTINCT updated_at FROM intake_records WHERE slot = 'morning'`,
+      )
+      .all() as { updated_at: string }[];
+    expect(morningTimes).toHaveLength(1);
+    expect(morningTimes[0].updated_at).not.toBe('2020-01-01 00:00:00');
     expect(
       raw.prepare('SELECT COUNT(*) count FROM stock_movements').get(),
     ).toEqual({
       count: 0,
     });
+    raw.close();
+  });
+
+  it('ne modifie ni les prises déjà validées ni les prises ignorées du créneau', async () => {
+    const { raw, database } = await setup();
+    await materializeIntakeSnapshots(database, [
+      snapshot,
+      beta,
+      {
+        ...snapshot,
+        key: intakeRecordKey(3, '2026-08-10', 'morning'),
+        treatmentId: 3,
+        specialtyCis: 'cis-3',
+        specialtyName: 'Gamma',
+      },
+    ]);
+    raw
+      .prepare(
+        `UPDATE intake_records
+         SET status = ?, updated_at = '2020-01-01 00:00:00'
+         WHERE intake_key = ?`,
+      )
+      .run('TAKEN', snapshot.key);
+    raw
+      .prepare(
+        `UPDATE intake_records
+         SET status = ?, updated_at = '2020-01-01 00:00:00'
+         WHERE intake_key = ?`,
+      )
+      .run('SKIPPED', beta.key);
+
+    expect(
+      await markPendingIntakesTaken(database, '2026-08-10', 'morning'),
+    ).toBe(1);
+
+    const rows = raw
+      .prepare(
+        `SELECT specialty_name, status, updated_at FROM intake_records
+         ORDER BY specialty_name`,
+      )
+      .all() as {
+      specialty_name: string;
+      status: string;
+      updated_at: string;
+    }[];
+    expect(
+      rows.map(({ specialty_name, status, updated_at }) => ({
+        specialty_name,
+        status,
+        updated_at,
+      })),
+    ).toEqual([
+      {
+        specialty_name: 'Alpha',
+        status: 'TAKEN',
+        updated_at: '2020-01-01 00:00:00',
+      },
+      {
+        specialty_name: 'Beta',
+        status: 'SKIPPED',
+        updated_at: '2020-01-01 00:00:00',
+      },
+      {
+        specialty_name: 'Gamma',
+        status: 'TAKEN',
+        updated_at: rows[2].updated_at,
+      },
+    ]);
+    expect(rows[2].updated_at).not.toBe('2020-01-01 00:00:00');
+
+    expect(
+      await markPendingIntakesTaken(database, '2026-08-10', 'morning'),
+    ).toBe(0);
+    expect(
+      raw
+        .prepare(`SELECT updated_at FROM intake_records WHERE intake_key = ?`)
+        .get(beta.key),
+    ).toEqual({ updated_at: '2020-01-01 00:00:00' });
     raw.close();
   });
 

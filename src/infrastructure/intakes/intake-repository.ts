@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import {
   isIntakeStatus,
+  PENDING_INTAKE_STATUS,
   type IntakeRecord,
   type IntakeStatus,
 } from '@/domain/intakes/intake-tracking';
@@ -109,24 +110,29 @@ export async function updateIntakeStatus(
   if (result.changes !== 1) throw new Error('Prise prévue introuvable.');
 }
 
-export async function updateIntakeGroupStatus(
+/**
+ * Valide en une seule opération les médicaments encore en attente d'un
+ * créneau, sans toucher à ceux déjà renseignés. L'unique instruction UPDATE
+ * garantit la même heure de validation pour toutes les prises concernées.
+ * Retourne le nombre de prises réellement validées.
+ */
+export async function markPendingIntakesTaken(
   database: SQLiteDatabase,
   date: string,
   slot: IntakeSlot,
-  status: IntakeStatus,
-): Promise<void> {
-  if (!isIntakeStatus(status)) throw new Error('Statut de prise invalide.');
+): Promise<number> {
+  let validated = 0;
   await database.withExclusiveTransactionAsync(async (transaction) => {
     const result = await transaction.runAsync(
-      `UPDATE intake_records SET status = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE intake_date = ? AND slot = ?`,
-      status,
+      `UPDATE intake_records SET status = 'TAKEN', updated_at = CURRENT_TIMESTAMP
+       WHERE intake_date = ? AND slot = ? AND status = ?`,
       date,
       slot,
+      PENDING_INTAKE_STATUS,
     );
-    if (result.changes === 0)
-      throw new Error('Aucun médicament attendu pour cette prise.');
+    validated = result.changes;
   });
+  return validated;
 }
 
 export type IntakePostponement = Readonly<{
