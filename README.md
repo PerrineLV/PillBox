@@ -233,7 +233,15 @@ le permet :
 Ces options dépendent de la configuration GitHub distante et ne peuvent pas être
 garanties par les fichiers du dépôt. Le fichier `.github/dependabot.yml` limite les
 mises à jour npm à un passage hebdomadaire et celles des GitHub Actions à un passage
-mensuel, avec regroupement et plafonds de pull requests.
+mensuel. Les mises à jour de version ciblent `dev` ; les mises à jour de sécurité
+continuent de cibler la branche par défaut et sont contrôlées par la CI sur `main`.
+
+Traiter une seule pull request Dependabot à la fois et ne jamais l'auto-fusionner. Un
+correctif compatible peut être fusionné après une CI verte et un test rapide sur le
+téléphone Android cible. Toute montée majeure, dépendance native, migration Expo ou
+React Native, ou modification avec rupture nécessite un ticket technique dédié. Si un
+correctif de sécurité compatible avec Expo SDK 54 n'existe pas, conserver la pull
+request non fusionnée, documenter le risque et créer un ticket de migration Expo.
 
 ## Documentation
 
