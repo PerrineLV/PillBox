@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# Une release en cours n'est jamais interrompue. GitHub conserve uniquement le
+# push main le plus récent encore en attente dans ce groupe de concurrence.
+concurrency:
+  group: android-release-main
+  cancel-in-progress: false
+
 jobs:
   release-apk:
     name: Signed release APK
@@ -40,6 +46,9 @@ jobs:
 
       - name: Install dependencies from lockfile
         run: npm ci --no-audit --no-fund
+
+      - name: Check formatting
+        run: npm run format:check
 
       - name: Lint
         run: npm run lint
@@ -108,7 +117,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: android-build-${{ github.run_number }}
+      RELEASE_TAG: android-${{ github.sha }}
 
     steps:
       - name: Download signed APK artifact
@@ -116,13 +125,6 @@ jobs:
         with:
           name: pillbox-apk-${{ github.sha }}
           path: release
-
-      - name: Refuse to replace an existing release
-        run: |
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists; refusing to replace it." >&2
-            exit 1
-          fi
 
       - name: Verify downloaded APK checksum
         shell: bash
@@ -133,13 +135,169 @@ jobs:
           cd release
           sha256sum --check pillbox-latest.apk.sha256
 
-      - name: Publish APK and checksum in GitHub Release
+      - name: Publish or verify the commit release
+        shell: bash
         run: |
-          gh release create "$RELEASE_TAG" \
-            release/pillbox-latest.apk \
-            release/pillbox-latest.apk.sha256 \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "PillBox Android build $GITHUB_RUN_NUMBER" \
-            --notes "APK Android release signé pour le commit $GITHUB_SHA." \
-            --latest
+          set -euo pipefail
+
+          readonly apk_name="pillbox-latest.apk"
+          readonly checksum_name="pillbox-latest.apk.sha256"
+          readonly apk_path="release/$apk_name"
+          readonly checksum_path="release/$checksum_name"
+          readonly release_title="PillBox Android $GITHUB_SHA"
+          readonly release_notes="APK Android release signé pour le commit $GITHUB_SHA."
+          readonly temporary_directory="$(mktemp -d)"
+          readonly existing_directory="$temporary_directory/existing"
+          readonly verification_directory="$temporary_directory/verification"
+          readonly release_error="$temporary_directory/release-view-error.log"
+          readonly latest_error="$temporary_directory/latest-release-error.log"
+
+          cleanup() {
+            rm -rf "$temporary_directory"
+          }
+          trap cleanup EXIT
+
+          release_exists=false
+          should_mark_latest=false
+
+          if latest_tag="$(
+            gh release view \
+              --repo "$GITHUB_REPOSITORY" \
+              --json tagName \
+              --jq '.tagName' \
+              2>"$latest_error"
+          )"; then
+            if [[ "$latest_tag" == "$RELEASE_TAG" ]]; then
+              latest_target="$GITHUB_SHA"
+            else
+              latest_target="$(
+                gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$latest_tag" \
+                  --jq '.object.sha'
+              )"
+              comparison_status="$(
+                gh api "repos/$GITHUB_REPOSITORY/compare/$latest_target...$GITHUB_SHA" \
+                  --jq '.status'
+              )"
+
+              case "$comparison_status" in
+                ahead)
+                  should_mark_latest=true
+                  ;;
+                behind | identical)
+                  ;;
+                *)
+                  echo "Le SHA $GITHUB_SHA diverge de la dernière release $latest_target." >&2
+                  exit 1
+                  ;;
+              esac
+            fi
+          elif grep -Eqi 'release not found|no published releases' "$latest_error"; then
+            latest_tag=''
+            should_mark_latest=true
+          else
+            cat "$latest_error" >&2
+            exit 1
+          fi
+
+          if release_target="$(
+            gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json targetCommitish \
+              --jq '.targetCommitish' \
+              2>"$release_error"
+          )"; then
+            release_exists=true
+          elif grep -Fqi 'release not found' "$release_error"; then
+            release_target=''
+          else
+            cat "$release_error" >&2
+            exit 1
+          fi
+
+          if [[ "$release_exists" == true ]]; then
+            if [[ "$release_target" != "$GITHUB_SHA" ]]; then
+              echo "Release $RELEASE_TAG cible $release_target au lieu de $GITHUB_SHA." >&2
+              exit 1
+            fi
+
+            tag_target="$(
+              gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" \
+                --jq '.object.sha'
+            )"
+            if [[ "$tag_target" != "$GITHUB_SHA" ]]; then
+              echo "Tag $RELEASE_TAG cible $tag_target au lieu de $GITHUB_SHA." >&2
+              exit 1
+            fi
+
+            mkdir -p "$existing_directory"
+            existing_assets=()
+            missing_assets=()
+
+            for asset_name in "$apk_name" "$checksum_name"; do
+              if gh release view "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json assets \
+                --jq '.assets[].name' | grep -Fxq "$asset_name"; then
+                gh release download "$RELEASE_TAG" \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --pattern "$asset_name" \
+                  --dir "$existing_directory"
+                existing_assets+=("$asset_name")
+              else
+                missing_assets+=("release/$asset_name")
+              fi
+            done
+
+            if (( ${#missing_assets[@]} > 0 )); then
+              for asset_name in "${existing_assets[@]}"; do
+                if ! cmp -s "release/$asset_name" "$existing_directory/$asset_name"; then
+                  echo "Asset existant $asset_name différent : publication refusée." >&2
+                  exit 1
+                fi
+              done
+
+              gh release upload "$RELEASE_TAG" "${missing_assets[@]}" \
+                --repo "$GITHUB_REPOSITORY"
+            else
+              (
+                cd "$existing_directory"
+                sha256sum --check "$checksum_name"
+              )
+              echo "Release $RELEASE_TAG déjà complète et identique ; aucune modification."
+            fi
+          else
+            gh release create "$RELEASE_TAG" \
+              "$apk_path" \
+              "$checksum_path" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$release_title" \
+              --notes "$release_notes" \
+              --latest=false
+          fi
+
+          if [[ "$release_exists" == false ]] || (( ${#missing_assets[@]} > 0 )); then
+            mkdir -p "$verification_directory"
+            for asset_name in "$apk_name" "$checksum_name"; do
+              gh release download "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --pattern "$asset_name" \
+                --dir "$verification_directory"
+
+              if ! cmp -s "release/$asset_name" "$verification_directory/$asset_name"; then
+                echo "Asset publié $asset_name différent du build courant." >&2
+                exit 1
+              fi
+            done
+
+            (
+              cd "$verification_directory"
+              sha256sum --check "$checksum_name"
+            )
+          fi
+
+          if [[ "$should_mark_latest" == true ]]; then
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --latest
+          fi

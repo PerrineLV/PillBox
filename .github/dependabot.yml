@@ -13,15 +13,6 @@ updates:
     # Garder une seule mise à jour de version npm en revue à la fois.
     open-pull-requests-limit: 1
     groups:
-      expo-sdk-54-patches:
-        # Une migration de SDK Expo est un ticket technique volontaire, réalisé
-        # avec les versions recommandées par Expo et testé sur le téléphone cible.
-        patterns:
-          - 'expo'
-          - 'expo-*'
-          - '@expo/*'
-        update-types:
-          - patch
       production-runtime:
         dependency-type: production
         patterns:
@@ -39,47 +30,63 @@ updates:
           - 'expo-*'
           - '@expo/*'
     ignore:
-      # Expo 55+ n'est pas compatible avec le téléphone cible. Les modules Expo
-      # restent sur les correctifs de leurs lignes compatibles avec le SDK 54.
+      # Les versions d'Expo, de React, de React Native et des modules natifs sont
+      # imposées par le SDK Expo 54, pas choisies dépendance par dépendance. Même
+      # un correctif proposé isolément par Dependabot sortirait de l'ensemble
+      # validé par Expo : ces paquets sont donc entièrement exclus des mises à
+      # jour de version. Ils évoluent uniquement par un ticket de migration de
+      # SDK, avec les versions rendues par `expo install` et un essai sur le
+      # téléphone Android cible. La CI exécute `expo install --check` pour
+      # détecter tout écart introduit malgré tout.
       - dependency-name: expo
-        versions:
-          - '>=55.0.0'
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
       - dependency-name: 'expo-*'
         update-types:
+          - version-update:semver-patch
           - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: '@expo/*'
         update-types:
+          - version-update:semver-patch
           - version-update:semver-minor
           - version-update:semver-major
-
-      # React, React Native et les dépendances natives restent sur les lignes
-      # validées avec Expo SDK 54. Leurs montées mineures ou majeures exigent un
-      # ticket de migration dédié et des essais sur le téléphone Android cible.
       - dependency-name: react
         update-types:
+          - version-update:semver-patch
           - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: react-dom
         update-types:
+          - version-update:semver-patch
           - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: react-native
         update-types:
+          - version-update:semver-patch
           - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: react-native-safe-area-context
         update-types:
+          - version-update:semver-patch
           - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: react-native-screens
         update-types:
+          - version-update:semver-patch
           - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: '@react-native-community/datetimepicker'
         update-types:
+          - version-update:semver-patch
           - version-update:semver-minor
           - version-update:semver-major
+
+      # better-sqlite3 n'est utilisée que par les tests Node ; ses correctifs
+      # restent proposés, mais ses montées mineures ou majeures demandent un
+      # ticket dédié.
       - dependency-name: better-sqlite3
         update-types:
           - version-update:semver-minor
