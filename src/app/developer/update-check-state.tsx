@@ -1,14 +1,12 @@
 /**
  * Écran de diagnostic temporaire : contenu réel de `update_check_settings`.
  *
- * Il sert uniquement à lire, sur un APK release non débuggable, l'état du cache
- * qui décide de l'appel à GitHub. Aucun comportement de production n'est
- * modifié : l'écran réutilise les fonctions existantes en lecture, et le bouton
- * de vérification forcée refait localement ce que ferait `resolveUpdateNotice`
+ * Route non liée dans la navigation, comme `developer/datamatrix-scanner`. Elle
+ * sert uniquement à lire, sur un APK release non débuggable, l'état du cache qui
+ * décide de l'appel à GitHub. Aucun comportement de production n'est modifié :
+ * l'écran réutilise les fonctions existantes en lecture, et le bouton de
+ * vérification forcée refait localement ce que ferait `resolveUpdateNotice`
  * lorsque l'intervalle de 6 heures est écoulé.
- *
- * TEMPORAIRE : cet écran et l'item « Debug mise à jour » de `more.tsx` sont à
- * supprimer avant la prochaine release réelle.
  */
 import { Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
