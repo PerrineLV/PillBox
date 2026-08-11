@@ -264,6 +264,7 @@ describe('suivi local des prises', () => {
       specialtyCis: 'cis-1',
       specialtyName: 'Alpha modifié',
       pharmaceuticalForm: 'gélule',
+      dosageKind: 'SCHEDULED',
       includedInPillbox: true,
       archivedAt: null,
       phases: [
@@ -275,6 +276,7 @@ describe('suivi local des prises', () => {
           dosage: [{ slot: 'morning', quantityHalfUnits: 4 }],
         },
       ],
+      asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
     });
     expect(await getTreatmentRemovalAction(database, 1)).toBe('ARCHIVE');
     await archiveTreatment(database, 1);

@@ -1,8 +1,10 @@
 import type { SQLiteDatabase, SQLiteRunResult } from 'expo-sqlite';
 
 import {
+  assertValidAsNeededTreatment,
   assertValidTreatmentPhases,
   isIntakeSlot,
+  isTreatmentDosageKind,
   isWeekday,
   type LegacyDosage,
   type PhaseDosage,
@@ -16,8 +18,11 @@ type TreatmentRow = {
   specialty_cis: string;
   specialty_name: string;
   pharmaceutical_form: string | null;
+  dosage_kind: string;
   included_in_pillbox: number;
   archived_at: string | null;
+  as_needed_max_quantity_half_units: number | null;
+  as_needed_min_interval_hours: number | null;
 };
 
 type PhaseRow = {
@@ -58,7 +63,10 @@ export async function getTreatmentRemovalAction(
        SELECT 1 FROM preparation_items WHERE source_treatment_id = ?
        UNION ALL
        SELECT 1 FROM intake_records WHERE source_treatment_id = ?
+       UNION ALL
+       SELECT 1 FROM as_needed_intake_records WHERE treatment_id = ?
      ) AS used`,
+    treatmentId,
     treatmentId,
     treatmentId,
   );
@@ -140,12 +148,16 @@ export async function createTreatment(
   await database.withExclusiveTransactionAsync(async (transaction) => {
     result = await transaction.runAsync(
       `INSERT INTO treatments
-       (specialty_cis, specialty_name, pharmaceutical_form, included_in_pillbox)
-       VALUES (?, ?, ?, ?)`,
+       (specialty_cis, specialty_name, pharmaceutical_form, dosage_kind, included_in_pillbox,
+        as_needed_max_quantity_half_units, as_needed_min_interval_hours)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       draft.specialtyCis,
       draft.specialtyName,
       draft.pharmaceuticalForm,
+      draft.dosageKind,
       draft.includedInPillbox ? 1 : 0,
+      draft.asNeededInfo.maxQuantityPerDayHalfUnits,
+      draft.asNeededInfo.minIntervalHours,
     );
     await insertPhases(transaction, result.lastInsertRowId, draft.phases);
   });
@@ -161,11 +173,15 @@ export async function updateTreatment(
   await database.withExclusiveTransactionAsync(async (transaction) => {
     const result = await transaction.runAsync(
       `UPDATE treatments SET specialty_cis = ?, specialty_name = ?, pharmaceutical_form = ?,
-       included_in_pillbox = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+       dosage_kind = ?, included_in_pillbox = ?, as_needed_max_quantity_half_units = ?,
+       as_needed_min_interval_hours = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       treatment.specialtyCis,
       treatment.specialtyName,
       treatment.pharmaceuticalForm,
+      treatment.dosageKind,
       treatment.includedInPillbox ? 1 : 0,
+      treatment.asNeededInfo.maxQuantityPerDayHalfUnits,
+      treatment.asNeededInfo.minIntervalHours,
       treatment.id,
     );
     if (result.changes !== 1) throw new Error('Traitement introuvable.');
@@ -314,22 +330,33 @@ async function hydrateTreatments(
     phases.push(phase);
     phasesByTreatment.set(row.treatment_id, phases);
   }
-  return rows.map((row) => ({
-    id: row.id,
-    specialtyCis: row.specialty_cis,
-    specialtyName: row.specialty_name,
-    pharmaceuticalForm: row.pharmaceutical_form,
-    includedInPillbox: row.included_in_pillbox === 1,
-    archivedAt: row.archived_at,
-    phases: phasesByTreatment.get(row.id) ?? [],
-  }));
+  return rows.map((row) => {
+    if (!isTreatmentDosageKind(row.dosage_kind))
+      throw new Error('La base locale contient un type de traitement invalide.');
+    return {
+      id: row.id,
+      specialtyCis: row.specialty_cis,
+      specialtyName: row.specialty_name,
+      pharmaceuticalForm: row.pharmaceutical_form,
+      dosageKind: row.dosage_kind,
+      includedInPillbox: row.included_in_pillbox === 1,
+      archivedAt: row.archived_at,
+      phases: phasesByTreatment.get(row.id) ?? [],
+      asNeededInfo: {
+        maxQuantityPerDayHalfUnits: row.as_needed_max_quantity_half_units,
+        minIntervalHours: row.as_needed_min_interval_hours,
+      },
+    };
+  });
 }
 
 function validateDraft(draft: TreatmentDraft): void {
   if (draft.specialtyCis.trim() === '' || draft.specialtyName.trim() === '')
     throw new Error('La spécialité doit provenir du référentiel.');
-  assertValidTreatmentPhases(draft.phases);
+  if (draft.dosageKind === 'AS_NEEDED') assertValidAsNeededTreatment(draft);
+  else assertValidTreatmentPhases(draft.phases);
 }
 
-const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form,
-  included_in_pillbox, archived_at FROM treatments`;
+const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form, dosage_kind,
+  included_in_pillbox, archived_at, as_needed_max_quantity_half_units, as_needed_min_interval_hours
+  FROM treatments`;

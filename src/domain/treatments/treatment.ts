@@ -45,17 +45,43 @@ export type LegacyTreatmentPhase = {
 
 export type TreatmentPhase = ScheduledTreatmentPhase | LegacyTreatmentPhase;
 
+/**
+ * Un traitement planifié suit les phases de posologie ci-dessus. Un traitement
+ * « si besoin » (ticket 19) est pris ponctuellement : il n'a jamais de phase,
+ * n'est jamais inclus dans le pilulier et ne génère jamais de rappel planifié.
+ */
+export const TREATMENT_DOSAGE_KINDS = ['SCHEDULED', 'AS_NEEDED'] as const;
+export type TreatmentDosageKind = (typeof TREATMENT_DOSAGE_KINDS)[number];
+
+/**
+ * Informations purement déclaratives sur un traitement « si besoin » :
+ * PillBox ne les utilise jamais pour calculer un délai avant reprise ni pour
+ * déclencher une alerte ou une recommandation.
+ */
+export type AsNeededInfo = {
+  maxQuantityPerDayHalfUnits: number | null;
+  minIntervalHours: number | null;
+};
+
 export type Treatment = {
   id: number;
   specialtyCis: string;
   specialtyName: string;
   pharmaceuticalForm: string | null;
+  dosageKind: TreatmentDosageKind;
   includedInPillbox: boolean;
   archivedAt: string | null;
   phases: TreatmentPhase[];
+  asNeededInfo: AsNeededInfo;
 };
 
 export type TreatmentDraft = Omit<Treatment, 'id' | 'archivedAt'>;
+
+export function isTreatmentDosageKind(
+  value: string,
+): value is TreatmentDosageKind {
+  return TREATMENT_DOSAGE_KINDS.some((kind) => kind === value);
+}
 
 export function isLegacyTreatmentPhase(
   phase: TreatmentPhase,
@@ -69,6 +95,42 @@ export function isWeekday(value: string): value is Weekday {
 
 export function isIntakeSlot(value: string): value is IntakeSlot {
   return INTAKE_SLOTS.some((slot) => slot === value);
+}
+
+/**
+ * Un traitement « si besoin » n'a aucune posologie planifiée et ne peut donc
+ * jamais être inclus dans le pilulier ni générer de rappel automatique.
+ */
+export function assertValidAsNeededTreatment(draft: {
+  phases: readonly TreatmentPhase[];
+  includedInPillbox: boolean;
+  asNeededInfo: AsNeededInfo;
+}): void {
+  if (draft.phases.length !== 0)
+    throw new Error(
+      'Un traitement « si besoin » ne peut pas avoir de posologie planifiée.',
+    );
+  if (draft.includedInPillbox)
+    throw new Error(
+      'Un traitement « si besoin » ne peut pas être inclus dans le pilulier.',
+    );
+  assertValidAsNeededInfo(draft.asNeededInfo);
+}
+
+function assertValidAsNeededInfo(info: AsNeededInfo): void {
+  if (
+    info.maxQuantityPerDayHalfUnits !== null &&
+    (!Number.isSafeInteger(info.maxQuantityPerDayHalfUnits) ||
+      info.maxQuantityPerDayHalfUnits <= 0)
+  )
+    throw new Error(
+      'La limite maximale par jour doit être un multiple positif de 0,5.',
+    );
+  if (
+    info.minIntervalHours !== null &&
+    (!Number.isSafeInteger(info.minIntervalHours) || info.minIntervalHours <= 0)
+  )
+    throw new Error('L’intervalle minimal doit être un nombre d’heures positif.');
 }
 
 export function assertValidTreatmentPhases(

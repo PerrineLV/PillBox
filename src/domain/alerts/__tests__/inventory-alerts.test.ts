@@ -11,6 +11,7 @@ const treatment = (): Treatment => ({
   specialtyCis: '60000001',
   specialtyName: 'Alpha',
   pharmaceuticalForm: 'comprimé',
+  dosageKind: 'SCHEDULED',
   includedInPillbox: true,
   archivedAt: null,
   phases: [
@@ -22,6 +23,7 @@ const treatment = (): Treatment => ({
       dosage: [{ slot: 'morning', quantityHalfUnits: 2 }],
     },
   ],
+  asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
 });
 
 const box = (overrides: Partial<MedicationBox> = {}): MedicationBox => ({

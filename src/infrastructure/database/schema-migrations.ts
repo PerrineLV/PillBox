@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 19;
+export const LATEST_SCHEMA_VERSION = 20;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -543,6 +543,38 @@ export const SCHEMA_MIGRATIONS = [
       // réelle : la supprimer ne perd aucune donnée.
       await transaction.execute(`
         DROP TABLE medication_renewal_dismissals;
+      `);
+    },
+  },
+  {
+    version: 20,
+    name: 'traitements si besoin et prises ponctuelles',
+    async up(transaction) {
+      // Les lignes existantes sont toutes des traitements planifiés : le
+      // défaut 'SCHEDULED' décrit exactement l'historique et n'invente rien.
+      // Un traitement « si besoin » n'a jamais de phase et n'est jamais inclus
+      // dans le pilulier (ticket 19) : ces informations restent purement
+      // déclaratives, jamais utilisées pour calculer un délai avant reprise.
+      await transaction.execute(`
+        ALTER TABLE treatments
+          ADD COLUMN dosage_kind TEXT NOT NULL DEFAULT 'SCHEDULED' CHECK (dosage_kind IN ('SCHEDULED', 'AS_NEEDED'));
+        ALTER TABLE treatments
+          ADD COLUMN as_needed_max_quantity_half_units INTEGER
+            CHECK (as_needed_max_quantity_half_units IS NULL OR as_needed_max_quantity_half_units > 0);
+        ALTER TABLE treatments
+          ADD COLUMN as_needed_min_interval_hours INTEGER
+            CHECK (as_needed_min_interval_hours IS NULL OR as_needed_min_interval_hours > 0);
+
+        CREATE TABLE as_needed_intake_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          treatment_id INTEGER NOT NULL REFERENCES treatments(id) ON DELETE CASCADE,
+          taken_at TEXT NOT NULL,
+          quantity_half_units INTEGER NOT NULL CHECK (quantity_half_units > 0),
+          note TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX as_needed_intake_records_treatment_idx
+          ON as_needed_intake_records(treatment_id, taken_at DESC);
       `);
     },
   },

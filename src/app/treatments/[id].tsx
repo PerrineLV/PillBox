@@ -3,6 +3,8 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 
+import { AsNeededIntakeLog } from '@/components/treatments/as-needed-intake-log';
+import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
 import { TreatmentDeletionConfirmation } from '@/components/treatments/delete-confirmation';
 import type { Treatment } from '@/domain/treatments/treatment';
@@ -85,24 +87,45 @@ export default function EditTreatmentScreen() {
         <LoadingState label="Chargement du traitement…" />
       ) : null}
       {treatment && treatment.archivedAt === null ? (
-        <TreatmentForm
-          initialValue={treatment}
-          submitLabel="Enregistrer les modifications"
-          onSubmit={async (draft) => {
-            await updateTreatment(database, {
-              ...draft,
-              id: treatment.id,
-              archivedAt: treatment.archivedAt,
-            });
-            await synchronizeTreatmentIntakeReminders(database, treatment.id);
-            router.replace('/treatments');
-          }}
-        />
+        treatment.dosageKind === 'AS_NEEDED' ? (
+          <AsNeededTreatmentForm
+            initialValue={treatment}
+            submitLabel="Enregistrer les modifications"
+            onSubmit={async (draft) => {
+              await updateTreatment(database, {
+                ...draft,
+                id: treatment.id,
+                archivedAt: treatment.archivedAt,
+              });
+              router.replace('/treatments');
+            }}
+          />
+        ) : (
+          <TreatmentForm
+            initialValue={treatment}
+            submitLabel="Enregistrer les modifications"
+            onSubmit={async (draft) => {
+              await updateTreatment(database, {
+                ...draft,
+                id: treatment.id,
+                archivedAt: treatment.archivedAt,
+              });
+              await synchronizeTreatmentIntakeReminders(database, treatment.id);
+              router.replace('/treatments');
+            }}
+          />
+        )
       ) : null}
       {treatment?.archivedAt ? (
         <Message tone="warning" title="Traitement archivé">
           Ses posologies et son historique sont conservés.
         </Message>
+      ) : null}
+      {treatment?.dosageKind === 'AS_NEEDED' ? (
+        <AsNeededIntakeLog
+          treatmentId={treatment.id}
+          canRecord={treatment.archivedAt === null}
+        />
       ) : null}
       {treatment && removalAction ? (
         treatment.archivedAt ? (

@@ -19,6 +19,7 @@ function treatment(overrides: Partial<Treatment> = {}): Treatment {
     specialtyCis: '60000001',
     specialtyName: 'Alpha',
     pharmaceuticalForm: 'comprimé',
+    dosageKind: 'SCHEDULED',
     includedInPillbox: true,
     archivedAt: null,
     phases: [
@@ -30,6 +31,7 @@ function treatment(overrides: Partial<Treatment> = {}): Treatment {
         dosage: [{ slot: 'morning', quantityHalfUnits: 2 }],
       },
     ],
+    asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
     ...overrides,
   };
 }
