@@ -84,6 +84,19 @@ L’identifiant Android est fixé à `com.perrinelv.pillbox`. Ne pas le modifier
 première installation : Android considérerait l’application comme une autre
 application. Le `versionCode` utilise le numéro croissant du run GitHub Actions.
 
+Une fois l’APK construit, signé et son checksum vérifié, le job `publish-to-landing`
+republie `pillbox-latest.apk` et `pillbox-latest.apk.sha256` comme assets de la release
+taguée `latest` du dépôt public `PerrineLV/PillBox-landing`, qui héberge la landing
+page. Le dépôt `PillBox` étant privé, ses propres assets de release exigent une
+authentification ; `PillBox-landing` reste donc la seule source de téléchargement
+accessible sans compte. L’APK n’est jamais commité dans l’arborescence de
+`PillBox-landing` : il ne vit que comme asset de release, afin de ne pas faire grossir
+son historique Git d’un fichier de plusieurs dizaines de mégaoctets à chaque version. Le
+tag `latest` est créé une seule fois puis mis à jour en place (assets remplacés par
+`gh release upload --clobber`) à chaque run suivant, jamais supprimé puis recréé : le
+lien permanent `releases/latest/download/pillbox-latest.apk` ne connaît donc aucune
+interruption entre deux versions.
+
 ### Créer la clé de signature
 
 Générer une clé dédiée dans un emplacement privé, hors du dépôt :
@@ -119,6 +132,31 @@ Le workflow applique donc `ANDROID_KEYSTORE_PASSWORD` aux deux et vérifie le fi
 le mot de passe et l’alias avant de lancer Gradle. Le secret
 `ANDROID_KEY_PASSWORD`, s’il avait déjà été créé, n’est plus utilisé et peut être
 supprimé.
+
+### Créer le jeton pour PillBox-landing
+
+Le job `publish-to-landing` s’authentifie auprès de `PillBox-landing` avec le secret
+`LANDING_REPO_TOKEN`, un jeton d’accès personnel *fine-grained* dédié, à portée
+strictement minimale :
+
+1. Sur le compte GitHub propriétaire des deux dépôts, ouvrir `Settings` →
+   `Developer settings` → `Personal access tokens` → `Fine-grained tokens` → `Generate
+   new token`.
+2. Restreindre `Repository access` au seul dépôt `PillBox-landing` (jamais
+   `PillBox`, ni tous les dépôts).
+3. Sous `Permissions` → `Repository permissions`, accorder uniquement `Contents:
+   Read and write` — c’est le seul droit nécessaire pour créer une release et y
+   téléverser des assets. Laisser tous les autres droits à `No access`.
+4. Choisir une expiration (ce jeton se régénère comme un secret de signature) puis
+   générer le jeton.
+
+Dans `Settings` → `Secrets and variables` → `Actions` **du dépôt `PillBox`** (jamais
+dans `PillBox-landing`, qui ne doit pas détenir sa propre capacité d’écriture), créer
+le secret `LANDING_REPO_TOKEN` avec la valeur du jeton généré.
+
+À l’expiration ou en cas de rotation, régénérer un jeton avec la même portée puis
+remplacer uniquement la valeur du secret `LANDING_REPO_TOKEN` : aucun autre réglage
+n’est à modifier.
 
 Le workflow échoue explicitement si un de ces secrets est absent. Le fichier `.jks`,
 les mots de passe et leur représentation Base64 ne doivent jamais être commités.
