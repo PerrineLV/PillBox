@@ -1,5 +1,6 @@
 import {
   assertValidAsNeededTreatment,
+  treatmentPhasesEqual,
   type AsNeededInfo,
   type TreatmentPhase,
 } from '../treatment';
@@ -86,4 +87,61 @@ describe('traitement « si besoin »', () => {
       ).toThrow('intervalle minimal');
     },
   );
+});
+
+describe('treatmentPhasesEqual', () => {
+  it('ignore les identifiants recréés à chaque modification', () => {
+    const a: TreatmentPhase[] = [{ ...PHASE, id: 1 }];
+    const b: TreatmentPhase[] = [{ ...PHASE, id: 2 }];
+
+    expect(treatmentPhasesEqual(a, b)).toBe(true);
+  });
+
+  it('ignore l’ordre de saisie des créneaux au sein d’une phase', () => {
+    const a: TreatmentPhase[] = [
+      {
+        ...PHASE,
+        dosage: [
+          { slot: 'morning', quantityHalfUnits: 2 },
+          { slot: 'evening', quantityHalfUnits: 1 },
+        ],
+      },
+    ];
+    const b: TreatmentPhase[] = [
+      {
+        ...PHASE,
+        dosage: [
+          { slot: 'evening', quantityHalfUnits: 1 },
+          { slot: 'morning', quantityHalfUnits: 2 },
+        ],
+      },
+    ];
+
+    expect(treatmentPhasesEqual(a, b)).toBe(true);
+  });
+
+  it('détecte un changement de quantité', () => {
+    const a: TreatmentPhase[] = [PHASE];
+    const b: TreatmentPhase[] = [
+      { ...PHASE, dosage: [{ slot: 'morning', quantityHalfUnits: 4 }] },
+    ];
+
+    expect(treatmentPhasesEqual(a, b)).toBe(false);
+  });
+
+  it('détecte l’ajout d’une nouvelle phase', () => {
+    const a: TreatmentPhase[] = [PHASE];
+    const b: TreatmentPhase[] = [
+      PHASE,
+      {
+        id: null,
+        startDate: '2026-09-01',
+        endDate: null,
+        frequency: { type: 'daily' },
+        dosage: [{ slot: 'evening', quantityHalfUnits: 1 }],
+      },
+    ];
+
+    expect(treatmentPhasesEqual(a, b)).toBe(false);
+  });
 });

@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 21;
+export const LATEST_SCHEMA_VERSION = 22;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -654,6 +654,31 @@ export const SCHEMA_MIGRATIONS = [
 
         CREATE INDEX preparation_box_usages_preparation_idx
           ON preparation_box_usages(preparation_id);
+      `);
+    },
+  },
+  {
+    version: 22,
+    name: 'historique du cycle de vie des traitements pour la timeline',
+    async up(transaction) {
+      // Jusqu'ici, seul le dernier archivage était connu (colonne archived_at) :
+      // une réactivation n'était pas datée et une modification de posologie
+      // écrasait silencieusement les anciennes phases. Cette table journalise
+      // ces événements pour toute modification future, sans jamais inventer
+      // ceux du passé qui n'ont pas été enregistrés.
+      await transaction.execute(`
+        CREATE TABLE treatment_lifecycle_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          treatment_id INTEGER NOT NULL REFERENCES treatments(id) ON DELETE CASCADE,
+          event_type TEXT NOT NULL CHECK (event_type IN ('ARCHIVED', 'REACTIVATED', 'DOSAGE_MODIFIED')),
+          occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX treatment_lifecycle_events_treatment_idx
+          ON treatment_lifecycle_events(treatment_id, occurred_at);
+
+        INSERT INTO treatment_lifecycle_events (treatment_id, event_type, occurred_at)
+        SELECT id, 'ARCHIVED', archived_at FROM treatments WHERE archived_at IS NOT NULL;
       `);
     },
   },

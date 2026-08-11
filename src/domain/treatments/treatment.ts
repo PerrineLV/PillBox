@@ -224,6 +224,40 @@ function assertCivilDate(value: string, message: string): void {
     throw new Error(message);
 }
 
+/**
+ * Compare le contenu métier de deux jeux de phases, sans tenir compte de leurs
+ * identifiants SQLite (recréés à chaque modification) ni de l'ordre de saisie
+ * des créneaux au sein d'une même phase. Sert à ne journaliser un changement
+ * de posologie que lorsque quelque chose a réellement changé.
+ */
+export function treatmentPhasesEqual(
+  a: readonly TreatmentPhase[],
+  b: readonly TreatmentPhase[],
+): boolean {
+  return (
+    JSON.stringify(a.map(normalizePhaseForComparison)) ===
+    JSON.stringify(b.map(normalizePhaseForComparison))
+  );
+}
+
+function normalizePhaseForComparison(phase: TreatmentPhase) {
+  const dosage = [...phase.dosage]
+    .map((item) => ({
+      weekday: 'weekday' in item ? item.weekday : null,
+      slot: item.slot,
+      quantityHalfUnits: item.quantityHalfUnits,
+    }))
+    .sort((x, y) =>
+      `${x.weekday}:${x.slot}`.localeCompare(`${y.weekday}:${y.slot}`),
+    );
+  return {
+    startDate: phase.startDate,
+    endDate: phase.endDate,
+    frequency: phase.frequency,
+    dosage,
+  };
+}
+
 export function formatHalfUnits(quantityHalfUnits: number): string {
   const whole = Math.floor(quantityHalfUnits / 2);
   return quantityHalfUnits % 2 === 0 ? String(whole) : `${whole},5`;

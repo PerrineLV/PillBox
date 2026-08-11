@@ -6,6 +6,7 @@ import {
   isIntakeSlot,
   isTreatmentDosageKind,
   isWeekday,
+  treatmentPhasesEqual,
   type LegacyDosage,
   type PhaseDosage,
   type Treatment,
@@ -111,6 +112,10 @@ export async function archiveTreatment(
     );
     if (result.changes !== 1)
       throw new Error('Traitement introuvable ou déjà archivé.');
+    await transaction.runAsync(
+      `INSERT INTO treatment_lifecycle_events (treatment_id, event_type) VALUES (?, 'ARCHIVED')`,
+      treatmentId,
+    );
   });
 }
 
@@ -118,13 +123,19 @@ export async function restoreArchivedTreatment(
   database: SQLiteDatabase,
   treatmentId: number,
 ): Promise<void> {
-  const result = await database.runAsync(
-    `UPDATE treatments SET active = 1, archived_at = NULL,
-     updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL`,
-    treatmentId,
-  );
-  if (result.changes !== 1)
-    throw new Error('Traitement introuvable ou non archivé.');
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const result = await transaction.runAsync(
+      `UPDATE treatments SET active = 1, archived_at = NULL,
+       updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL`,
+      treatmentId,
+    );
+    if (result.changes !== 1)
+      throw new Error('Traitement introuvable ou non archivé.');
+    await transaction.runAsync(
+      `INSERT INTO treatment_lifecycle_events (treatment_id, event_type) VALUES (?, 'REACTIVATED')`,
+      treatmentId,
+    );
+  });
 }
 
 export async function getTreatment(
@@ -171,6 +182,7 @@ export async function updateTreatment(
 ): Promise<void> {
   validateDraft(treatment);
   await database.withExclusiveTransactionAsync(async (transaction) => {
+    const existing = await getTreatment(transaction, treatment.id);
     const result = await transaction.runAsync(
       `UPDATE treatments SET specialty_cis = ?, specialty_name = ?, pharmaceutical_form = ?,
        dosage_kind = ?, included_in_pillbox = ?, as_needed_max_quantity_half_units = ?,
@@ -195,6 +207,19 @@ export async function updateTreatment(
       treatment.id,
     );
     await insertPhases(transaction, treatment.id, treatment.phases);
+    // Remplacer les phases efface leur trace dans treatment_phases : sans ce
+    // marqueur, la timeline (ticket 18) perdrait la date à laquelle une
+    // posologie a réellement changé. Un enregistrement sans changement de
+    // posologie (autre champ modifié) ne doit rien journaliser.
+    if (
+      existing !== null &&
+      !treatmentPhasesEqual(existing.phases, treatment.phases)
+    ) {
+      await transaction.runAsync(
+        `INSERT INTO treatment_lifecycle_events (treatment_id, event_type) VALUES (?, 'DOSAGE_MODIFIED')`,
+        treatment.id,
+      );
+    }
   });
 }
 

@@ -121,6 +121,18 @@ export default function EditTreatmentScreen() {
           Ses posologies et son historique sont conservés.
         </Message>
       ) : null}
+      {treatment ? (
+        <AppButton
+          label="Voir la chronologie"
+          variant="secondary"
+          onPress={() =>
+            router.push({
+              pathname: '/history',
+              params: { treatmentId: String(treatment.id) },
+            })
+          }
+        />
+      ) : null}
       {treatment?.dosageKind === 'AS_NEEDED' ? (
         <AsNeededIntakeLog
           treatmentId={treatment.id}

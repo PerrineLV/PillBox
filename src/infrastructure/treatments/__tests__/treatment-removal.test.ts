@@ -3,6 +3,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { generatePreparationSnapshot } from '@/domain/preparations/preparation';
 import { generateIntakes } from '@/domain/treatments/generate-intakes';
+import { isLegacyTreatmentPhase } from '@/domain/treatments/treatment';
 import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 import {
   archiveTreatment,
@@ -10,6 +11,7 @@ import {
   getTreatment,
   getTreatmentRemovalAction,
   restoreArchivedTreatment,
+  updateTreatment,
 } from '../treatment-repository';
 
 type Parameters = readonly (string | number | null)[];
@@ -216,6 +218,65 @@ describe('suppression et archivage des traitements', () => {
       includedInPillbox: false,
       archivedAt: null,
     });
+    raw.close();
+  });
+
+  it('journalise l’archivage puis la réactivation pour la timeline', async () => {
+    const { raw, database, treatmentId } = await setup();
+    useInPreparation(raw, treatmentId, 'COMPLETED');
+
+    await archiveTreatment(database, treatmentId);
+    await restoreArchivedTreatment(database, treatmentId);
+
+    expect(
+      raw
+        .prepare(
+          'SELECT event_type FROM treatment_lifecycle_events WHERE treatment_id = ? ORDER BY id',
+        )
+        .all(treatmentId),
+    ).toEqual([{ event_type: 'ARCHIVED' }, { event_type: 'REACTIVATED' }]);
+    raw.close();
+  });
+
+  it('journalise un changement de posologie mais pas une simple modification d’un autre champ', async () => {
+    const { raw, database, treatmentId } = await setup();
+    const treatment = await getTreatment(database, treatmentId);
+    if (treatment === null) throw new Error('Traitement introuvable.');
+
+    await updateTreatment(database, {
+      ...treatment,
+      specialtyName: 'Nouveau nom, même posologie',
+    });
+
+    expect(
+      raw
+        .prepare(
+          'SELECT COUNT(*) AS count FROM treatment_lifecycle_events WHERE treatment_id = ?',
+        )
+        .get(treatmentId),
+    ).toEqual({ count: 0 });
+
+    const reloaded = await getTreatment(database, treatmentId);
+    if (reloaded === null) throw new Error('Traitement introuvable.');
+    const [phase] = reloaded.phases;
+    if (isLegacyTreatmentPhase(phase)) throw new Error('Phase inattendue.');
+    await updateTreatment(database, {
+      ...reloaded,
+      phases: [
+        {
+          ...phase,
+          dosage: [{ slot: 'morning', quantityHalfUnits: 4 }],
+        },
+      ],
+    });
+
+    expect(
+      raw
+        .prepare(
+          'SELECT event_type FROM treatment_lifecycle_events WHERE treatment_id = ?',
+        )
+        .all(treatmentId),
+    ).toEqual([{ event_type: 'DOSAGE_MODIFIED' }]);
     raw.close();
   });
 });
