@@ -222,6 +222,7 @@ describe('suppression d’une boîte du stock', () => {
     await savePreparationProgress(database, preparationId, {
       specialtyCis: manualDraft.specialtyCis,
       boxId: id,
+      quantityHalfUnits: 7,
       verification: 'MANUAL',
       scanRaw: null,
       nonFefoAcknowledged: false,
@@ -250,6 +251,7 @@ describe('suppression d’une boîte du stock', () => {
     await savePreparationProgress(database, preparationId, {
       specialtyCis: manualDraft.specialtyCis,
       boxId: id,
+      quantityHalfUnits: 7,
       verification: 'MANUAL',
       scanRaw: null,
       nonFefoAcknowledged: false,

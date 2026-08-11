@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 20;
+export const LATEST_SCHEMA_VERSION = 21;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -575,6 +575,85 @@ export const SCHEMA_MIGRATIONS = [
         );
         CREATE INDEX as_needed_intake_records_treatment_idx
           ON as_needed_intake_records(treatment_id, taken_at DESC);
+      `);
+    },
+  },
+  {
+    version: 21,
+    name: 'plusieurs boîtes pour un même médicament au sein d’une préparation',
+    async up(transaction) {
+      // Jusqu'ici une préparation ne retenait qu'une seule boîte par
+      // médicament, même lorsque celle-ci ne suffisait pas pour toute la
+      // semaine. Chaque ligne existante couvrait donc, par construction,
+      // l'intégralité du besoin de sa spécialité : la quantité est
+      // reconstituée depuis preparation_requirements, sans rien inventer.
+      await transaction.execute(`
+        DROP INDEX preparation_progress_preparation_idx;
+        ALTER TABLE preparation_progress RENAME TO preparation_progress_v20;
+
+        CREATE TABLE preparation_progress (
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE RESTRICT,
+          specialty_cis TEXT NOT NULL,
+          box_id INTEGER NOT NULL REFERENCES medication_boxes(id) ON DELETE RESTRICT,
+          quantity_half_units INTEGER NOT NULL CHECK (quantity_half_units > 0),
+          verification TEXT NOT NULL CHECK (verification IN ('SCAN', 'MANUAL')),
+          scan_raw TEXT NOT NULL DEFAULT '',
+          non_fefo_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK (non_fefo_acknowledged IN (0, 1)),
+          completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (preparation_id, specialty_cis, box_id),
+          FOREIGN KEY (preparation_id, specialty_cis)
+            REFERENCES preparation_requirements(preparation_id, specialty_cis)
+            ON DELETE RESTRICT
+        );
+
+        INSERT INTO preparation_progress
+          (preparation_id, specialty_cis, box_id, quantity_half_units,
+           verification, scan_raw, non_fefo_acknowledged, completed_at)
+        SELECT
+          old.preparation_id, old.specialty_cis, old.box_id,
+          requirement.required_half_units, old.verification, old.scan_raw,
+          old.non_fefo_acknowledged, old.completed_at
+        FROM preparation_progress_v20 old
+        JOIN preparation_requirements requirement
+          ON requirement.preparation_id = old.preparation_id
+         AND requirement.specialty_cis = old.specialty_cis;
+
+        DROP TABLE preparation_progress_v20;
+
+        CREATE INDEX preparation_progress_preparation_idx
+          ON preparation_progress(preparation_id);
+
+        DROP INDEX preparation_box_usages_preparation_idx;
+        ALTER TABLE preparation_box_usages RENAME TO preparation_box_usages_v20;
+
+        CREATE TABLE preparation_box_usages (
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE RESTRICT,
+          specialty_cis TEXT NOT NULL,
+          specialty_name TEXT NOT NULL,
+          box_id INTEGER NOT NULL REFERENCES medication_boxes(id) ON DELETE RESTRICT,
+          presentation_cip13 TEXT NOT NULL,
+          presentation_label TEXT NOT NULL,
+          lot TEXT,
+          serial_number TEXT,
+          expiration_date TEXT NOT NULL,
+          quantity_half_units INTEGER NOT NULL CHECK (quantity_half_units > 0),
+          verification TEXT NOT NULL DEFAULT 'SCAN' CHECK (verification IN ('SCAN', 'MANUAL')),
+          PRIMARY KEY (preparation_id, specialty_cis, box_id)
+        );
+
+        INSERT INTO preparation_box_usages
+          (preparation_id, specialty_cis, specialty_name, box_id,
+           presentation_cip13, presentation_label, lot, serial_number,
+           expiration_date, quantity_half_units, verification)
+        SELECT preparation_id, specialty_cis, specialty_name, box_id,
+          presentation_cip13, presentation_label, lot, serial_number,
+          expiration_date, quantity_half_units, verification
+        FROM preparation_box_usages_v20;
+
+        DROP TABLE preparation_box_usages_v20;
+
+        CREATE INDEX preparation_box_usages_preparation_idx
+          ON preparation_box_usages(preparation_id);
       `);
     },
   },

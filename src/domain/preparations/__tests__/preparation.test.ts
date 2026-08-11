@@ -3,6 +3,8 @@ import type { Treatment } from '@/domain/treatments/treatment';
 
 import {
   assertVerificationEvidence,
+  effectiveUsableBoxes,
+  evaluateBoxAvailability,
   generatePreparationSnapshot,
   listBoxesForMedication,
   matchScannedBox,
@@ -10,6 +12,7 @@ import {
   preparationStartDate,
   preparationWeeks,
   preparationWeekState,
+  remainingHalfUnitsFor,
   verifyPreparationBox,
 } from '../preparation';
 
@@ -223,6 +226,44 @@ describe('vérification des boîtes pendant la préparation', () => {
     ).toBe('EXPIRED');
   });
 
+  it('bloque une boîte vide, qui ne peut rien apporter', () => {
+    expect(
+      verifyPreparationBox(
+        '60000001',
+        14,
+        box({ remainingQuantity: 0 }),
+        [box({ remainingQuantity: 0 })],
+        '2026-08-03',
+      ).status,
+    ).toBe('INSUFFICIENT');
+  });
+
+  it('accepte une boîte insuffisante seule comme contribution partielle', () => {
+    const result = verifyPreparationBox(
+      '60000001',
+      22,
+      box({ remainingQuantity: 10 }),
+      [box({ remainingQuantity: 10 })],
+      '2026-08-03',
+    );
+    expect(result).toMatchObject({
+      status: 'PARTIAL',
+      quantityHalfUnits: 20,
+      remainingAfterHalfUnits: 2,
+    });
+  });
+
+  it('couvre exactement le reste à charge, pas toute la boîte', () => {
+    const result = verifyPreparationBox(
+      '60000001',
+      10,
+      box({ remainingQuantity: 20 }),
+      [box({ remainingQuantity: 20 })],
+      '2026-08-03',
+    );
+    expect(result).toMatchObject({ status: 'VALID', quantityHalfUnits: 10 });
+  });
+
   it('recommande FEFO mais accepte explicitement un autre lot valide', () => {
     const earliest = box({
       id: 1,
@@ -312,10 +353,53 @@ describe('vérification des boîtes pendant la préparation', () => {
     expect(
       listBoxesForMedication(
         '60000001',
+        14,
         [expired, later, soonest, other],
         '2026-08-03',
       ).map((item) => item.id),
     ).toEqual([3, 2, 1]);
+  });
+
+  it('priorise aussi selon la quantité : suffisante avant insuffisante avant périmée', () => {
+    const insufficientButEarliest = box({
+      id: 1,
+      remainingQuantity: 2,
+      expirationDate: '2026-08-15',
+    });
+    const sufficientButLater = box({
+      id: 2,
+      remainingQuantity: 20,
+      expirationDate: '2027-01-01',
+    });
+    const expired = box({
+      id: 3,
+      remainingQuantity: 20,
+      expirationDate: '2026-08-01',
+    });
+    expect(
+      listBoxesForMedication(
+        '60000001',
+        14,
+        [insufficientButEarliest, sufficientButLater, expired],
+        '2026-08-03',
+      ).map((item) => item.id),
+    ).toEqual([2, 1, 3]);
+  });
+
+  it('évalue la disponibilité d’une boîte selon péremption et quantité', () => {
+    expect(
+      evaluateBoxAvailability(
+        box({ expirationDate: '2026-08-01' }),
+        14,
+        '2026-08-03',
+      ),
+    ).toBe('EXPIRED');
+    expect(
+      evaluateBoxAvailability(box({ remainingQuantity: 2 }), 14, '2026-08-03'),
+    ).toBe('INSUFFICIENT');
+    expect(
+      evaluateBoxAvailability(box({ remainingQuantity: 10 }), 14, '2026-08-03'),
+    ).toBe('SUFFICIENT');
   });
 
   it('refuse de présenter une sélection manuelle comme une vérification par scan', () => {
@@ -324,5 +408,76 @@ describe('vérification des boîtes pendant la préparation', () => {
     expect(() => assertVerificationEvidence('SCAN', null)).toThrow('brute');
     expect(() => assertVerificationEvidence('SCAN', '')).toThrow('brute');
     expect(() => assertVerificationEvidence('MANUAL', 'raw')).toThrow('scan');
+  });
+});
+
+describe('répartition d’un médicament entre plusieurs boîtes', () => {
+  it('réduit le reste à couvrir au fil des contributions déjà retenues', () => {
+    expect(remainingHalfUnitsFor(14, [])).toBe(14);
+    expect(
+      remainingHalfUnitsFor(14, [{ boxId: 1, quantityHalfUnits: 6 }]),
+    ).toBe(8);
+    expect(
+      remainingHalfUnitsFor(14, [
+        { boxId: 1, quantityHalfUnits: 6 },
+        { boxId: 2, quantityHalfUnits: 8 },
+      ]),
+    ).toBe(0);
+    // Ne descend jamais sous zéro même si, par construction, cela ne devrait
+    // pas arriver.
+    expect(
+      remainingHalfUnitsFor(10, [{ boxId: 1, quantityHalfUnits: 20 }]),
+    ).toBe(0);
+  });
+
+  it('réduit la quantité effective d’une boîte déjà partiellement retenue', () => {
+    const first = box({ id: 1, remainingQuantity: 10 });
+    const second = box({ id: 2, remainingQuantity: 8 });
+    const effective = effectiveUsableBoxes(
+      [first, second],
+      [{ boxId: 1, quantityHalfUnits: 20 }],
+    );
+    expect(effective.find((item) => item.id === 1)?.remainingQuantity).toBe(0);
+    expect(effective.find((item) => item.id === 2)?.remainingQuantity).toBe(8);
+  });
+
+  it('simule la fin d’une boîte puis le relais par une seconde pour le même médicament', () => {
+    const almostEmpty = box({ id: 1, remainingQuantity: 3 });
+    const fresh = box({ id: 2, remainingQuantity: 20 });
+    const referenceDate = '2026-08-03';
+
+    // Première boîte : ne couvre pas tout le besoin (14 demi-unités), elle
+    // est prise intégralement.
+    const first = verifyPreparationBox(
+      '60000001',
+      14,
+      almostEmpty,
+      [almostEmpty, fresh],
+      referenceDate,
+    );
+    expect(first).toMatchObject({
+      status: 'PARTIAL',
+      quantityHalfUnits: 6,
+      remainingAfterHalfUnits: 8,
+    });
+
+    const contributions = [{ boxId: 1, quantityHalfUnits: 6 }];
+    const remaining = remainingHalfUnitsFor(14, contributions);
+    expect(remaining).toBe(8);
+
+    // Seconde boîte : couvre exactement ce qu'il reste, sans jamais
+    // recompter la première.
+    const effectiveBoxes = effectiveUsableBoxes(
+      [almostEmpty, fresh],
+      contributions,
+    );
+    const second = verifyPreparationBox(
+      '60000001',
+      remaining,
+      effectiveBoxes.find((item) => item.id === 2)!,
+      effectiveBoxes,
+      referenceDate,
+    );
+    expect(second).toMatchObject({ status: 'VALID', quantityHalfUnits: 8 });
   });
 });

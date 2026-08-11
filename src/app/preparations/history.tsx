@@ -22,6 +22,50 @@ import {
   typography,
 } from '@/ui';
 
+type MedicationUsage = PreparationHistoryEntry['medications'][number];
+
+/**
+ * Regroupe les lots utilisés par médicament : un médicament dont la boîte
+ * s'est terminée en cours de préparation est couvert par plusieurs lots, qui
+ * doivent rester distinguables sans se dupliquer dans l'affichage.
+ */
+function groupBySpecialty(medications: readonly MedicationUsage[]): readonly {
+  specialtyCis: string;
+  specialtyName: string;
+  totalQuantityHalfUnits: number;
+  usages: readonly MedicationUsage[];
+}[] {
+  const order: string[] = [];
+  const groups = new Map<
+    string,
+    { specialtyName: string; usages: MedicationUsage[] }
+  >();
+  for (const medication of medications) {
+    const group = groups.get(medication.specialtyCis);
+    if (group) {
+      group.usages.push(medication);
+    } else {
+      order.push(medication.specialtyCis);
+      groups.set(medication.specialtyCis, {
+        specialtyName: medication.specialtyName,
+        usages: [medication],
+      });
+    }
+  }
+  return order.map((specialtyCis) => {
+    const group = groups.get(specialtyCis)!;
+    return {
+      specialtyCis,
+      specialtyName: group.specialtyName,
+      totalQuantityHalfUnits: group.usages.reduce(
+        (sum, usage) => sum + usage.quantityHalfUnits,
+        0,
+      ),
+      usages: group.usages,
+    };
+  });
+}
+
 export default function PreparationHistoryScreen() {
   const database = useSQLiteContext();
   const [history, setHistory] = useState<PreparationHistoryEntry[]>([]);
@@ -74,27 +118,38 @@ export default function PreparationHistoryScreen() {
           <Text style={styles.muted}>
             Validée le {formatFrenchDateTime(preparation.completedAt)}
           </Text>
-          {preparation.medications.map((medication) => (
-            <View key={medication.specialtyCis} style={styles.medication}>
-              <Text style={styles.name}>{medication.specialtyName}</Text>
+          {groupBySpecialty(preparation.medications).map((group) => (
+            <View key={group.specialtyCis} style={styles.medication}>
+              <Text style={styles.name}>{group.specialtyName}</Text>
               <Text>
-                Quantité : {formatHalfUnits(medication.quantityHalfUnits)}
+                Quantité totale :{' '}
+                {formatHalfUnits(group.totalQuantityHalfUnits)}
+                {group.usages.length > 1
+                  ? ` (${group.usages.length} boîtes)`
+                  : ''}
               </Text>
-              <Text>Lot : {medication.lot ?? 'non renseigné'}</Text>
-              <Text>
-                Péremption :{' '}
-                {formatLongFrenchCivilDate(medication.expirationDate)}
-              </Text>
-              <Text>
-                Présentation : {medication.presentationLabel} (
-                {medication.presentationCip13})
-              </Text>
-              <Text>
-                Vérification :{' '}
-                {medication.verification === 'SCAN'
-                  ? 'scan DataMatrix'
-                  : 'boîte choisie dans le stock, sans scan'}
-              </Text>
+              {group.usages.map((usage) => (
+                <View key={usage.boxId} style={styles.usage}>
+                  <Text>
+                    Lot {usage.lot ?? 'non renseigné'} ·{' '}
+                    {formatHalfUnits(usage.quantityHalfUnits)}
+                  </Text>
+                  <Text>
+                    Péremption :{' '}
+                    {formatLongFrenchCivilDate(usage.expirationDate)}
+                  </Text>
+                  <Text>
+                    Présentation : {usage.presentationLabel} (
+                    {usage.presentationCip13})
+                  </Text>
+                  <Text>
+                    Vérification :{' '}
+                    {usage.verification === 'SCAN'
+                      ? 'scan DataMatrix'
+                      : 'boîte choisie dans le stock, sans scan'}
+                  </Text>
+                </View>
+              ))}
             </View>
           ))}
         </Card>
@@ -125,4 +180,10 @@ const styles = StyleSheet.create({
   muted: { color: '#4b5563', marginTop: 3 },
   name: { fontWeight: '700' },
   title: typography.heading,
+  usage: {
+    borderTopColor: '#e5e7eb',
+    borderTopWidth: 1,
+    marginTop: 6,
+    paddingTop: 6,
+  },
 });

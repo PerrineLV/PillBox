@@ -11,22 +11,25 @@ import {
   formatLongFrenchCivilDate,
 } from '@/components/treatments/civil-date';
 import {
-  isExpired,
   parseGs1Expiration,
   todayIso,
   type MedicationBox,
 } from '@/domain/inventory/inventory';
 import { normalizeScannedGtinToCip13 } from '@/domain/medications/normalize-scanned-identifier';
 import {
+  effectiveUsableBoxes,
+  evaluateBoxAvailability,
   generatePreparationSnapshot,
   listBoxesForMedication,
   matchScannedBox,
   preparationWeeks,
   preparationWeekState,
+  remainingHalfUnitsFor,
   verifyPreparationBox,
   type BoxVerification,
   type BoxVerificationMethod,
   type KnownPreparation,
+  type MedicationRequirement,
   type PreparationSnapshot,
   type PreparationWeek,
   type PreparationWeekChoice,
@@ -44,6 +47,7 @@ import {
   getLatestDraftPreparation,
   listPreparationWeeks,
   savePreparationProgress,
+  type SavedPreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
@@ -77,8 +81,18 @@ type PendingBox = Readonly<{
   method: BoxVerificationMethod;
   /** Preuve brute du DataMatrix, absente lorsque la boîte est choisie dans le stock. */
   raw: string | null;
-  verification: Extract<BoxVerification, { status: 'VALID' }>;
+  verification: Extract<BoxVerification, { status: 'VALID' | 'PARTIAL' }>;
 }>;
+
+/**
+ * Médicament en cours de vérification : le besoin restant tient compte des
+ * boîtes déjà retenues dans cette préparation, lorsque la première s'est
+ * terminée avant de couvrir toute la semaine.
+ */
+type CurrentRequirement = MedicationRequirement & {
+  remainingHalfUnits: number;
+  contributions: readonly SavedPreparationProgress[];
+};
 
 export default function NewPreparationScreen() {
   const database = useSQLiteContext();
@@ -88,7 +102,7 @@ export default function NewPreparationScreen() {
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
   const [weeks, setWeeks] = useState<KnownPreparation[]>([]);
   const [choice, setChoice] = useState<PreparationWeekChoice>('CURRENT');
-  const [completed, setCompleted] = useState<Set<string>>(new Set());
+  const [progress, setProgress] = useState<SavedPreparationProgress[]>([]);
   const [pending, setPending] = useState<PendingBox | null>(null);
   const [scanning, setScanning] = useState(false);
   const [choosing, setChoosing] = useState(false);
@@ -117,9 +131,7 @@ export default function NewPreparationScreen() {
         if (saved) {
           setSnapshot(saved.snapshot);
           setPreparationId(saved.id);
-          setCompleted(
-            new Set(saved.progress.map((item) => item.specialtyCis)),
-          );
+          setProgress([...saved.progress]);
           return;
         }
         const available = options.find(
@@ -140,13 +152,46 @@ export default function NewPreparationScreen() {
     };
   }, [database, options]);
 
-  const current = useMemo(
-    () =>
-      snapshot?.requirements.find(
-        (item) => !completed.has(item.specialtyCis),
-      ) ?? null,
-    [completed, snapshot],
+  const current = useMemo<CurrentRequirement | null>(() => {
+    if (!snapshot) return null;
+    for (const requirement of snapshot.requirements) {
+      const contributions = progress.filter(
+        (item) => item.specialtyCis === requirement.specialtyCis,
+      );
+      const remainingHalfUnits = remainingHalfUnitsFor(
+        requirement.requiredHalfUnits,
+        contributions,
+      );
+      if (remainingHalfUnits > 0) {
+        return { ...requirement, remainingHalfUnits, contributions };
+      }
+    }
+    return null;
+  }, [progress, snapshot]);
+
+  /**
+   * Vue du stock où chaque boîte déjà retenue par cette préparation (en tout
+   * ou en partie) voit sa quantité restante réduite d'autant : le stock en
+   * base n'est décrémenté qu'à la validation finale, mais une même boîte ne
+   * doit jamais paraître disponible deux fois au sein d'une même préparation.
+   */
+  const effectiveBoxes = useMemo(
+    () => effectiveUsableBoxes(boxes, progress),
+    [boxes, progress],
   );
+
+  const completedRequirementsCount = useMemo(() => {
+    if (!snapshot) return 0;
+    return snapshot.requirements.filter(
+      (requirement) =>
+        remainingHalfUnitsFor(
+          requirement.requiredHalfUnits,
+          progress.filter(
+            (item) => item.specialtyCis === requirement.specialtyCis,
+          ),
+        ) === 0,
+    ).length;
+  }, [progress, snapshot]);
 
   const selectedWeek =
     options.find((week) => week.choice === choice) ?? options[0];
@@ -187,7 +232,7 @@ export default function NewPreparationScreen() {
   function resetToWeekChoice(): void {
     setSnapshot(null);
     setPreparationId(null);
-    setCompleted(new Set());
+    setProgress([]);
     setPending(null);
     setChoosing(false);
     setScanning(false);
@@ -205,7 +250,7 @@ export default function NewPreparationScreen() {
 
   function requestCancel(): void {
     if (preparationId === null || saving) return;
-    if (completed.size > 0 || pending !== null) {
+    if (progress.length > 0 || pending !== null) {
       setCancelConfirmationVisible(true);
       return;
     }
@@ -267,22 +312,25 @@ export default function NewPreparationScreen() {
     if (current === null) return;
     const verification = verifyPreparationBox(
       current.specialtyCis,
-      current.requiredHalfUnits,
+      current.remainingHalfUnits,
       box,
-      boxes,
+      effectiveBoxes,
       todayIso(),
     );
     if (verification.status === 'EXPIRED') {
       rejectBox(
         `Boîte périmée depuis le ${formatLongFrenchCivilDate(verification.box.expirationDate)} : utilisation bloquée.`,
+        method,
       );
     } else if (verification.status === 'WRONG_MEDICATION') {
       rejectBox(
         `Produit différent détecté : ${verification.box.specialtyName}. Boîte refusée.`,
+        method,
       );
     } else if (verification.status === 'INSUFFICIENT') {
       rejectBox(
-        'Cette boîte ne contient pas assez de médicament pour ce traitement.',
+        'Cette boîte ne contient plus aucune quantité utilisable pour ce traitement. Choisissez une autre boîte.',
+        method,
       );
     } else {
       setScanning(false);
@@ -309,6 +357,7 @@ export default function NewPreparationScreen() {
     ) {
       rejectBox(
         'Scan incomplet ou invalide : produit, lot et péremption sont requis.',
+        'SCAN',
       );
       return;
     }
@@ -325,15 +374,23 @@ export default function NewPreparationScreen() {
         match.status === 'AMBIGUOUS'
           ? 'Plusieurs boîtes correspondent : impossible de savoir laquelle est utilisée.'
           : 'Cette boîte ne correspond exactement à aucune boîte du stock local.',
+        'SCAN',
       );
       return;
     }
-    verifyBox(match.box, 'SCAN', result.data);
+    const effectiveBox =
+      effectiveBoxes.find((box) => box.id === match.box.id) ?? match.box;
+    verifyBox(effectiveBox, 'SCAN', result.data);
   }
 
-  function rejectBox(reason: string): void {
+  /**
+   * Une boîte refusée depuis la liste du stock y reste affichée : passer à
+   * une seconde boîte se fait alors en un seul geste, sans devoir rouvrir la
+   * liste. Un scan refusé referme la caméra, qui doit être relancée.
+   */
+  function rejectBox(reason: string, method: BoxVerificationMethod): void {
     setScanning(false);
-    setChoosing(false);
+    setChoosing(method === 'MANUAL');
     setError(reason);
   }
 
@@ -341,19 +398,33 @@ export default function NewPreparationScreen() {
     acknowledgeNonFefo: boolean,
   ): Promise<void> {
     if (!pending || !current || preparationId === null || saving) return;
-    if (!pending.verification.isFefo && !acknowledgeNonFefo) return;
+    const { verification } = pending;
+    if (
+      verification.status === 'VALID' &&
+      !verification.isFefo &&
+      !acknowledgeNonFefo
+    )
+      return;
     setSaving(true);
     setError(null);
     try {
-      await savePreparationProgress(database, preparationId, {
+      const entry: SavedPreparationProgress = {
         specialtyCis: current.specialtyCis,
-        boxId: pending.verification.box.id,
+        boxId: verification.box.id,
+        quantityHalfUnits: verification.quantityHalfUnits,
         verification: pending.method,
         scanRaw: pending.raw,
-        nonFefoAcknowledged: acknowledgeNonFefo,
-      });
-      setCompleted((previous) => new Set(previous).add(current.specialtyCis));
+        nonFefoAcknowledged:
+          verification.status === 'VALID' ? acknowledgeNonFefo : false,
+      };
+      await savePreparationProgress(database, preparationId, entry);
+      setProgress((previous) => [...previous, entry]);
       setPending(null);
+      // Une contribution partielle laisse le médicament ouvert : proposer
+      // aussitôt une seconde boîte pour couvrir le reste, sans double tap.
+      if (verification.status === 'PARTIAL') {
+        setChoosing(true);
+      }
     } catch (reason: unknown) {
       setError(message(reason, 'Sauvegarde de la progression impossible.'));
     } finally {
@@ -489,15 +560,15 @@ export default function NewPreparationScreen() {
             {formatLongFrenchCivilDate(snapshot.endDate)}
           </Text>
           <Text accessibilityRole="header" style={styles.progress}>
-            {completed.size + (current ? 1 : 0)} sur{' '}
+            {completedRequirementsCount + (current ? 1 : 0)} sur{' '}
             {snapshot.requirements.length}
           </Text>
           <Text style={typography.caption}>
-            {completed.size} médicament{completed.size > 1 ? 's' : ''} déjà
-            vérifié
-            {completed.size > 1 ? 's' : ''}
+            {completedRequirementsCount} médicament
+            {completedRequirementsCount > 1 ? 's' : ''} déjà vérifié
+            {completedRequirementsCount > 1 ? 's' : ''}
           </Text>
-          {completed.size > 0 && current ? (
+          {progress.length > 0 && current ? (
             <Badge label="Préparation reprise" tone="success" />
           ) : null}
         </>
@@ -515,20 +586,17 @@ export default function NewPreparationScreen() {
         <Text>Aucune prise prévue pour cette période.</Text>
       ) : null}
       {current ? (
-        <MedicationStep
-          snapshot={snapshot!}
-          specialtyCis={current.specialtyCis}
-          name={current.specialtyName}
-          requiredHalfUnits={current.requiredHalfUnits}
-        />
+        <MedicationStep snapshot={snapshot!} current={current} boxes={boxes} />
       ) : null}
       {choosing && current && !pending ? (
         <StockBoxChoice
           boxes={listBoxesForMedication(
             current.specialtyCis,
-            boxes,
+            current.remainingHalfUnits,
+            effectiveBoxes,
             todayIso(),
           )}
+          requiredHalfUnits={current.remainingHalfUnits}
           onCancel={() => setChoosing(false)}
           onSelect={(box) => verifyBox(box, 'MANUAL', null)}
         />
@@ -549,6 +617,8 @@ export default function NewPreparationScreen() {
             stock.
           </Text>
           <DailyFinalCheck snapshot={snapshot} />
+          <Text style={styles.casesTitle}>Lots retenus pour cette semaine</Text>
+          <UsageSummary snapshot={snapshot} progress={progress} boxes={boxes} />
           <Message tone="warning">
             Cette validation décrémentera le stock une seule fois. Contrôlez
             chaque case avant de continuer.
@@ -597,11 +667,15 @@ export default function NewPreparationScreen() {
         onPrimary={() => void cancelCurrentPreparation()}
       >
         <Text style={styles.intro}>
-          {completed.size === 0
-            ? 'La boîte désignée mais pas encore validée sera oubliée.'
-            : completed.size > 1
-              ? `Les ${completed.size} médicaments déjà vérifiés seront oubliés.`
-              : 'Le médicament déjà vérifié sera oublié.'}{' '}
+          {(() => {
+            const touched = new Set(progress.map((item) => item.specialtyCis))
+              .size;
+            if (touched === 0)
+              return 'La boîte désignée mais pas encore validée sera oubliée.';
+            return touched > 1
+              ? `Les ${touched} médicaments déjà touchés seront oubliés.`
+              : 'Le médicament déjà touché sera oublié.';
+          })()}{' '}
           Aucun stock n’est décrémenté et rien n’est ajouté à l’historique.
         </Text>
       </AppModal>
@@ -728,27 +802,45 @@ function DailyFinalCheck({ snapshot }: { snapshot: PreparationSnapshot }) {
 
 function MedicationStep({
   snapshot,
-  specialtyCis,
-  name,
-  requiredHalfUnits,
+  current,
+  boxes,
 }: {
   snapshot: PreparationSnapshot;
-  specialtyCis: string;
-  name: string;
-  requiredHalfUnits: number;
+  current: CurrentRequirement;
+  boxes: readonly MedicationBox[];
 }) {
   const cases = snapshot.items.filter(
-    (item) => item.specialtyCis === specialtyCis,
+    (item) => item.specialtyCis === current.specialtyCis,
   );
   return (
     <Card style={styles.card}>
-      <Text style={styles.name}>{name}</Text>
+      <Text style={styles.name}>{current.specialtyName}</Text>
       {cases[0]?.pharmaceuticalForm ? (
         <Text style={typography.body}>{cases[0].pharmaceuticalForm}</Text>
       ) : null}
       <Text style={styles.total}>
-        Quantité totale : {formatHalfUnits(requiredHalfUnits)}
+        Quantité totale : {formatHalfUnits(current.requiredHalfUnits)}
       </Text>
+      {current.contributions.length > 0 ? (
+        <Message
+          tone="warning"
+          title="Boîte précédente épuisée : reste à couvrir"
+        >
+          {current.contributions.map((contribution) => {
+            const box = boxes.find((item) => item.id === contribution.boxId);
+            return (
+              <Text key={contribution.boxId} style={styles.case}>
+                • Lot {box?.lot ?? 'non renseigné'} :{' '}
+                {formatHalfUnits(contribution.quantityHalfUnits)} déjà attribués
+              </Text>
+            );
+          })}
+          <Text style={styles.case}>
+            Reste à couvrir avec une seconde boîte :{' '}
+            {formatHalfUnits(current.remainingHalfUnits)}
+          </Text>
+        </Message>
+      ) : null}
       <Text style={styles.casesTitle}>Cases concernées</Text>
       {cases.map((item, index) => (
         <Text key={`${item.date}-${item.slot}-${index}`} style={styles.case}>
@@ -761,15 +853,66 @@ function MedicationStep({
 }
 
 /**
- * Boîtes déjà enregistrées pour ce médicament. Les boîtes inutilisables restent
- * visibles mais explicitement signalées : rien n'est masqué silencieusement.
+ * Récapitulatif des lots réellement retenus pour chaque médicament, affiché
+ * juste avant la validation finale : lorsque plusieurs boîtes couvrent un
+ * même médicament, les deux doivent être visibles avant la décrémentation.
+ */
+function UsageSummary({
+  snapshot,
+  progress,
+  boxes,
+}: {
+  snapshot: PreparationSnapshot;
+  progress: readonly SavedPreparationProgress[];
+  boxes: readonly MedicationBox[];
+}) {
+  return (
+    <View style={styles.finalCheck}>
+      {snapshot.requirements.map((requirement) => {
+        const contributions = progress.filter(
+          (item) => item.specialtyCis === requirement.specialtyCis,
+        );
+        return (
+          <View key={requirement.specialtyCis} style={styles.day}>
+            <Text style={styles.dayTitle}>{requirement.specialtyName}</Text>
+            {contributions.map((contribution) => {
+              const box = boxes.find((item) => item.id === contribution.boxId);
+              return (
+                <Text key={contribution.boxId} style={styles.case}>
+                  • Lot {box?.lot ?? 'non renseigné'} · péremption{' '}
+                  {box ? formatLongFrenchCivilDate(box.expirationDate) : '—'} ·{' '}
+                  {formatHalfUnits(contribution.quantityHalfUnits)} ·{' '}
+                  {contribution.verification === 'SCAN'
+                    ? 'vérifiée par scan'
+                    : 'choisie sans scan'}
+                </Text>
+              );
+            })}
+            {contributions.length === 0 ? (
+              <Text style={styles.case}>Aucune boîte retenue</Text>
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * Boîtes déjà enregistrées pour ce médicament, du lot à utiliser en priorité
+ * vers les boîtes inutilisables. Rien n'est masqué silencieusement : une
+ * quantité insuffisante est signalée avant même la sélection, pour permettre
+ * de choisir directement une seconde boîte lorsque la première est presque
+ * terminée plutôt que de découvrir le problème après validation.
  */
 function StockBoxChoice({
   boxes,
+  requiredHalfUnits,
   onCancel,
   onSelect,
 }: {
   boxes: readonly MedicationBox[];
+  requiredHalfUnits: number;
   onCancel(): void;
   onSelect(box: MedicationBox): void;
 }) {
@@ -787,7 +930,11 @@ function StockBoxChoice({
         </Text>
       ) : null}
       {boxes.map((box) => {
-        const expired = isExpired(box.expirationDate, today);
+        const availability = evaluateBoxAvailability(
+          box,
+          requiredHalfUnits,
+          today,
+        );
         return (
           <Pressable
             accessibilityRole="button"
@@ -802,7 +949,12 @@ function StockBoxChoice({
               Péremption {formatLongFrenchCivilDate(box.expirationDate)} · reste{' '}
               {box.remainingQuantity}
             </Text>
-            {expired ? <Badge label="Périmée" tone="danger" /> : null}
+            {availability === 'EXPIRED' ? (
+              <Badge label="Périmée" tone="danger" />
+            ) : null}
+            {availability === 'INSUFFICIENT' ? (
+              <Badge label="Quantité insuffisante seule" tone="warning" />
+            ) : null}
             {box.origin === 'MANUAL' ? (
               <Badge label="Ajoutée sans DataMatrix" />
             ) : null}
@@ -825,8 +977,50 @@ function BoxConfirmation({
   onRestart(): void;
   onValidate(acknowledgeNonFefo: boolean): Promise<void>;
 }) {
-  const { box, isFefo, recommendedBox } = pending.verification;
+  const { verification } = pending;
   const scanned = pending.method === 'SCAN';
+
+  if (verification.status === 'PARTIAL') {
+    const { box, quantityHalfUnits, remainingAfterHalfUnits } = verification;
+    return (
+      <View style={styles.warning}>
+        <Text style={styles.warningTitle}>
+          Boîte insuffisante seule : contribution partielle
+        </Text>
+        <Badge
+          label={
+            scanned
+              ? 'Vérifiée par scan DataMatrix'
+              : 'Choisie dans le stock, sans scan'
+          }
+          tone={scanned ? 'success' : 'warning'}
+        />
+        <Text>
+          Lot {box.lot ?? 'non renseigné'} · péremption{' '}
+          {formatLongFrenchCivilDate(box.expirationDate)}
+        </Text>
+        <Text>
+          Cette boîte couvre {formatHalfUnits(quantityHalfUnits)}. Il restera{' '}
+          {formatHalfUnits(remainingAfterHalfUnits)} à couvrir avec une seconde
+          boîte.
+        </Text>
+        <AppButton
+          loading={saving}
+          label="Utiliser cette boîte entièrement"
+          onPress={() => void onValidate(false)}
+        />
+        <AppButton
+          label={
+            scanned ? 'Scanner une autre boîte' : 'Choisir une autre boîte'
+          }
+          variant="secondary"
+          onPress={onRestart}
+        />
+      </View>
+    );
+  }
+
+  const { box, isFefo, recommendedBox } = verification;
   return (
     <View style={isFefo ? styles.verified : styles.warning}>
       <Text style={styles.warningTitle}>
