@@ -24,10 +24,12 @@ import {
   type NotificationTarget,
 } from '@/domain/reminders/notification-navigation';
 import {
-  isDefaultNotificationTap,
+  dismissRespondedNotification,
   notificationCommandOf,
+  notificationOpening,
   notificationTargetOf,
 } from '@/infrastructure/reminders/local-notifications';
+import { runNotificationCommand } from '@/domain/reminders/notification-actions';
 import { synchronizeIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
 import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 import { markPendingIntakesTakenForGroups } from '@/infrastructure/intakes/intake-repository';
@@ -116,6 +118,10 @@ function ReminderCoordinator() {
  * L’écriture est idempotente : seules les prises encore en attente changent
  * d’état. Une réponse reçue deux fois, ou rejouée au démarrage suivant, ne crée
  * donc aucun doublon et ne réécrit pas l’heure d’une prise déjà validée.
+ *
+ * Une fois l’écriture confirmée, la notification est retirée du tiroir Android :
+ * l’action prise en compte cesse d’être proposée. L’ordre est porté par
+ * `runNotificationCommand`, testable sans module natif.
  */
 function IntakeActionCoordinator() {
   const database = useSQLiteContext();
@@ -126,23 +132,27 @@ function IntakeActionCoordinator() {
     function handle(response: Notifications.NotificationResponse): void {
       const command = notificationCommandOf(response);
       if (command === null) return;
-      // L’écriture passe par la file, comme la synchronisation des rappels, mais
-      // devant celles qui attendent : l’action vient de l’utilisatrice et doit
-      // aboutir même si l’application n’est pas passée au premier plan. Traitée
-      // avant la synchronisation, elle lui fournit en prime des compteurs de
-      // prises en attente déjà à jour.
-      queue
-        .run(() => markPendingIntakesTakenForGroups(database, command.groups), {
-          first: true,
-        })
-        .then(() => {
+      void runNotificationCommand(command, {
+        // L’écriture passe par la file, comme la synchronisation des rappels,
+        // mais devant celles qui attendent : l’action vient de l’utilisatrice et
+        // doit aboutir même si l’application n’est pas passée au premier plan.
+        // Traitée avant la synchronisation, elle lui fournit en prime des
+        // compteurs de prises en attente déjà à jour.
+        validate: (groups) =>
+          queue.run(() => markPendingIntakesTakenForGroups(database, groups), {
+            first: true,
+          }),
+        // Le retrait n’est pas conditionné au montage : la notification doit
+        // disparaître même si l’écran a été démonté entre-temps.
+        dismiss: () => dismissRespondedNotification(response),
+        acknowledge: () => {
           // La réponse traitée ne doit pas être rejouée au prochain démarrage.
           if (!released) Notifications.clearLastNotificationResponse();
-        })
-        .catch(() => {
-          // La réponse reste en attente : elle sera rejouée au démarrage
-          // suivant, sans risque de doublon. Aucune donnée n’est journalisée.
-        });
+        },
+      });
+      // Une écriture échouée laisse la réponse en attente : elle sera rejouée au
+      // démarrage suivant, sans risque de doublon, et la notification reste
+      // affichée. Aucune donnée n’est journalisée.
     }
 
     // Cas de l’application arrêtée : la réponse peut précéder le premier rendu.
@@ -180,7 +190,9 @@ function openNotificationTarget(target: NotificationTarget): void {
 }
 
 /**
- * Ouvre l’écran correspondant à la notification touchée.
+ * Ouvre l’écran correspondant à la notification touchée, que l’appui vienne du
+ * corps de la notification ou de son bouton « Ouvrir PillBox » : les deux gestes
+ * partagent la même navigation différée, aucune prise n’est validée au passage.
  *
  * L’appui est enregistré dès le premier rendu, mais la navigation n’a lieu
  * qu’une fois l’arbre de navigation monté. Sur un démarrage à froid déclenché
@@ -198,11 +210,20 @@ function useNotificationNavigation(): void {
     });
 
     function handle(response: Notifications.NotificationResponse): void {
-      // Un bouton d’action valide une prise sans ouvrir l’application : seul
-      // l’appui standard sur la notification déclenche une navigation.
-      if (!isDefaultNotificationTap(response)) return;
+      // Deux gestes ouvrent PillBox et mènent au même écran : l’appui standard
+      // sur la notification et le bouton « Ouvrir PillBox ». Le bouton de
+      // validation, lui, n’ouvre rien et ne navigue donc jamais.
+      const opening = notificationOpening(response);
+      if (opening === null) return;
       const target = notificationTargetOf(response.notification);
       if (target !== null) navigation.request(target);
+      // Android retire de lui-même la notification touchée en son corps, mais
+      // laisse affichée celle dont on presse un bouton : le geste explicite
+      // d’ouverture doit aboutir au même tiroir vide.
+      if (opening === 'action-button')
+        void dismissRespondedNotification(response).catch(() => {
+          /* L’écran demandé s’ouvre malgré tout ; aucune donnée n’est journalisée. */
+        });
     }
 
     // Cas de l’application complètement arrêtée : la réponse est déjà connue

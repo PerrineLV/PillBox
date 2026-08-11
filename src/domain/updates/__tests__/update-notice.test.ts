@@ -1,3 +1,4 @@
+import { PUBLIC_APK_DOWNLOAD_URL } from '../apk-download';
 import type { PublishedRelease } from '../github-release';
 import {
   UPDATE_CHECK_INTERVAL_MS,
@@ -41,7 +42,7 @@ describe('décision d’alerte de mise à jour', () => {
     expect(decide('1.0.41', release())).toEqual({
       version: '1.0.42',
       installedVersion: '1.0.41',
-      downloadUrl: release().apkUrl,
+      downloadUrl: PUBLIC_APK_DOWNLOAD_URL,
       fallbackToReleasePage: false,
     });
   });
@@ -58,10 +59,10 @@ describe('décision d’alerte de mise à jour', () => {
     expect(decide('1.10.0', release({ version: '1.9.0' }))).toBeNull();
   });
 
-  it('replie sur la page de release en l’absence d’asset APK', () => {
+  it('ouvre toujours le miroir public, même sans asset APK résolu', () => {
     const notice = decide('1.0.41', release({ apkUrl: null }));
-    expect(notice?.downloadUrl).toBe(release().releaseUrl);
-    expect(notice?.fallbackToReleasePage).toBe(true);
+    expect(notice?.downloadUrl).toBe(PUBLIC_APK_DOWNLOAD_URL);
+    expect(notice?.fallbackToReleasePage).toBe(false);
   });
 
   it('n’alerte pas sans release connue ni sans version locale lisible', () => {

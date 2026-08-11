@@ -1,3 +1,5 @@
+import type { StockMovementType } from '@/domain/inventory/inventory';
+import type { RenewalUrgency } from '@/domain/renewal/renewal-list';
 import {
   WEEKDAYS,
   type IntakeSlot,
@@ -26,4 +28,20 @@ export const INTAKE_SLOT_LABELS: Record<IntakeSlot, string> = {
   noon: 'Midi',
   evening: 'Soir',
   bedtime: 'Coucher',
+};
+
+/** Libellés affichés pour l’origine d’un mouvement de stock. */
+export const STOCK_MOVEMENT_TYPE_LABELS: Record<StockMovementType, string> = {
+  BOX_ADDED: 'Ajout de la boîte',
+  MANUAL_ADJUSTMENT: 'Ajustement manuel',
+  CORRECTION: 'Correction',
+  PILLBOX_PREPARATION: 'Préparation du pilulier',
+};
+
+/** Libellés affichés pour le niveau d’urgence d’un besoin de renouvellement. */
+export const RENEWAL_URGENCY_LABELS: Record<RenewalUrgency, string> = {
+  INSUFFICIENT_FOR_NEXT_PREPARATION:
+    'Insuffisant pour la prochaine préparation',
+  RUNS_OUT_SOON: 'Rupture proche',
+  LOW_STOCK: 'Stock faible',
 };

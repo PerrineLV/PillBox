@@ -3,8 +3,23 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { usableQuantity } from '@/domain/inventory/inventory';
 import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
+import {
+  preparationEndDate,
+  type PreparationSnapshot,
+} from '@/domain/preparations/preparation';
+import {
+  completePreparation,
+  createPreparation,
+  savePreparationProgress,
+} from '@/infrastructure/preparations/preparation-repository';
 
-import { addMedicationBox, listMedicationBoxes } from '../inventory-repository';
+import {
+  addMedicationBox,
+  deleteUnusedMedicationBox,
+  getMedicationBoxRemovalAction,
+  listMedicationBoxes,
+  listStockMovements,
+} from '../inventory-repository';
 
 type SqlParameters = readonly (string | number | null)[];
 
@@ -151,6 +166,112 @@ describe('ajout d’une boîte au stock local', () => {
       scanRaw: 'raw-historique',
       remainingQuantity: 12,
     });
+    raw.close();
+  });
+});
+
+/** Snapshot minimal portant sur la spécialité de `manualDraft`. */
+function weekSnapshot(startDate: string): PreparationSnapshot {
+  return {
+    startDate,
+    endDate: preparationEndDate(startDate),
+    items: [
+      {
+        treatmentId: 1,
+        specialtyCis: manualDraft.specialtyCis,
+        specialtyName: manualDraft.specialtyName,
+        pharmaceuticalForm: manualDraft.pharmaceuticalForm,
+        date: startDate,
+        slot: 'morning',
+        quantityHalfUnits: 1,
+      },
+    ],
+    requirements: [
+      {
+        specialtyCis: manualDraft.specialtyCis,
+        specialtyName: manualDraft.specialtyName,
+        requiredHalfUnits: 7,
+        usableStockHalfUnits: 60,
+        missingHalfUnits: 0,
+      },
+    ],
+    hasShortages: false,
+  };
+}
+
+describe('suppression d’une boîte du stock', () => {
+  it('supprime une boîte jamais utilisée ainsi que ses mouvements de stock', async () => {
+    const { raw, database } = await createDatabase();
+    const id = await addMedicationBox(database, manualDraft);
+
+    expect(await getMedicationBoxRemovalAction(database, id)).toBe('DELETE');
+    await deleteUnusedMedicationBox(database, id);
+
+    expect(await listMedicationBoxes(database)).toEqual([]);
+    expect(await listStockMovements(database, id)).toEqual([]);
+    raw.close();
+  });
+
+  it('refuse de supprimer une boîte consommée par une préparation validée et oriente vers l’ajustement', async () => {
+    const { raw, database } = await createDatabase();
+    const id = await addMedicationBox(database, manualDraft);
+    const preparationId = await createPreparation(
+      database,
+      weekSnapshot('2026-08-10'),
+    );
+    await savePreparationProgress(database, preparationId, {
+      specialtyCis: manualDraft.specialtyCis,
+      boxId: id,
+      verification: 'MANUAL',
+      scanRaw: null,
+      nonFefoAcknowledged: false,
+    });
+    await completePreparation(database, preparationId, '2026-08-10');
+
+    expect(await getMedicationBoxRemovalAction(database, id)).toBe(
+      'KEEP_USED_IN_PREPARATION',
+    );
+    await expect(deleteUnusedMedicationBox(database, id)).rejects.toThrow(
+      'ajustez sa quantité restante à 0',
+    );
+
+    expect(await listMedicationBoxes(database)).toHaveLength(1);
+    expect(await listStockMovements(database, id)).toHaveLength(2);
+    raw.close();
+  });
+
+  it('refuse de supprimer une boîte désignée par une préparation en cours', async () => {
+    const { raw, database } = await createDatabase();
+    const id = await addMedicationBox(database, manualDraft);
+    const preparationId = await createPreparation(
+      database,
+      weekSnapshot('2026-08-10'),
+    );
+    await savePreparationProgress(database, preparationId, {
+      specialtyCis: manualDraft.specialtyCis,
+      boxId: id,
+      verification: 'MANUAL',
+      scanRaw: null,
+      nonFefoAcknowledged: false,
+    });
+
+    expect(await getMedicationBoxRemovalAction(database, id)).toBe(
+      'KEEP_IN_DRAFT_PREPARATION',
+    );
+    await expect(deleteUnusedMedicationBox(database, id)).rejects.toThrow(
+      'préparation en cours',
+    );
+
+    expect(await listMedicationBoxes(database)).toHaveLength(1);
+    raw.close();
+  });
+
+  it('refuse de supprimer une boîte introuvable', async () => {
+    const { raw, database } = await createDatabase();
+
+    await expect(deleteUnusedMedicationBox(database, 404)).rejects.toThrow(
+      'Boîte introuvable.',
+    );
     raw.close();
   });
 });

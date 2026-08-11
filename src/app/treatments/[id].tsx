@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 
 import { TreatmentForm } from '@/components/treatments/treatment-form';
-import { confirmPermanentTreatmentDeletion } from '@/components/treatments/delete-confirmation';
+import { TreatmentDeletionConfirmation } from '@/components/treatments/delete-confirmation';
 import type { Treatment } from '@/domain/treatments/treatment';
 import {
   archiveTreatment,
@@ -30,6 +30,8 @@ export default function EditTreatmentScreen() {
   const [removalAction, setRemovalAction] =
     useState<TreatmentRemovalAction | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [deleteConfirmationVisible, setDeleteConfirmationVisible] =
+    useState(false);
   const numericId = Number(id);
 
   useEffect(() => {
@@ -132,16 +134,23 @@ export default function EditTreatmentScreen() {
             label="Supprimer définitivement"
             variant="danger"
             loading={processing}
-            onPress={() =>
-              confirmPermanentTreatmentDeletion(treatment.specialtyName, () => {
-                void runAction(async () => {
-                  await deleteUnusedTreatment(database, treatment.id);
-                  await synchronizeIntakeReminders(database);
-                }, `Le traitement « ${treatment.specialtyName} » a été supprimé.`);
-              })
-            }
+            onPress={() => setDeleteConfirmationVisible(true)}
           />
         )
+      ) : null}
+      {treatment ? (
+        <TreatmentDeletionConfirmation
+          visible={deleteConfirmationVisible}
+          treatmentName={treatment.specialtyName}
+          onCancel={() => setDeleteConfirmationVisible(false)}
+          onConfirm={() => {
+            setDeleteConfirmationVisible(false);
+            void runAction(async () => {
+              await deleteUnusedTreatment(database, treatment.id);
+              await synchronizeIntakeReminders(database);
+            }, `Le traitement « ${treatment.specialtyName} » a été supprimé.`);
+          }}
+        />
       ) : null}
     </ScrollView>
   );

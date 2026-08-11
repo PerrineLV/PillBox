@@ -44,6 +44,50 @@ describe('HomeScreen', () => {
     expect(rendered).toContain('LOT-B');
   });
 
+  it('ajoute la date de rupture estimée à une alerte de stock', () => {
+    const rendered = JSON.stringify(
+      HomeContent({
+        loading: false,
+        error: null,
+        alerts: {
+          startDate: '2026-08-10',
+          endDate: '2026-08-16',
+          stock: [
+            {
+              status: 'INSUFFICIENT',
+              specialtyCis: '1',
+              specialtyName: 'Alpha',
+              requiredHalfUnits: 14,
+              usableStockHalfUnits: 10,
+              missingHalfUnits: 4,
+            },
+          ],
+          expirations: [],
+        },
+        forecasts: new Map([
+          [
+            '1',
+            {
+              specialtyCis: '1',
+              specialtyName: 'Alpha',
+              availableHalfUnits: 10,
+              nextPreparationHalfUnits: 14,
+              missingHalfUnits: 4,
+              insufficientForNextPreparation: true,
+              coverage: {
+                status: 'RUNS_OUT',
+                date: '2026-08-15',
+                cause: 'CONSUMED',
+                coveredDays: 5,
+              },
+            },
+          ],
+        ]),
+      }),
+    );
+    expect(rendered).toContain('Rupture estimée le 15 août 2026');
+  });
+
   it('n’affiche aucune information de mise à jour quand l’app est à jour', () => {
     const screen = HomeContent({ alerts: null, loading: false, error: null });
     expect(JSON.stringify(screen)).not.toContain('Mise à jour');

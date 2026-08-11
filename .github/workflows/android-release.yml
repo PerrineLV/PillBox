@@ -331,3 +331,65 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --latest
           fi
+
+  publish-to-landing:
+    name: Publish APK to PillBox-landing
+    needs: release-apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.LANDING_REPO_TOKEN }}
+      LANDING_REPOSITORY: PerrineLV/PillBox-landing
+      APP_VERSION: ${{ needs.release-apk.outputs.app-version }}
+      # Tag mutable et stable : la landing page pointe toujours vers ce même
+      # lien (`releases/latest/download/pillbox-latest.apk`), quelle que soit
+      # la version publiée.
+      RELEASE_TAG: latest
+
+    steps:
+      - name: Download signed APK artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pillbox-apk-${{ github.sha }}
+          path: release
+
+      - name: Verify downloaded APK checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s release/pillbox-latest.apk
+          test -s release/pillbox-latest.apk.sha256
+          cd release
+          sha256sum --check pillbox-latest.apk.sha256
+
+      - name: Publish or update the latest release on PillBox-landing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          readonly release_title="PillBox $APP_VERSION"
+          readonly release_notes="APK Android release signé, republié depuis PillBox pour la version $APP_VERSION."
+
+          # Le tag « latest » existe déjà à partir de la deuxième exécution.
+          # Le mettre à jour en place (upload --clobber) plutôt que le
+          # supprimer puis le recréer évite toute fenêtre où le lien
+          # permanent de la landing page serait cassé.
+          if gh release view "$RELEASE_TAG" --repo "$LANDING_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              release/pillbox-latest.apk \
+              release/pillbox-latest.apk.sha256 \
+              --repo "$LANDING_REPOSITORY" \
+              --clobber
+            gh release edit "$RELEASE_TAG" \
+              --repo "$LANDING_REPOSITORY" \
+              --title "$release_title" \
+              --notes "$release_notes"
+          else
+            gh release create "$RELEASE_TAG" \
+              release/pillbox-latest.apk \
+              release/pillbox-latest.apk.sha256 \
+              --repo "$LANDING_REPOSITORY" \
+              --title "$release_title" \
+              --notes "$release_notes" \
+              --latest
+          fi

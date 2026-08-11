@@ -4,6 +4,7 @@
  * Les deux temporisations ci-dessous sont les seuls réglages du mécanisme :
  * elles sont centralisées ici et s'ajustent d'une seule valeur.
  */
+import { PUBLIC_APK_DOWNLOAD_URL } from './apk-download';
 import type { PublishedRelease } from './github-release';
 import {
   compareSemanticVersions,
@@ -32,9 +33,9 @@ export interface UpdatePostponement {
 export interface UpdateNotice {
   readonly version: string;
   readonly installedVersion: string;
-  /** Lien ouvert par « Télécharger » : APK publié, sinon page de la release. */
+  /** Lien ouvert par « Télécharger » : le miroir public de l'APK. */
   readonly downloadUrl: string;
-  /** `true` lorsque l'APK n'a pas pu être résolu et que le repli est utilisé. */
+  /** Conservé pour l'UI ; toujours `false` depuis que le lien est fixe (ticket 13n). */
   readonly fallbackToReleasePage: boolean;
 }
 
@@ -79,8 +80,8 @@ export function decideUpdateNotice({
   return {
     version: release.version,
     installedVersion,
-    downloadUrl: release.apkUrl ?? release.releaseUrl,
-    fallbackToReleasePage: release.apkUrl === null,
+    downloadUrl: PUBLIC_APK_DOWNLOAD_URL,
+    fallbackToReleasePage: false,
   };
 }
 

@@ -97,6 +97,91 @@ export async function addMedicationBox(
   return (insert as SQLiteRunResult).lastInsertRowId;
 }
 
+/**
+ * Suite réservée à une boîte : suppression définitive, ou conservation lorsque
+ * la supprimer effacerait ce qui a réellement été préparé, ou lorsqu'une
+ * préparation en cours la désigne déjà.
+ */
+export type MedicationBoxRemovalAction =
+  'DELETE' | 'KEEP_USED_IN_PREPARATION' | 'KEEP_IN_DRAFT_PREPARATION';
+
+/**
+ * Une boîte n'est supprimable que si elle n'a laissé aucune trace dans une
+ * préparation. `preparation_box_usages` et le mouvement `PILLBOX_PREPARATION`
+ * sont écrits ensemble à la validation : les deux sont vérifiés pour ne
+ * dépendre d'aucune supposition sur ce lien. `preparation_progress` marque une
+ * boîte déjà désignée dans une préparation encore en cours ; rien n'a été
+ * consommé, mais la supprimer romprait la préparation, donc on refuse.
+ */
+export async function getMedicationBoxRemovalAction(
+  database: SQLiteDatabase,
+  boxId: number,
+): Promise<MedicationBoxRemovalAction> {
+  const row = await database.getFirstAsync<{
+    used: number;
+    drafted: number;
+  }>(
+    `SELECT
+       EXISTS(
+         SELECT 1 FROM preparation_box_usages WHERE box_id = ?
+         UNION ALL
+         SELECT 1 FROM stock_movements
+           WHERE box_id = ? AND type = 'PILLBOX_PREPARATION'
+       ) AS used,
+       EXISTS(SELECT 1 FROM preparation_progress WHERE box_id = ?) AS drafted`,
+    boxId,
+    boxId,
+    boxId,
+  );
+  if (row === null) {
+    throw new Error('Impossible de vérifier l’usage de cette boîte.');
+  }
+  if (row.used === 1) return 'KEEP_USED_IN_PREPARATION';
+  if (row.drafted === 1) return 'KEEP_IN_DRAFT_PREPARATION';
+  return 'DELETE';
+}
+
+/**
+ * Supprime définitivement une boîte ajoutée par erreur ou en doublon, avec ses
+ * mouvements de stock. La vérification est refaite dans la transaction : une
+ * préparation validée entre l'affichage de l'écran et la confirmation doit
+ * bloquer la suppression plutôt que d'effacer un historique réel.
+ */
+export async function deleteUnusedMedicationBox(
+  database: SQLiteDatabase,
+  boxId: number,
+): Promise<void> {
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const box = await transaction.getFirstAsync<{ id: number }>(
+      'SELECT id FROM medication_boxes WHERE id = ?',
+      boxId,
+    );
+    if (box === null) throw new Error('Boîte introuvable.');
+    const action = await getMedicationBoxRemovalAction(transaction, boxId);
+    if (action === 'KEEP_USED_IN_PREPARATION') {
+      throw new Error(
+        'Cette boîte a déjà servi à une préparation : sa suppression effacerait cet historique. Pour la retirer du stock utilisable, ajustez sa quantité restante à 0.',
+      );
+    }
+    if (action === 'KEEP_IN_DRAFT_PREPARATION') {
+      throw new Error(
+        'Cette boîte est désignée dans une préparation en cours. Terminez ou annulez cette préparation avant de la supprimer.',
+      );
+    }
+    await transaction.runAsync(
+      'DELETE FROM stock_movements WHERE box_id = ?',
+      boxId,
+    );
+    const deleted = await transaction.runAsync(
+      'DELETE FROM medication_boxes WHERE id = ?',
+      boxId,
+    );
+    if (deleted.changes !== 1) {
+      throw new Error('La boîte n’a pas pu être supprimée.');
+    }
+  });
+}
+
 export async function adjustMedicationBox(
   database: SQLiteDatabase,
   boxId: number,
