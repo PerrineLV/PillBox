@@ -1,5 +1,8 @@
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
-import type { RenewalItem, RenewalUrgency } from '@/domain/renewal/renewal-list';
+import type {
+  RenewalItem,
+  RenewalUrgency,
+} from '@/domain/renewal/renewal-list';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
 
 export function renewalUrgencyTone(

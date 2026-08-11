@@ -40,7 +40,8 @@ export const STOCK_MOVEMENT_TYPE_LABELS: Record<StockMovementType, string> = {
 
 /** Libellés affichés pour le niveau d’urgence d’un besoin de renouvellement. */
 export const RENEWAL_URGENCY_LABELS: Record<RenewalUrgency, string> = {
-  INSUFFICIENT_FOR_NEXT_PREPARATION: 'Insuffisant pour la prochaine préparation',
+  INSUFFICIENT_FOR_NEXT_PREPARATION:
+    'Insuffisant pour la prochaine préparation',
   RUNS_OUT_SOON: 'Rupture proche',
   LOW_STOCK: 'Stock faible',
 };

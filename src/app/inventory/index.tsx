@@ -167,63 +167,65 @@ export default function InventoryScreen() {
       ) : null}
       {filter !== 'renew' &&
         groups.map((medication) => {
-        const medicationForecast = forecastsByCis.get(medication.cis);
-        return (
-          <View key={medication.cis} style={styles.medication}>
-            <Text style={styles.medicationName}>{medication.name}</Text>
-            {medicationForecast ? (
-              <StockForecastCard forecast={medicationForecast} />
-            ) : null}
-            {medication.lots.map((lot) => {
-              const usable = lot.boxes.reduce(
-                (sum, box) => sum + usableQuantity(box, today),
-                0,
-              );
-              return (
-                <Card key={lot.key} style={styles.lot}>
-                  <Text style={styles.lotTitle}>Lot {lot.label}</Text>
-                  <Text style={styles.usable}>Stock utilisable : {usable}</Text>
-                  {lot.boxes.map((box) => {
-                    const expired = isExpired(box.expirationDate, today);
-                    return (
-                      <Link
-                        key={box.id}
-                        href={{
-                          pathname: '/inventory/[id]',
-                          params: { id: String(box.id) },
-                        }}
-                        style={[styles.box, expired && styles.expiredBox]}
-                      >
-                        <View>
-                          <Text style={styles.boxTitle}>
-                            Boîte #{box.id} · {box.remainingQuantity}/
-                            {box.initialQuantity}
-                          </Text>
-                          <Text>
-                            Péremption :{' '}
-                            {formatLongFrenchCivilDate(box.expirationDate)}
-                          </Text>
-                          <Text>
-                            {box.origin === 'SCAN'
-                              ? 'Ajoutée par scan DataMatrix'
-                              : 'Ajoutée manuellement, sans scan'}
-                          </Text>
-                          {expired ? (
-                            <Badge
-                              label="Périmée — stock inutilisable"
-                              tone="danger"
-                            />
-                          ) : null}
-                        </View>
-                      </Link>
-                    );
-                  })}
-                </Card>
-              );
-            })}
-          </View>
-        );
-      })}
+          const medicationForecast = forecastsByCis.get(medication.cis);
+          return (
+            <View key={medication.cis} style={styles.medication}>
+              <Text style={styles.medicationName}>{medication.name}</Text>
+              {medicationForecast ? (
+                <StockForecastCard forecast={medicationForecast} />
+              ) : null}
+              {medication.lots.map((lot) => {
+                const usable = lot.boxes.reduce(
+                  (sum, box) => sum + usableQuantity(box, today),
+                  0,
+                );
+                return (
+                  <Card key={lot.key} style={styles.lot}>
+                    <Text style={styles.lotTitle}>Lot {lot.label}</Text>
+                    <Text style={styles.usable}>
+                      Stock utilisable : {usable}
+                    </Text>
+                    {lot.boxes.map((box) => {
+                      const expired = isExpired(box.expirationDate, today);
+                      return (
+                        <Link
+                          key={box.id}
+                          href={{
+                            pathname: '/inventory/[id]',
+                            params: { id: String(box.id) },
+                          }}
+                          style={[styles.box, expired && styles.expiredBox]}
+                        >
+                          <View>
+                            <Text style={styles.boxTitle}>
+                              Boîte #{box.id} · {box.remainingQuantity}/
+                              {box.initialQuantity}
+                            </Text>
+                            <Text>
+                              Péremption :{' '}
+                              {formatLongFrenchCivilDate(box.expirationDate)}
+                            </Text>
+                            <Text>
+                              {box.origin === 'SCAN'
+                                ? 'Ajoutée par scan DataMatrix'
+                                : 'Ajoutée manuellement, sans scan'}
+                            </Text>
+                            {expired ? (
+                              <Badge
+                                label="Périmée — stock inutilisable"
+                                tone="danger"
+                              />
+                            ) : null}
+                          </View>
+                        </Link>
+                      );
+                    })}
+                  </Card>
+                );
+              })}
+            </View>
+          );
+        })}
     </ScrollView>
   );
 }
