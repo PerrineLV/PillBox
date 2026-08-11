@@ -4,12 +4,13 @@
 
 Le snapshot est une réutilisation de la [Base de données publique des médicaments (BDPM)](https://base-donnees-publique.medicaments.gouv.fr/telechargement), diffusée librement par le ministère chargé de la Santé. La BDPM précise qu'elle est actualisée mensuellement et que le réutilisateur doit mentionner la source et les dates de mise à jour.
 
-Deux fichiers officiels, tabulés et sans en-tête, sont utilisés :
+Trois fichiers officiels, tabulés et sans en-tête, sont utilisés :
 
 - `CIS_bdpm.txt` : spécialités ;
-- `CIS_CIP_bdpm.txt` : présentations.
+- `CIS_CIP_bdpm.txt` : présentations ;
+- `CIS_GENER_bdpm.txt` : groupes génériques.
 
-Le format des colonnes est celui du document officiel `Contenu_et_format_des_fichiers_telechargeables_dans_la_BDM_v4.pdf`, accessible depuis la page de téléchargement. Le snapshot actuellement livré a été construit avec les spécialités datées du **03/08/2026** et les présentations datées du **08/08/2026**, dates affichées par la BDPM au téléchargement.
+Le format des colonnes est celui du document officiel `Contenu_et_format_des_fichiers_telechargeables_dans_la_BDM_v4.pdf`, accessible depuis la page de téléchargement. Le snapshot actuellement livré (`assets/medications/medications.db`) a été construit avant l'ajout du fichier des groupes génériques, avec les spécialités datées du **03/08/2026** et les présentations datées du **08/08/2026** ; il ne contient donc pas encore la table `generic_groups`. L'importeur sait désormais consommer les trois fichiers, mais une régénération du snapshot embarqué (voir « Mettre à jour le snapshot ») reste nécessaire pour l'inclure.
 
 La réutilisation n'a aucun caractère officiel et ne suggère aucune reconnaissance par l'ANSM, la HAS ou l'Assurance Maladie.
 
@@ -50,7 +51,19 @@ Les espaces de bord sont retirés lors de l'import, mais les valeurs ne sont pas
 
 `medication_search` est un index FTS5 dérivé de la dénomination et de la forme. Sa copie normalisée ignore casse, accents et ponctuation. Les valeurs sources affichées ne sont pas normalisées.
 
-`metadata` conserve la version du schéma, la source, les deux dates source, la date de génération et le nombre de présentations dont le CIS est absent du fichier des spécialités.
+Table `generic_groups`, une ligne par couple (groupe générique, CIS membre) — un même CIS peut légitimement apparaître dans plusieurs groupes (ex. complémentarité posologique entre dosages) :
+
+- `group_id` (identifiant du groupe générique) ;
+- `cis` fourni par la source ;
+- `group_label` (libellé du groupe générique) ;
+- `type` (code brut du fichier source, non interprété par l'importeur) ;
+- `sort_number` (numéro de tri de la présentation au sein du groupe).
+
+La clé primaire est le couple `(group_id, cis)` : un même CIS peut légitimement porter deux lignes de `type` différent dans deux groupes distincts (ex. complémentarité posologique entre un dosage à 250 mg et un dosage à 500 mg). Le code `type` n'est jamais interprété ni traduit par l'importeur : il reste la valeur brute du fichier source, conformément à l'interdiction de déduire une correspondance générique par un autre moyen que la relation officielle. D'après la documentation ANSM du format des fichiers téléchargeables, les valeurs observées sont `0` (princeps), `1` (générique), `2` (générique par complémentarité posologique) et `4` (générique substituable) ; cette liste est indicative et ne conditionne aucune logique de l'importeur.
+
+Cette table est alimentée en lecture seule à des fins de traçabilité et de tickets futurs (affichage informatif, confirmation de correspondance générique). À l'issue de ce ticket, elle n'est lue par aucun écran, et n'intervient dans aucune règle de stock, de boîte ou de préparation.
+
+`metadata` conserve la version du schéma, la source, les trois dates source, la date de génération, le nombre de présentations dont le CIS est absent du fichier des spécialités (`orphan_presentations`) et le nombre de lignes de groupes génériques dont le CIS est absent du fichier des spécialités (`orphan_generic_groups`).
 
 ### Incertitude constatée dans le snapshot actuel
 
@@ -58,23 +71,26 @@ Les deux fichiers officiels n'ont pas la même date. Quatre présentations du fi
 
 ## Mettre à jour le snapshot
 
-1. Ouvrir la page officielle de téléchargement et noter séparément les dates affichées pour « Fichier des spécialités » et « Fichier des présentations ».
+1. Ouvrir la page officielle de téléchargement et noter séparément les trois dates affichées : « Fichier des spécialités », « Fichier des présentations » et « Fichier des groupes génériques ».
 2. Télécharger directement, sans les modifier :
    - `https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_bdpm.txt`
    - `https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_CIP_bdpm.txt`
+   - `https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_GENER_bdpm.txt`
 3. Lancer depuis la racine, en remplaçant les chemins et dates :
 
 ```sh
 npm run medications:import -- \
   --specialties /chemin/CIS_bdpm.txt \
   --presentations /chemin/CIS_CIP_bdpm.txt \
+  --generics /chemin/CIS_GENER_bdpm.txt \
   --output assets/medications/medications.db \
   --specialties-source-date AAAA-MM-JJ \
-  --presentations-source-date AAAA-MM-JJ
+  --presentations-source-date AAAA-MM-JJ \
+  --generics-source-date AAAA-MM-JJ
 ```
 
-4. Vérifier les nombres affichés et examiner toute présentation avec CIS absent. Une valeur non nulle peut provenir du décalage de publication des deux fichiers ; elle ne doit pas être corrigée manuellement.
-5. Mettre à jour dans ce document les deux dates et l'incertitude constatée.
+4. Vérifier les nombres affichés et examiner toute présentation ou ligne de groupe générique avec CIS absent. Une valeur non nulle peut provenir du décalage de publication entre fichiers ; elle ne doit pas être corrigée manuellement.
+5. Mettre à jour dans ce document les trois dates et l'incertitude constatée.
 6. Exécuter `npm run lint`, `npm run typecheck`, `npm test` et `npm run build:android:check`.
 7. Sur Android, rechercher plusieurs noms avec et sans accents, plusieurs dosages et plusieurs formes, puis vérifier CIS et CIP13 face à la source officielle.
 

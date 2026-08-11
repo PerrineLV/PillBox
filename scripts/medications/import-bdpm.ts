@@ -7,19 +7,24 @@ import { normalizeMedicationSearch } from '../../src/domain/medications/normaliz
 
 const SPECIALTY_COLUMN_COUNT = 12;
 const PRESENTATION_COLUMN_COUNT = 13;
+const GENERIC_GROUP_COLUMN_COUNT = 6;
 
 export type ImportOptions = {
   specialtiesPath: string;
   presentationsPath: string;
+  genericsPath: string;
   outputPath: string;
   specialtiesSourceDate: string;
   presentationsSourceDate: string;
+  genericsSourceDate: string;
 };
 
 export type ImportSummary = {
   specialties: number;
   presentations: number;
   orphanPresentations: number;
+  genericGroups: number;
+  orphanGenericGroups: number;
 };
 
 type SpecialtyRow = {
@@ -47,11 +52,20 @@ type PresentationRow = {
   cip13: string;
 };
 
+type GenericGroupRow = {
+  groupId: string;
+  groupLabel: string;
+  cis: string;
+  type: string | null;
+  sortNumber: string | null;
+};
+
 export async function importBdpm(
   options: ImportOptions,
 ): Promise<ImportSummary> {
   validateSourceDate(options.specialtiesSourceDate);
   validateSourceDate(options.presentationsSourceDate);
+  validateSourceDate(options.genericsSourceDate);
   const specialtyRows = parseSpecialties(
     await readFile(options.specialtiesPath),
     options.specialtiesPath,
@@ -60,10 +74,17 @@ export async function importBdpm(
     await readFile(options.presentationsPath),
     options.presentationsPath,
   );
+  const genericGroupRows = parseGenericGroups(
+    await readFile(options.genericsPath),
+    options.genericsPath,
+  );
   const specialtyIds = new Set(specialtyRows.map((row) => row.cis));
 
   const orphanPresentations = presentationRows.filter(
     (presentation) => !specialtyIds.has(presentation.cis),
+  ).length;
+  const orphanGenericGroups = genericGroupRows.filter(
+    (genericGroup) => !specialtyIds.has(genericGroup.cis),
   ).length;
 
   const outputPath = resolve(options.outputPath);
@@ -75,9 +96,15 @@ export async function importBdpm(
   try {
     createSchema(database);
     database.transaction(() => {
-      insertMetadata(database, options, orphanPresentations);
+      insertMetadata(
+        database,
+        options,
+        orphanPresentations,
+        orphanGenericGroups,
+      );
       insertSpecialties(database, specialtyRows);
       insertPresentations(database, presentationRows);
+      insertGenericGroups(database, genericGroupRows);
       database.exec(
         "INSERT INTO medication_search(medication_search) VALUES ('optimize')",
       );
@@ -96,6 +123,8 @@ export async function importBdpm(
     specialties: specialtyRows.length,
     presentations: presentationRows.length,
     orphanPresentations,
+    genericGroups: genericGroupRows.length,
+    orphanGenericGroups,
   };
 }
 
@@ -143,6 +172,23 @@ function parsePresentations(
   });
 }
 
+function parseGenericGroups(
+  contents: Buffer,
+  sourcePath: string,
+): GenericGroupRow[] {
+  const text = new TextDecoder('windows-1252').decode(contents);
+  return parseLines(text, sourcePath, GENERIC_GROUP_COLUMN_COUNT, (columns) => {
+    const cis = requiredIdentifier(columns[2], 'CIS', /^\d{8}$/);
+    return {
+      groupId: requiredText(columns[0], 'identifiant de groupe générique', cis),
+      groupLabel: requiredText(columns[1], 'libellé de groupe générique', cis),
+      cis,
+      type: optionalText(columns[3]),
+      sortNumber: optionalText(columns[4]),
+    };
+  });
+}
+
 function parseLines<T>(
   text: string,
   sourcePath: string,
@@ -178,11 +224,16 @@ function parseLines<T>(
 
 function getRowIdentifier(row: unknown): string {
   if (isPresentationRow(row)) return row.cip13;
+  if (isGenericGroupRow(row)) return `${row.groupId}:${row.cis}`;
   return (row as SpecialtyRow).cis;
 }
 
 function isPresentationRow(row: unknown): row is PresentationRow {
   return typeof row === 'object' && row !== null && 'cip13' in row;
+}
+
+function isGenericGroupRow(row: unknown): row is GenericGroupRow {
+  return typeof row === 'object' && row !== null && 'groupId' in row;
 }
 
 function requiredIdentifier(
@@ -246,6 +297,15 @@ function createSchema(database: Database.Database): void {
       marketing_declaration_date TEXT
     ) WITHOUT ROWID;
     CREATE INDEX presentations_by_cis ON presentations(cis, cip13);
+    CREATE TABLE generic_groups (
+      group_id TEXT NOT NULL,
+      cis TEXT NOT NULL CHECK(length(cis) = 8),
+      group_label TEXT NOT NULL,
+      type TEXT,
+      sort_number TEXT,
+      PRIMARY KEY (group_id, cis)
+    ) WITHOUT ROWID;
+    CREATE INDEX generic_groups_by_cis ON generic_groups(cis);
     CREATE VIRTUAL TABLE medication_search USING fts5(
       cis UNINDEXED,
       search_text,
@@ -258,6 +318,7 @@ function insertMetadata(
   database: Database.Database,
   options: ImportOptions,
   orphanPresentations: number,
+  orphanGenericGroups: number,
 ): void {
   const insert = database.prepare(
     'INSERT INTO metadata (key, value) VALUES (?, ?)',
@@ -266,7 +327,9 @@ function insertMetadata(
   insert.run('source', 'Base de données publique des médicaments (BDPM)');
   insert.run('specialties_source_date', options.specialtiesSourceDate);
   insert.run('presentations_source_date', options.presentationsSourceDate);
+  insert.run('generics_source_date', options.genericsSourceDate);
   insert.run('orphan_presentations', String(orphanPresentations));
+  insert.run('orphan_generic_groups', String(orphanGenericGroups));
   insert.run('generated_at', new Date().toISOString());
 }
 
@@ -306,6 +369,17 @@ function insertPresentations(
   for (const row of rows) insert.run(row);
 }
 
+function insertGenericGroups(
+  database: Database.Database,
+  rows: GenericGroupRow[],
+): void {
+  const insert = database.prepare(`
+    INSERT INTO generic_groups (group_id, cis, group_label, type, sort_number)
+    VALUES (@groupId, @cis, @groupLabel, @type, @sortNumber)
+  `);
+  for (const row of rows) insert.run(row);
+}
+
 export function parseImportArguments(arguments_: string[]): ImportOptions {
   const values = new Map<string, string>();
   for (let index = 0; index < arguments_.length; index += 2) {
@@ -313,8 +387,8 @@ export function parseImportArguments(arguments_: string[]): ImportOptions {
     const value = arguments_[index + 1];
     if (key === undefined || value === undefined || !key.startsWith('--')) {
       throw new Error(
-        'Arguments attendus: --specialties, --presentations, --output, ' +
-          '--specialties-source-date, --presentations-source-date.',
+        'Arguments attendus: --specialties, --presentations, --generics, --output, ' +
+          '--specialties-source-date, --presentations-source-date, --generics-source-date.',
       );
     }
     values.set(key, value);
@@ -327,8 +401,10 @@ export function parseImportArguments(arguments_: string[]): ImportOptions {
   return {
     specialtiesPath: read('--specialties'),
     presentationsPath: read('--presentations'),
+    genericsPath: read('--generics'),
     outputPath: read('--output'),
     specialtiesSourceDate: read('--specialties-source-date'),
     presentationsSourceDate: read('--presentations-source-date'),
+    genericsSourceDate: read('--generics-source-date'),
   };
 }
