@@ -26,6 +26,8 @@ describe('importBdpm', () => {
       specialties: 2,
       presentations: 2,
       orphanPresentations: 0,
+      genericGroups: 2,
+      orphanGenericGroups: 0,
     });
     expect(
       database
@@ -45,6 +47,31 @@ describe('importBdpm', () => {
         .prepare("SELECT name FROM pragma_table_info('presentations')")
         .all(),
     ).not.toContainEqual({ name: 'quantity' });
+    expect(
+      database.prepare('SELECT * FROM generic_groups ORDER BY cis').all(),
+    ).toEqual([
+      {
+        group_id: '10',
+        cis: '61234567',
+        group_label: 'GROUPE TEST GÉNÉRIQUE',
+        type: '0',
+        sort_number: '1',
+      },
+      {
+        group_id: '10',
+        cis: '67654321',
+        group_label: 'GROUPE TEST GÉNÉRIQUE',
+        type: '1',
+        sort_number: '2',
+      },
+    ]);
+    expect(
+      database
+        .prepare(
+          "SELECT value FROM metadata WHERE key = 'generics_source_date'",
+        )
+        .get(),
+    ).toEqual({ value: '2026-08-05' });
     database.close();
   });
 
@@ -88,6 +115,74 @@ describe('importBdpm', () => {
     ).toEqual({ value: '1' });
     database.close();
   });
+
+  it('conserve et compte un groupe générique lié à un CIS absent', async () => {
+    const paths = await writeFixtures(directory);
+    const generics = await readFile(paths.genericsPath, 'latin1');
+    await writeFile(
+      paths.genericsPath,
+      Buffer.from(generics.replace('61234567', '69999999'), 'latin1'),
+    );
+
+    await expect(importBdpm(importOptions(paths))).resolves.toEqual(
+      expect.objectContaining({ orphanGenericGroups: 1 }),
+    );
+    const database = new Database(paths.outputPath, { readonly: true });
+    expect(
+      database
+        .prepare(
+          "SELECT value FROM metadata WHERE key = 'orphan_generic_groups'",
+        )
+        .get(),
+    ).toEqual({ value: '1' });
+    database.close();
+  });
+
+  it('accepte un même CIS dans deux groupes génériques distincts', async () => {
+    const paths = await writeFixtures(directory);
+    const generics = [
+      genericGroupRow('10', 'GROUPE A', '61234567', '0', '1'),
+      genericGroupRow('11', 'GROUPE B', '61234567', '2', '1'),
+    ].join('\r\n');
+    await writeFile(paths.genericsPath, Buffer.from(generics, 'latin1'));
+
+    const summary = await importBdpm(importOptions(paths));
+    expect(summary.genericGroups).toBe(2);
+    const database = new Database(paths.outputPath, { readonly: true });
+    expect(
+      database
+        .prepare(
+          'SELECT group_id FROM generic_groups WHERE cis = ? ORDER BY group_id',
+        )
+        .all('61234567'),
+    ).toEqual([{ group_id: '10' }, { group_id: '11' }]);
+    database.close();
+  });
+
+  it('rejette un doublon de groupe et CIS dans les groupes génériques', async () => {
+    const paths = await writeFixtures(directory);
+    const generics = [
+      genericGroupRow('10', 'GROUPE TEST', '61234567', '0', '1'),
+      genericGroupRow('10', 'GROUPE TEST', '61234567', '1', '2'),
+    ].join('\r\n');
+    await writeFile(paths.genericsPath, Buffer.from(generics, 'latin1'));
+
+    await expect(importBdpm(importOptions(paths))).rejects.toThrow(
+      /identifiant dupliqué/,
+    );
+  });
+
+  it('rejette un fichier de groupes génériques avec un nombre de colonnes invalide', async () => {
+    const paths = await writeFixtures(directory);
+    await writeFile(
+      paths.genericsPath,
+      Buffer.from('10\tGROUPE TEST\t61234567\t0', 'latin1'),
+    );
+
+    await expect(importBdpm(importOptions(paths))).rejects.toThrow(
+      /colonnes attendues/,
+    );
+  });
 });
 
 describe('normalizeMedicationSearch', () => {
@@ -101,6 +196,7 @@ describe('normalizeMedicationSearch', () => {
 async function writeFixtures(directory: string) {
   const specialtiesPath = join(directory, 'CIS_bdpm.txt');
   const presentationsPath = join(directory, 'CIS_CIP_bdpm.txt');
+  const genericsPath = join(directory, 'CIS_GENER_bdpm.txt');
   const outputPath = join(directory, 'medications.db');
   const specialtyRows = [
     specialtyRow('61234567', 'ÉFFERALGAN 500 mg, comprimé', 'comprimé'),
@@ -128,7 +224,12 @@ async function writeFixtures(directory: string) {
       ),
     ].join('\r\n'),
   );
-  return { specialtiesPath, presentationsPath, outputPath };
+  const genericRows = [
+    genericGroupRow('10', 'GROUPE TEST GÉNÉRIQUE', '61234567', '0', '1'),
+    genericGroupRow('10', 'GROUPE TEST GÉNÉRIQUE', '67654321', '1', '2'),
+  ].join('\r\n');
+  await writeFile(genericsPath, Buffer.from(genericRows, 'latin1'));
+  return { specialtiesPath, presentationsPath, genericsPath, outputPath };
 }
 
 function specialtyRow(cis: string, name: string, form: string): string {
@@ -171,14 +272,26 @@ function presentationRow(
   ].join('\t');
 }
 
+function genericGroupRow(
+  groupId: string,
+  groupLabel: string,
+  cis: string,
+  type: string,
+  sortNumber: string,
+): string {
+  return [groupId, groupLabel, cis, type, sortNumber].join('\t');
+}
+
 function importOptions(paths: {
   specialtiesPath: string;
   presentationsPath: string;
+  genericsPath: string;
   outputPath: string;
 }) {
   return {
     ...paths,
     specialtiesSourceDate: '2026-08-03',
     presentationsSourceDate: '2026-08-08',
+    genericsSourceDate: '2026-08-05',
   };
 }

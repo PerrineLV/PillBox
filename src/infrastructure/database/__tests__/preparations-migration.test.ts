@@ -99,12 +99,18 @@ describe('migration des snapshots de préparation', () => {
       .run();
     database
       .prepare(
-        `INSERT INTO preparation_progress (preparation_id, specialty_cis, box_id, scan_raw) VALUES (?, '60000001', ?, 'scan-1')`,
+        `INSERT INTO preparation_progress
+         (preparation_id, specialty_cis, box_id, quantity_half_units, verification, scan_raw)
+         VALUES (?, '60000001', ?, 14, 'SCAN', 'scan-1')`,
       )
       .run(preparation.lastInsertRowid, medicationBox.lastInsertRowid);
     database
       .prepare(
-        `INSERT INTO preparation_progress (preparation_id, specialty_cis, box_id, scan_raw) VALUES (?, '60000001', ?, 'scan-2') ON CONFLICT(preparation_id, specialty_cis) DO UPDATE SET scan_raw = excluded.scan_raw`,
+        `INSERT INTO preparation_progress
+         (preparation_id, specialty_cis, box_id, quantity_half_units, verification, scan_raw)
+         VALUES (?, '60000001', ?, 14, 'SCAN', 'scan-2')
+         ON CONFLICT(preparation_id, specialty_cis, box_id)
+         DO UPDATE SET scan_raw = excluded.scan_raw`,
       )
       .run(preparation.lastInsertRowid, medicationBox.lastInsertRowid);
     expect(

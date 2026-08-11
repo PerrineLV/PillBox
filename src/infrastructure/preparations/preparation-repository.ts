@@ -11,10 +11,20 @@ import {
 export type SavedPreparationProgress = Readonly<{
   specialtyCis: string;
   boxId: number;
+  /** Quantité couverte par cette boîte : le reste du besoin est apporté par d'autres lignes. */
+  quantityHalfUnits: number;
   verification: BoxVerificationMethod;
   /** Chaîne brute du DataMatrix, absente lorsque la boîte a été choisie dans le stock. */
   scanRaw: string | null;
   nonFefoAcknowledged: boolean;
+  /**
+   * CIS réellement utilisé lorsqu'il diffère de `specialtyCis` (autre membre
+   * du même groupe générique officiel, confirmé explicitement) ; `null` pour
+   * une correspondance exacte. `specialtyCis` continue de désigner le
+   * médicament attendu, jamais celui réellement scanné.
+   */
+  matchedCis: string | null;
+  matchedSpecialtyName: string | null;
 }>;
 
 export type SavedPreparation = Readonly<{
@@ -38,6 +48,8 @@ export type PreparationHistoryEntry = Readonly<{
     lot: string | null;
     expirationDate: string;
     verification: BoxVerificationMethod;
+    matchedCis: string | null;
+    matchedSpecialtyName: string | null;
   }>[];
 }>;
 
@@ -174,12 +186,16 @@ export async function getLatestDraftPreparation(
   const progress = await database.getAllAsync<{
     specialty_cis: string;
     box_id: number;
+    quantity_half_units: number;
     verification: string;
     scan_raw: string;
     non_fefo_acknowledged: number;
+    matched_cis: string | null;
+    matched_specialty_name: string | null;
   }>(
-    `SELECT specialty_cis, box_id, verification, scan_raw, non_fefo_acknowledged
-     FROM preparation_progress WHERE preparation_id = ?`,
+    `SELECT specialty_cis, box_id, quantity_half_units, verification,
+      scan_raw, non_fefo_acknowledged, matched_cis, matched_specialty_name
+     FROM preparation_progress WHERE preparation_id = ? ORDER BY box_id`,
     preparation.id,
   );
   const hydratedRequirements = requirements.map((row) => ({
@@ -211,36 +227,79 @@ export async function getLatestDraftPreparation(
     progress: progress.map((row) => ({
       specialtyCis: row.specialty_cis,
       boxId: row.box_id,
+      quantityHalfUnits: row.quantity_half_units,
       verification: toVerificationMethod(row.verification),
       scanRaw: row.scan_raw === '' ? null : row.scan_raw,
       nonFefoAcknowledged: row.non_fefo_acknowledged === 1,
+      matchedCis: row.matched_cis,
+      matchedSpecialtyName: row.matched_specialty_name,
     })),
   };
 }
 
+/**
+ * Enregistre la contribution d'une boîte au besoin d'un médicament. Plusieurs
+ * boîtes peuvent contribuer au même médicament : la ligne est identifiée par
+ * boîte, pas seulement par médicament, afin qu'une boîte qui se termine en
+ * cours de préparation puisse être complétée par une seconde sans écraser la
+ * première.
+ */
 export async function savePreparationProgress(
   database: SQLiteDatabase,
   preparationId: number,
   progress: SavedPreparationProgress,
 ): Promise<void> {
   assertVerificationEvidence(progress.verification, progress.scanRaw);
+  assertGenericMatchConsistency(progress);
   await database.runAsync(
     `INSERT INTO preparation_progress
-      (preparation_id, specialty_cis, box_id, verification, scan_raw, non_fefo_acknowledged)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(preparation_id, specialty_cis) DO UPDATE SET
-       box_id = excluded.box_id,
+      (preparation_id, specialty_cis, box_id, quantity_half_units,
+       verification, scan_raw, non_fefo_acknowledged, matched_cis,
+       matched_specialty_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(preparation_id, specialty_cis, box_id) DO UPDATE SET
+       quantity_half_units = excluded.quantity_half_units,
        verification = excluded.verification,
        scan_raw = excluded.scan_raw,
        non_fefo_acknowledged = excluded.non_fefo_acknowledged,
+       matched_cis = excluded.matched_cis,
+       matched_specialty_name = excluded.matched_specialty_name,
        completed_at = CURRENT_TIMESTAMP`,
     preparationId,
     progress.specialtyCis,
     progress.boxId,
+    progress.quantityHalfUnits,
     progress.verification,
     progress.scanRaw ?? '',
     progress.nonFefoAcknowledged ? 1 : 0,
+    progress.matchedCis,
+    progress.matchedSpecialtyName,
   );
+}
+
+/**
+ * Une correspondance générique n'a de sens que pour un CIS différent de celui
+ * attendu, et les deux champs vont toujours de pair : c'est le filet de
+ * sécurité de ce module, la légitimité de la correspondance elle-même (même
+ * groupe générique officiel + confirmation explicite) ayant déjà été établie
+ * par l'appelant avant d'atteindre ce repository.
+ */
+function assertGenericMatchConsistency(
+  progress: SavedPreparationProgress,
+): void {
+  if (
+    (progress.matchedCis === null) !==
+    (progress.matchedSpecialtyName === null)
+  ) {
+    throw new Error(
+      'matchedCis et matchedSpecialtyName doivent être renseignés ensemble.',
+    );
+  }
+  if (progress.matchedCis === progress.specialtyCis) {
+    throw new Error(
+      'matchedCis ne peut pas être identique au CIS attendu : ce cas est une correspondance exacte.',
+    );
+  }
 }
 
 /**
@@ -317,106 +376,140 @@ export async function completePreparation(
       throw new Error('Cette préparation est déjà terminée.');
     }
 
-    const usages = await transaction.getAllAsync<{
+    const requirements = await transaction.getAllAsync<{
       specialty_cis: string;
       specialty_name: string;
       required_half_units: number;
-      box_id: number | null;
-      verification: string | null;
-      box_specialty_cis: string | null;
-      presentation_cip13: string | null;
-      presentation_label: string | null;
-      lot: string | null;
-      expiration_date: string | null;
-      remaining_quantity: number | null;
     }>(
-      `SELECT requirement.specialty_cis, requirement.specialty_name,
-        requirement.required_half_units, progress.box_id,
-        progress.verification,
-        box.specialty_cis AS box_specialty_cis,
-        box.presentation_cip13, box.presentation_label, box.lot,
-        box.expiration_date, box.remaining_quantity
-       FROM preparation_requirements requirement
-       LEFT JOIN preparation_progress progress
-         ON progress.preparation_id = requirement.preparation_id
-        AND progress.specialty_cis = requirement.specialty_cis
-       LEFT JOIN medication_boxes box ON box.id = progress.box_id
-       WHERE requirement.preparation_id = ?
-       ORDER BY requirement.specialty_name`,
+      `SELECT specialty_cis, specialty_name, required_half_units
+       FROM preparation_requirements WHERE preparation_id = ?
+       ORDER BY specialty_name`,
       preparationId,
     );
 
-    for (const usage of usages) {
-      if (
-        usage.box_id === null ||
-        usage.verification === null ||
-        usage.box_specialty_cis === null ||
-        usage.presentation_cip13 === null ||
-        usage.presentation_label === null ||
-        usage.expiration_date === null ||
-        usage.remaining_quantity === null
-      ) {
+    for (const requirement of requirements) {
+      // Un même médicament peut être couvert par plusieurs boîtes lorsque la
+      // première s'est terminée en cours de préparation : chaque ligne de
+      // progression est une contribution distincte, décrémentée séparément.
+      const usages = await transaction.getAllAsync<{
+        box_id: number;
+        quantity_half_units: number;
+        verification: string;
+        matched_cis: string | null;
+        matched_specialty_name: string | null;
+        box_specialty_cis: string | null;
+        presentation_cip13: string | null;
+        presentation_label: string | null;
+        lot: string | null;
+        expiration_date: string | null;
+        remaining_quantity: number | null;
+      }>(
+        `SELECT progress.box_id, progress.quantity_half_units,
+          progress.verification, progress.matched_cis,
+          progress.matched_specialty_name,
+          box.specialty_cis AS box_specialty_cis,
+          box.presentation_cip13, box.presentation_label, box.lot,
+          box.expiration_date, box.remaining_quantity
+         FROM preparation_progress progress
+         LEFT JOIN medication_boxes box ON box.id = progress.box_id
+         WHERE progress.preparation_id = ? AND progress.specialty_cis = ?
+         ORDER BY progress.box_id`,
+        preparationId,
+        requirement.specialty_cis,
+      );
+
+      if (usages.length === 0) {
         throw new Error(
           'Tous les médicaments doivent être vérifiés avant la validation finale.',
         );
       }
-      if (usage.box_specialty_cis !== usage.specialty_cis) {
+
+      let coveredHalfUnits = 0;
+      for (const usage of usages) {
+        if (
+          usage.box_specialty_cis === null ||
+          usage.presentation_cip13 === null ||
+          usage.presentation_label === null ||
+          usage.expiration_date === null ||
+          usage.remaining_quantity === null
+        ) {
+          throw new Error(
+            'Tous les médicaments doivent être vérifiés avant la validation finale.',
+          );
+        }
+        // Un CIS différent n'est légitime que s'il s'agit de la correspondance
+        // générique déjà validée lors de la vérification (matched_cis) : la
+        // légitimité elle-même (même groupe générique + confirmation
+        // explicite) n'est pas revérifiée ici, ce niveau ne fait que
+        // s'assurer que la boîte n'a pas changé de médicament depuis.
+        const acceptedBoxCis = usage.matched_cis ?? requirement.specialty_cis;
+        if (usage.box_specialty_cis !== acceptedBoxCis) {
+          throw new Error(
+            'Une boîte vérifiée ne correspond plus au médicament attendu.',
+          );
+        }
+        if (usage.expiration_date < completionDate) {
+          throw new Error(
+            'Une boîte sélectionnée est périmée. Vérifiez la préparation.',
+          );
+        }
+        const consumedQuantity = usage.quantity_half_units / 2;
+        const quantityAfter = usage.remaining_quantity - consumedQuantity;
+        if (quantityAfter < 0) {
+          throw new Error(
+            'Le stock d’une boîte sélectionnée est insuffisant. Rechargez la préparation.',
+          );
+        }
+        const update = await transaction.runAsync(
+          `UPDATE medication_boxes
+           SET remaining_quantity = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND remaining_quantity = ?`,
+          quantityAfter,
+          usage.box_id,
+          usage.remaining_quantity,
+        );
+        if (update.changes !== 1) {
+          throw new Error(
+            'Le stock a changé. Rechargez la préparation puis réessayez.',
+          );
+        }
+        await transaction.runAsync(
+          `INSERT INTO stock_movements
+            (box_id, preparation_id, type, quantity_delta, quantity_after, explanation)
+           VALUES (?, ?, 'PILLBOX_PREPARATION', ?, ?, ?)`,
+          usage.box_id,
+          preparationId,
+          -consumedQuantity,
+          quantityAfter,
+          `Préparation du pilulier du ${completionDate}`,
+        );
+        await transaction.runAsync(
+          `INSERT INTO preparation_box_usages
+            (preparation_id, specialty_cis, specialty_name, box_id,
+             presentation_cip13, presentation_label, lot,
+             expiration_date, quantity_half_units, verification,
+             matched_cis, matched_specialty_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          preparationId,
+          requirement.specialty_cis,
+          requirement.specialty_name,
+          usage.box_id,
+          usage.presentation_cip13,
+          usage.presentation_label,
+          usage.lot,
+          usage.expiration_date,
+          usage.quantity_half_units,
+          toVerificationMethod(usage.verification),
+          usage.matched_cis,
+          usage.matched_specialty_name,
+        );
+        coveredHalfUnits += usage.quantity_half_units;
+      }
+      if (coveredHalfUnits !== requirement.required_half_units) {
         throw new Error(
-          'Une boîte vérifiée ne correspond plus au médicament attendu.',
+          'La quantité vérifiée ne couvre pas exactement le besoin de la semaine.',
         );
       }
-      if (usage.expiration_date < completionDate) {
-        throw new Error(
-          'Une boîte sélectionnée est périmée. Vérifiez la préparation.',
-        );
-      }
-      const consumedQuantity = usage.required_half_units / 2;
-      const quantityAfter = usage.remaining_quantity - consumedQuantity;
-      if (quantityAfter < 0) {
-        throw new Error(
-          'Le stock d’une boîte sélectionnée est insuffisant. Rechargez la préparation.',
-        );
-      }
-      const update = await transaction.runAsync(
-        `UPDATE medication_boxes
-         SET remaining_quantity = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND remaining_quantity = ?`,
-        quantityAfter,
-        usage.box_id,
-        usage.remaining_quantity,
-      );
-      if (update.changes !== 1) {
-        throw new Error(
-          'Le stock a changé. Rechargez la préparation puis réessayez.',
-        );
-      }
-      await transaction.runAsync(
-        `INSERT INTO stock_movements
-          (box_id, preparation_id, type, quantity_delta, quantity_after, explanation)
-         VALUES (?, ?, 'PILLBOX_PREPARATION', ?, ?, ?)`,
-        usage.box_id,
-        preparationId,
-        -consumedQuantity,
-        quantityAfter,
-        `Préparation du pilulier du ${completionDate}`,
-      );
-      await transaction.runAsync(
-        `INSERT INTO preparation_box_usages
-          (preparation_id, specialty_cis, specialty_name, box_id,
-           presentation_cip13, presentation_label, lot,
-           expiration_date, quantity_half_units, verification)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        preparationId,
-        usage.specialty_cis,
-        usage.specialty_name,
-        usage.box_id,
-        usage.presentation_cip13,
-        usage.presentation_label,
-        usage.lot,
-        usage.expiration_date,
-        usage.required_half_units,
-        toVerificationMethod(usage.verification),
-      );
     }
 
     const completed = await transaction.runAsync(
@@ -455,11 +548,14 @@ export async function listPreparationHistory(
       lot: string | null;
       expiration_date: string;
       verification: string;
+      matched_cis: string | null;
+      matched_specialty_name: string | null;
     }>(
       `SELECT specialty_cis, specialty_name, quantity_half_units, box_id,
-        presentation_cip13, presentation_label, lot, expiration_date, verification
+        presentation_cip13, presentation_label, lot, expiration_date, verification,
+        matched_cis, matched_specialty_name
        FROM preparation_box_usages WHERE preparation_id = ?
-       ORDER BY specialty_name`,
+       ORDER BY specialty_name, box_id`,
       preparation.id,
     );
     result.push({
@@ -477,6 +573,8 @@ export async function listPreparationHistory(
         lot: item.lot,
         expirationDate: item.expiration_date,
         verification: toVerificationMethod(item.verification),
+        matchedCis: item.matched_cis,
+        matchedSpecialtyName: item.matched_specialty_name,
       })),
     });
   }

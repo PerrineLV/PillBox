@@ -139,7 +139,10 @@ export default function TreatmentsScreen() {
 }
 
 function TreatmentItem({ treatment }: { treatment: Treatment }) {
-  const summary = treatment.phases.map(humanPhaseSummary).join(' Puis ');
+  const summary =
+    treatment.dosageKind === 'AS_NEEDED'
+      ? 'Pris ponctuellement, sans posologie planifiée.'
+      : treatment.phases.map(humanPhaseSummary).join(' Puis ');
   return (
     <Link
       href={{
@@ -153,6 +156,8 @@ function TreatmentItem({ treatment }: { treatment: Treatment }) {
         <View style={styles.badges}>
           {treatment.archivedAt ? (
             <Badge label="Archivé" tone="neutral" />
+          ) : treatment.dosageKind === 'AS_NEEDED' ? (
+            <Badge label="Si besoin" />
           ) : (
             <Badge
               label={

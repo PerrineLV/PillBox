@@ -22,7 +22,7 @@ Construire une application personnelle fiable conformément à PROJECT.md. La pr
 
 # Avant de terminer un ticket
 
-Exécuter les commandes disponibles pour : lint, typecheck et tests. Corriger les erreurs liées au changement.
+Exécuter les commandes disponibles pour : lint, prettier, typecheck et tests. Corriger les erreurs liées au changement.
 
 Fournir ensuite un compte rendu court : fichiers importants modifiés, comportement ajouté, tests effectués, hypothèses/incertitudes restantes et manipulations à tester sur téléphone.
 

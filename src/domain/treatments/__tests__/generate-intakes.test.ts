@@ -11,9 +11,11 @@ function treatment(phases: TreatmentPhase[]): Treatment {
     specialtyCis: '60000001',
     specialtyName: 'Médicament de test',
     pharmaceuticalForm: 'comprimé',
+    dosageKind: 'SCHEDULED',
     includedInPillbox: true,
     archivedAt: null,
     phases,
+    asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
   };
 }
 
@@ -220,6 +222,19 @@ describe('generateIntakes avec phases', () => {
         '2026-08-03',
         '2026-08-03',
       ),
+    ).toEqual([]);
+  });
+
+  it('ne génère jamais de prise planifiée pour un traitement « si besoin »', () => {
+    const asNeeded: Treatment = {
+      ...treatment([]),
+      dosageKind: 'AS_NEEDED',
+      includedInPillbox: false,
+    };
+    expect(
+      generateIntakes([asNeeded], '2026-08-01', '2026-08-31', {
+        includeTreatmentsOutsidePillbox: true,
+      }),
     ).toEqual([]);
   });
 });

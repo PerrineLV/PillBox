@@ -135,8 +135,8 @@ function seedPreparation(
     raw
       .prepare(
         `INSERT INTO preparation_progress
-       (preparation_id, specialty_cis, box_id, verification, scan_raw)
-       VALUES (?, ?, ?, ?, ?)`,
+       (preparation_id, specialty_cis, box_id, quantity_half_units, verification, scan_raw)
+       VALUES (?, ?, ?, 7, ?, ?)`,
       )
       .run(
         preparationId,
@@ -147,6 +147,78 @@ function seedPreparation(
       );
   }
   return preparationId;
+}
+
+function twoMedicationSnapshot(startDate: string): PreparationSnapshot {
+  return {
+    startDate,
+    endDate: preparationEndDate(startDate),
+    items: [
+      {
+        treatmentId: 1,
+        specialtyCis: '60000001',
+        specialtyName: 'Médicament 1',
+        pharmaceuticalForm: 'comprimé',
+        date: startDate,
+        slot: 'morning',
+        quantityHalfUnits: 1,
+      },
+      {
+        treatmentId: 2,
+        specialtyCis: '60000002',
+        specialtyName: 'Médicament 2',
+        pharmaceuticalForm: 'comprimé',
+        date: startDate,
+        slot: 'morning',
+        quantityHalfUnits: 1,
+      },
+    ],
+    requirements: [
+      {
+        specialtyCis: '60000001',
+        specialtyName: 'Médicament 1',
+        requiredHalfUnits: 7,
+        usableStockHalfUnits: 20,
+        missingHalfUnits: 0,
+      },
+      {
+        specialtyCis: '60000002',
+        specialtyName: 'Médicament 2',
+        requiredHalfUnits: 7,
+        usableStockHalfUnits: 20,
+        missingHalfUnits: 0,
+      },
+    ],
+    hasShortages: false,
+  };
+}
+
+function insertBox(
+  raw: Database.Database,
+  overrides: {
+    specialtyCis: string;
+    lot: string;
+    remainingQuantity?: number;
+    expirationDate?: string;
+  },
+): number {
+  return Number(
+    raw
+      .prepare(
+        `INSERT INTO medication_boxes
+       (specialty_cis, specialty_name, presentation_cip13, presentation_label,
+        lot, expiration_date, initial_quantity, remaining_quantity, scan_raw)
+       VALUES (?, ?, ?, 'Boîte', ?, ?, 10, ?, 'raw')`,
+      )
+      .run(
+        overrides.specialtyCis,
+        `Médicament ${overrides.specialtyCis}`,
+        `34${overrides.specialtyCis}0000`,
+        overrides.lot,
+        overrides.expirationDate ?? '2027-01-01',
+        overrides.remainingQuantity ?? 10,
+      ).lastInsertRowid,
+  );
 }
 
 function weekSnapshot(startDate: string): PreparationSnapshot {
@@ -358,6 +430,116 @@ describe('validation transactionnelle d’une préparation', () => {
     raw.close();
   });
 
+  it('accepte une correspondance générique confirmée et la trace jusqu’à l’historique', async () => {
+    const { raw, database } = await createDatabase();
+    const preparationId = Number(
+      raw
+        .prepare(
+          `INSERT INTO preparations (start_date, end_date) VALUES ('2026-08-10', '2026-08-16')`,
+        )
+        .run().lastInsertRowid,
+    );
+    raw
+      .prepare(
+        `INSERT INTO preparation_requirements VALUES (?, '60000001', 'Zoloft', 7, 20, 0)`,
+      )
+      .run(preparationId);
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000002',
+      lot: 'SERTRALINE-1',
+    });
+    raw
+      .prepare(
+        `INSERT INTO preparation_progress
+         (preparation_id, specialty_cis, box_id, quantity_half_units,
+          verification, scan_raw, matched_cis, matched_specialty_name)
+         VALUES (?, '60000001', ?, 7, 'SCAN', 'scan', '60000002', 'Sertraline')`,
+      )
+      .run(preparationId, boxId);
+
+    await completePreparation(database, preparationId, '2026-08-09');
+
+    const history = await listPreparationHistory(database);
+    expect(history[0].medications[0]).toMatchObject({
+      specialtyCis: '60000001',
+      specialtyName: 'Zoloft',
+      matchedCis: '60000002',
+      matchedSpecialtyName: 'Sertraline',
+    });
+    raw.close();
+  });
+
+  it('refuse la validation si la boîte ne correspond ni au CIS attendu ni au CIS confirmé', async () => {
+    const { raw, database } = await createDatabase();
+    const preparationId = Number(
+      raw
+        .prepare(
+          `INSERT INTO preparations (start_date, end_date) VALUES ('2026-08-10', '2026-08-16')`,
+        )
+        .run().lastInsertRowid,
+    );
+    raw
+      .prepare(
+        `INSERT INTO preparation_requirements VALUES (?, '60000001', 'Zoloft', 7, 20, 0)`,
+      )
+      .run(preparationId);
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000002',
+      lot: 'SERTRALINE-1',
+    });
+    // matched_cis pointe vers un troisième CIS, différent de celui de la boîte
+    // réellement liée : incohérence détectée à la validation.
+    raw
+      .prepare(
+        `INSERT INTO preparation_progress
+         (preparation_id, specialty_cis, box_id, quantity_half_units,
+          verification, scan_raw, matched_cis, matched_specialty_name)
+         VALUES (?, '60000001', ?, 7, 'SCAN', 'scan', '60000003', 'Autre générique')`,
+      )
+      .run(preparationId, boxId);
+
+    await expect(
+      completePreparation(database, preparationId, '2026-08-09'),
+    ).rejects.toThrow('ne correspond plus au médicament attendu');
+    raw.close();
+  });
+
+  it('refuse de sauvegarder une correspondance générique identique au CIS attendu', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+    await expect(
+      savePreparationProgress(database, id, {
+        specialtyCis: '60000001',
+        boxId: 1,
+        quantityHalfUnits: 7,
+        verification: 'SCAN',
+        scanRaw: 'scan',
+        nonFefoAcknowledged: false,
+        matchedCis: '60000001',
+        matchedSpecialtyName: 'Médicament 1',
+      }),
+    ).rejects.toThrow('correspondance exacte');
+    raw.close();
+  });
+
+  it('refuse une correspondance générique incomplète (CIS sans nom ou l’inverse)', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+    await expect(
+      savePreparationProgress(database, id, {
+        specialtyCis: '60000001',
+        boxId: 1,
+        quantityHalfUnits: 7,
+        verification: 'SCAN',
+        scanRaw: 'scan',
+        nonFefoAcknowledged: false,
+        matchedCis: '60000002',
+        matchedSpecialtyName: null,
+      }),
+    ).rejects.toThrow('ensemble');
+    raw.close();
+  });
+
   it('refuse d’enregistrer une vérification par scan sans chaîne brute', async () => {
     const { raw, database } = await createDatabase();
     const id = seedPreparation(raw);
@@ -366,9 +548,12 @@ describe('validation transactionnelle d’une préparation', () => {
       savePreparationProgress(database, id, {
         specialtyCis: '60000001',
         boxId: 1,
+        quantityHalfUnits: 7,
         verification: 'SCAN',
         scanRaw: null,
         nonFefoAcknowledged: false,
+        matchedCis: null,
+        matchedSpecialtyName: null,
       }),
     ).rejects.toThrow('brute');
     raw.close();
@@ -381,9 +566,12 @@ describe('validation transactionnelle d’une préparation', () => {
     await savePreparationProgress(database, id, {
       specialtyCis: '60000001',
       boxId: 1,
+      quantityHalfUnits: 7,
       verification: 'MANUAL',
       scanRaw: null,
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
 
     const saved = await getLatestDraftPreparation(database);
@@ -434,6 +622,281 @@ describe('validation transactionnelle d’une préparation', () => {
     expect(
       raw.prepare(`SELECT COUNT(*) AS count FROM preparation_box_usages`).get(),
     ).toEqual({ count: 0 });
+    raw.close();
+  });
+});
+
+describe('reprise d’une préparation après fermeture de l’application', () => {
+  it('retrouve exactement la progression déjà enregistrée et le médicament restant', async () => {
+    const { raw, database } = await createDatabase();
+    const id = await createPreparation(
+      database,
+      twoMedicationSnapshot('2026-08-17'),
+    );
+    const firstBoxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'LOT-1',
+    });
+
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId: firstBoxId,
+      quantityHalfUnits: 7,
+      verification: 'SCAN',
+      scanRaw: 'raw',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+
+    // Simule une fermeture puis réouverture de l’app : tout est relu depuis
+    // la base locale plutôt que depuis un état en mémoire.
+    const reopened = await getLatestDraftPreparation(database);
+    expect(reopened?.id).toBe(id);
+    expect(reopened?.snapshot.requirements).toHaveLength(2);
+    expect(reopened?.progress).toHaveLength(1);
+    expect(reopened?.progress[0]).toMatchObject({
+      specialtyCis: '60000001',
+      boxId: firstBoxId,
+      verification: 'SCAN',
+    });
+    raw.close();
+  });
+
+  it('reprend une préparation entièrement vérifiée sans médicament restant', async () => {
+    const { raw, database } = await createDatabase();
+    const id = await createPreparation(
+      database,
+      twoMedicationSnapshot('2026-08-17'),
+    );
+    const firstBoxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'LOT-1',
+    });
+    const secondBoxId = insertBox(raw, {
+      specialtyCis: '60000002',
+      lot: 'LOT-2',
+    });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId: firstBoxId,
+      quantityHalfUnits: 7,
+      verification: 'SCAN',
+      scanRaw: 'raw',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000002',
+      boxId: secondBoxId,
+      quantityHalfUnits: 7,
+      verification: 'MANUAL',
+      scanRaw: null,
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+
+    const reopened = await getLatestDraftPreparation(database);
+    expect(reopened?.progress).toHaveLength(2);
+    raw.close();
+  });
+});
+
+describe('fin d’une boîte et relais par une seconde pour un même médicament', () => {
+  it('couvre le besoin par deux boîtes distinctes et décrémente chacune exactement', async () => {
+    const { raw, database } = await createDatabase();
+    const id = await createPreparation(
+      database,
+      twoMedicationSnapshot('2026-08-17'),
+    );
+    // Besoin de 7 demi-unités pour 60000001 (twoMedicationSnapshot) : la
+    // première boîte n'en couvre qu'une partie, la seconde complète le reste.
+    const almostEmptyBoxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'PRESQUE-VIDE',
+      remainingQuantity: 1,
+    });
+    const freshBoxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'FRAICHE',
+      remainingQuantity: 10,
+    });
+    const otherBoxId = insertBox(raw, {
+      specialtyCis: '60000002',
+      lot: 'LOT-2',
+    });
+
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId: almostEmptyBoxId,
+      quantityHalfUnits: 2,
+      verification: 'SCAN',
+      scanRaw: 'raw-1',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId: freshBoxId,
+      quantityHalfUnits: 5,
+      verification: 'SCAN',
+      scanRaw: 'raw-2',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000002',
+      boxId: otherBoxId,
+      quantityHalfUnits: 7,
+      verification: 'SCAN',
+      scanRaw: 'raw-3',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+
+    // Reprise après fermeture : les deux contributions du même médicament
+    // doivent toutes deux être retrouvées, sans que l'une efface l'autre.
+    const reopened = await getLatestDraftPreparation(database);
+    expect(
+      reopened?.progress.filter((item) => item.specialtyCis === '60000001'),
+    ).toHaveLength(2);
+
+    await completePreparation(database, id, '2026-08-16');
+
+    expect(
+      raw
+        .prepare('SELECT remaining_quantity FROM medication_boxes WHERE id = ?')
+        .get(almostEmptyBoxId),
+    ).toEqual({ remaining_quantity: 0 });
+    expect(
+      raw
+        .prepare('SELECT remaining_quantity FROM medication_boxes WHERE id = ?')
+        .get(freshBoxId),
+    ).toEqual({ remaining_quantity: 7.5 });
+    expect(
+      raw
+        .prepare('SELECT remaining_quantity FROM medication_boxes WHERE id = ?')
+        .get(otherBoxId),
+    ).toEqual({ remaining_quantity: 6.5 });
+
+    const usedBoxIds = (
+      raw
+        .prepare('SELECT box_id FROM preparation_box_usages ORDER BY box_id')
+        .all() as { box_id: number }[]
+    ).map((row) => row.box_id);
+    expect(usedBoxIds).toEqual(
+      [almostEmptyBoxId, freshBoxId, otherBoxId].sort((a, b) => a - b),
+    );
+
+    const history = await listPreparationHistory(database);
+    const medication1Usages = history[0].medications.filter(
+      (item) => item.specialtyCis === '60000001',
+    );
+    expect(medication1Usages).toHaveLength(2);
+    expect(
+      medication1Usages.reduce((sum, item) => sum + item.quantityHalfUnits, 0),
+    ).toBe(7);
+    raw.close();
+  });
+
+  it('refuse la validation si les contributions ne couvrent pas exactement le besoin', async () => {
+    const { raw, database } = await createDatabase();
+    const id = await createPreparation(
+      database,
+      twoMedicationSnapshot('2026-08-17'),
+    );
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'INCOMPLETE',
+      remainingQuantity: 10,
+    });
+    const otherBoxId = insertBox(raw, {
+      specialtyCis: '60000002',
+      lot: 'LOT-2',
+    });
+    // Contribution volontairement insuffisante (2 sur 7 nécessaires), comme
+    // si l'écran avait laissé passer une boîte partielle sans en ajouter une
+    // seconde : la transaction doit refuser plutôt que sous-décrémenter.
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId,
+      quantityHalfUnits: 2,
+      verification: 'SCAN',
+      scanRaw: 'raw-1',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000002',
+      boxId: otherBoxId,
+      quantityHalfUnits: 7,
+      verification: 'SCAN',
+      scanRaw: 'raw-2',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+
+    await expect(
+      completePreparation(database, id, '2026-08-16'),
+    ).rejects.toThrow('ne couvre pas exactement');
+    expect(
+      raw.prepare('SELECT status FROM preparations WHERE id = ?').get(id),
+    ).toEqual({ status: 'DRAFT' });
+    expect(
+      raw.prepare('SELECT COUNT(*) AS count FROM stock_movements').get(),
+    ).toEqual({ count: 0 });
+    raw.close();
+  });
+});
+
+describe('plusieurs préparations se succèdent sans interférence', () => {
+  it('conserve un historique distinct et un stock correct pour chaque semaine validée', async () => {
+    const { raw, database } = await createDatabase();
+
+    const firstId = seedPreparation(raw);
+    await completePreparation(database, firstId, '2026-08-09');
+
+    const boxId = insertBox(raw, { specialtyCis: '60000001', lot: 'LOT-2' });
+    const secondId = await createPreparation(
+      database,
+      weekSnapshot('2026-08-17'),
+    );
+    await savePreparationProgress(database, secondId, {
+      specialtyCis: '60000001',
+      boxId,
+      quantityHalfUnits: 7,
+      verification: 'SCAN',
+      scanRaw: 'raw-semaine-2',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+    await completePreparation(database, secondId, '2026-08-16');
+
+    expect(firstId).not.toBe(secondId);
+    const history = await listPreparationHistory(database);
+    expect(history).toHaveLength(2);
+    expect(history.map((entry) => entry.startDate).sort()).toEqual([
+      '2026-08-10',
+      '2026-08-17',
+    ]);
+    // Le mouvement de la seconde semaine ne touche que sa propre boîte : la
+    // boîte de la première semaine n'est jamais redécrémentée.
+    expect(
+      raw
+        .prepare('SELECT remaining_quantity FROM medication_boxes ORDER BY id')
+        .all(),
+    ).toEqual([{ remaining_quantity: 6.5 }, { remaining_quantity: 6.5 }]);
+    expect(
+      raw.prepare('SELECT COUNT(*) AS count FROM stock_movements').get(),
+    ).toEqual({ count: 2 });
     raw.close();
   });
 });

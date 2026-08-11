@@ -3,6 +3,10 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 
+import { GenericGroupSectionWithDatabase } from '@/components/medications/generic-group-section';
+import { AsNeededIntakeLog } from '@/components/treatments/as-needed-intake-log';
+import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
+import { GenericEquivalenceList } from '@/components/treatments/generic-equivalence-list';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
 import { TreatmentDeletionConfirmation } from '@/components/treatments/delete-confirmation';
 import type { Treatment } from '@/domain/treatments/treatment';
@@ -15,6 +19,11 @@ import {
   type TreatmentRemovalAction,
   updateTreatment,
 } from '@/infrastructure/treatments/treatment-repository';
+import {
+  forgetGenericEquivalence,
+  listGenericEquivalenceConfirmations,
+  type GenericEquivalenceConfirmation,
+} from '@/infrastructure/treatments/generic-equivalence-repository';
 import {
   synchronizeIntakeReminders,
   synchronizeTreatmentIntakeReminders,
@@ -29,6 +38,9 @@ export default function EditTreatmentScreen() {
   const [error, setError] = useState<string | null>(null);
   const [removalAction, setRemovalAction] =
     useState<TreatmentRemovalAction | null>(null);
+  const [genericEquivalences, setGenericEquivalences] = useState<
+    GenericEquivalenceConfirmation[]
+  >([]);
   const [processing, setProcessing] = useState(false);
   const [deleteConfirmationVisible, setDeleteConfirmationVisible] =
     useState(false);
@@ -42,12 +54,14 @@ export default function EditTreatmentScreen() {
     Promise.all([
       getTreatment(database, numericId),
       getTreatmentRemovalAction(database, numericId),
+      listGenericEquivalenceConfirmations(database, numericId),
     ])
-      .then(([value, action]) => {
+      .then(([value, action, equivalences]) => {
         if (value === null) setError('Traitement introuvable.');
         else {
           setTreatment(value);
           setRemovalAction(action);
+          setGenericEquivalences(equivalences);
         }
       })
       .catch((reason: unknown) =>
@@ -56,6 +70,17 @@ export default function EditTreatmentScreen() {
         ),
       );
   }, [database, numericId]);
+
+  async function forgetEquivalence(cis: string): Promise<void> {
+    try {
+      await forgetGenericEquivalence(database, numericId, cis);
+      setGenericEquivalences((previous) =>
+        previous.filter((item) => item.cis !== cis),
+      );
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Oubli impossible.');
+    }
+  }
 
   async function runAction(action: () => Promise<void>, notice: string) {
     setProcessing(true);
@@ -85,24 +110,64 @@ export default function EditTreatmentScreen() {
         <LoadingState label="Chargement du traitement…" />
       ) : null}
       {treatment && treatment.archivedAt === null ? (
-        <TreatmentForm
-          initialValue={treatment}
-          submitLabel="Enregistrer les modifications"
-          onSubmit={async (draft) => {
-            await updateTreatment(database, {
-              ...draft,
-              id: treatment.id,
-              archivedAt: treatment.archivedAt,
-            });
-            await synchronizeTreatmentIntakeReminders(database, treatment.id);
-            router.replace('/treatments');
-          }}
-        />
+        treatment.dosageKind === 'AS_NEEDED' ? (
+          <AsNeededTreatmentForm
+            initialValue={treatment}
+            submitLabel="Enregistrer les modifications"
+            onSubmit={async (draft) => {
+              await updateTreatment(database, {
+                ...draft,
+                id: treatment.id,
+                archivedAt: treatment.archivedAt,
+              });
+              router.replace('/treatments');
+            }}
+          />
+        ) : (
+          <TreatmentForm
+            initialValue={treatment}
+            submitLabel="Enregistrer les modifications"
+            onSubmit={async (draft) => {
+              await updateTreatment(database, {
+                ...draft,
+                id: treatment.id,
+                archivedAt: treatment.archivedAt,
+              });
+              await synchronizeTreatmentIntakeReminders(database, treatment.id);
+              router.replace('/treatments');
+            }}
+          />
+        )
       ) : null}
       {treatment?.archivedAt ? (
         <Message tone="warning" title="Traitement archivé">
           Ses posologies et son historique sont conservés.
         </Message>
+      ) : null}
+      {treatment ? (
+        <GenericGroupSectionWithDatabase cis={treatment.specialtyCis} />
+      ) : null}
+      <GenericEquivalenceList
+        confirmations={genericEquivalences}
+        onForget={(cis) => void forgetEquivalence(cis)}
+      />
+      {treatment ? (
+        <AppButton
+          label="Voir la chronologie"
+          variant="secondary"
+          onPress={() =>
+            router.push({
+              pathname: '/history',
+              params: { treatmentId: String(treatment.id) },
+            })
+          }
+        />
+      ) : null}
+      {treatment?.dosageKind === 'AS_NEEDED' ? (
+        <AsNeededIntakeLog
+          treatmentId={treatment.id}
+          canRecord={treatment.archivedAt === null}
+        />
       ) : null}
       {treatment && removalAction ? (
         treatment.archivedAt ? (

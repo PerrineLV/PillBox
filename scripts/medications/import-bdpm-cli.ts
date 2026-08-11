@@ -4,7 +4,9 @@ importBdpm(parseImportArguments(process.argv.slice(2)))
   .then((summary) => {
     console.log(
       `Snapshot créé: ${summary.specialties} spécialités, ${summary.presentations} présentations, ` +
-        `${summary.orphanPresentations} présentation(s) avec CIS absent.`,
+        `${summary.orphanPresentations} présentation(s) avec CIS absent, ` +
+        `${summary.genericGroups} ligne(s) de groupe générique, ` +
+        `${summary.orphanGenericGroups} ligne(s) de groupe générique avec CIS absent.`,
     );
   })
   .catch((error: unknown) => {

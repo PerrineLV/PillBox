@@ -1,9 +1,12 @@
 import type { SQLiteDatabase, SQLiteRunResult } from 'expo-sqlite';
 
 import {
+  assertValidAsNeededTreatment,
   assertValidTreatmentPhases,
   isIntakeSlot,
+  isTreatmentDosageKind,
   isWeekday,
+  treatmentPhasesEqual,
   type LegacyDosage,
   type PhaseDosage,
   type Treatment,
@@ -16,8 +19,11 @@ type TreatmentRow = {
   specialty_cis: string;
   specialty_name: string;
   pharmaceutical_form: string | null;
+  dosage_kind: string;
   included_in_pillbox: number;
   archived_at: string | null;
+  as_needed_max_quantity_half_units: number | null;
+  as_needed_min_interval_hours: number | null;
 };
 
 type PhaseRow = {
@@ -53,12 +59,20 @@ export async function getTreatmentRemovalAction(
   database: SQLiteDatabase,
   treatmentId: number,
 ): Promise<TreatmentRemovalAction> {
+  // Une ligne `UNSET` dans intake_records n'est qu'un aide-mémoire de
+  // planification matérialisé par la synchronisation des rappels (jusqu'à
+  // 30 jours à l'avance) : elle ne prouve aucune prise réelle et ne doit pas
+  // empêcher la suppression d'un traitement jamais réellement pris ni
+  // ignoré. Seules les lignes TAKEN/SKIPPED comptent comme un usage réel.
   const row = await database.getFirstAsync<{ used: number }>(
     `SELECT EXISTS(
        SELECT 1 FROM preparation_items WHERE source_treatment_id = ?
        UNION ALL
-       SELECT 1 FROM intake_records WHERE source_treatment_id = ?
+       SELECT 1 FROM intake_records WHERE source_treatment_id = ? AND status <> 'UNSET'
+       UNION ALL
+       SELECT 1 FROM as_needed_intake_records WHERE treatment_id = ?
      ) AS used`,
+    treatmentId,
     treatmentId,
     treatmentId,
   );
@@ -76,6 +90,15 @@ export async function deleteUnusedTreatment(
       throw new Error(
         'Ce traitement a déjà été utilisé et ne peut pas être supprimé définitivement.',
       );
+    // intake_records n'a pas de clé étrangère vers treatments (une prise
+    // réelle doit survivre à la suppression de son traitement, comme
+    // preparation_items) : les lignes UNSET restantes, simples aide-mémoire
+    // de planification jamais transformés en prise réelle, sont donc
+    // supprimées explicitement pour ne rien laisser d'orphelin.
+    await transaction.runAsync(
+      `DELETE FROM intake_records WHERE source_treatment_id = ? AND status = 'UNSET'`,
+      treatmentId,
+    );
     const result = await transaction.runAsync(
       'DELETE FROM treatments WHERE id = ?',
       treatmentId,
@@ -103,6 +126,10 @@ export async function archiveTreatment(
     );
     if (result.changes !== 1)
       throw new Error('Traitement introuvable ou déjà archivé.');
+    await transaction.runAsync(
+      `INSERT INTO treatment_lifecycle_events (treatment_id, event_type) VALUES (?, 'ARCHIVED')`,
+      treatmentId,
+    );
   });
 }
 
@@ -110,13 +137,19 @@ export async function restoreArchivedTreatment(
   database: SQLiteDatabase,
   treatmentId: number,
 ): Promise<void> {
-  const result = await database.runAsync(
-    `UPDATE treatments SET active = 1, archived_at = NULL,
-     updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL`,
-    treatmentId,
-  );
-  if (result.changes !== 1)
-    throw new Error('Traitement introuvable ou non archivé.');
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const result = await transaction.runAsync(
+      `UPDATE treatments SET active = 1, archived_at = NULL,
+       updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL`,
+      treatmentId,
+    );
+    if (result.changes !== 1)
+      throw new Error('Traitement introuvable ou non archivé.');
+    await transaction.runAsync(
+      `INSERT INTO treatment_lifecycle_events (treatment_id, event_type) VALUES (?, 'REACTIVATED')`,
+      treatmentId,
+    );
+  });
 }
 
 export async function getTreatment(
@@ -140,12 +173,16 @@ export async function createTreatment(
   await database.withExclusiveTransactionAsync(async (transaction) => {
     result = await transaction.runAsync(
       `INSERT INTO treatments
-       (specialty_cis, specialty_name, pharmaceutical_form, included_in_pillbox)
-       VALUES (?, ?, ?, ?)`,
+       (specialty_cis, specialty_name, pharmaceutical_form, dosage_kind, included_in_pillbox,
+        as_needed_max_quantity_half_units, as_needed_min_interval_hours)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       draft.specialtyCis,
       draft.specialtyName,
       draft.pharmaceuticalForm,
+      draft.dosageKind,
       draft.includedInPillbox ? 1 : 0,
+      draft.asNeededInfo.maxQuantityPerDayHalfUnits,
+      draft.asNeededInfo.minIntervalHours,
     );
     await insertPhases(transaction, result.lastInsertRowId, draft.phases);
   });
@@ -159,13 +196,18 @@ export async function updateTreatment(
 ): Promise<void> {
   validateDraft(treatment);
   await database.withExclusiveTransactionAsync(async (transaction) => {
+    const existing = await getTreatment(transaction, treatment.id);
     const result = await transaction.runAsync(
       `UPDATE treatments SET specialty_cis = ?, specialty_name = ?, pharmaceutical_form = ?,
-       included_in_pillbox = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+       dosage_kind = ?, included_in_pillbox = ?, as_needed_max_quantity_half_units = ?,
+       as_needed_min_interval_hours = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       treatment.specialtyCis,
       treatment.specialtyName,
       treatment.pharmaceuticalForm,
+      treatment.dosageKind,
       treatment.includedInPillbox ? 1 : 0,
+      treatment.asNeededInfo.maxQuantityPerDayHalfUnits,
+      treatment.asNeededInfo.minIntervalHours,
       treatment.id,
     );
     if (result.changes !== 1) throw new Error('Traitement introuvable.');
@@ -179,6 +221,19 @@ export async function updateTreatment(
       treatment.id,
     );
     await insertPhases(transaction, treatment.id, treatment.phases);
+    // Remplacer les phases efface leur trace dans treatment_phases : sans ce
+    // marqueur, la timeline (ticket 18) perdrait la date à laquelle une
+    // posologie a réellement changé. Un enregistrement sans changement de
+    // posologie (autre champ modifié) ne doit rien journaliser.
+    if (
+      existing !== null &&
+      !treatmentPhasesEqual(existing.phases, treatment.phases)
+    ) {
+      await transaction.runAsync(
+        `INSERT INTO treatment_lifecycle_events (treatment_id, event_type) VALUES (?, 'DOSAGE_MODIFIED')`,
+        treatment.id,
+      );
+    }
   });
 }
 
@@ -314,22 +369,35 @@ async function hydrateTreatments(
     phases.push(phase);
     phasesByTreatment.set(row.treatment_id, phases);
   }
-  return rows.map((row) => ({
-    id: row.id,
-    specialtyCis: row.specialty_cis,
-    specialtyName: row.specialty_name,
-    pharmaceuticalForm: row.pharmaceutical_form,
-    includedInPillbox: row.included_in_pillbox === 1,
-    archivedAt: row.archived_at,
-    phases: phasesByTreatment.get(row.id) ?? [],
-  }));
+  return rows.map((row) => {
+    if (!isTreatmentDosageKind(row.dosage_kind))
+      throw new Error(
+        'La base locale contient un type de traitement invalide.',
+      );
+    return {
+      id: row.id,
+      specialtyCis: row.specialty_cis,
+      specialtyName: row.specialty_name,
+      pharmaceuticalForm: row.pharmaceutical_form,
+      dosageKind: row.dosage_kind,
+      includedInPillbox: row.included_in_pillbox === 1,
+      archivedAt: row.archived_at,
+      phases: phasesByTreatment.get(row.id) ?? [],
+      asNeededInfo: {
+        maxQuantityPerDayHalfUnits: row.as_needed_max_quantity_half_units,
+        minIntervalHours: row.as_needed_min_interval_hours,
+      },
+    };
+  });
 }
 
 function validateDraft(draft: TreatmentDraft): void {
   if (draft.specialtyCis.trim() === '' || draft.specialtyName.trim() === '')
     throw new Error('La spécialité doit provenir du référentiel.');
-  assertValidTreatmentPhases(draft.phases);
+  if (draft.dosageKind === 'AS_NEEDED') assertValidAsNeededTreatment(draft);
+  else assertValidTreatmentPhases(draft.phases);
 }
 
-const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form,
-  included_in_pillbox, archived_at FROM treatments`;
+const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form, dosage_kind,
+  included_in_pillbox, archived_at, as_needed_max_quantity_half_units, as_needed_min_interval_hours
+  FROM treatments`;

@@ -12,8 +12,13 @@ import {
   typography,
 } from '@/ui';
 
-type MenuRoute = '/preparations/history' | '/intakes/history' | '/settings';
-type IconName = 'calendar' | 'check' | 'settings';
+type MenuRoute =
+  | '/preparations/history'
+  | '/intakes/history'
+  | '/history'
+  | '/statistics'
+  | '/settings';
+type IconName = 'calendar' | 'check' | 'timeline' | 'chart' | 'settings';
 
 const ITEMS: readonly {
   href: MenuRoute;
@@ -32,6 +37,18 @@ const ITEMS: readonly {
     icon: 'check',
     title: 'Prises',
     detail: 'Statuts, reports et corrections',
+  },
+  {
+    href: '/history',
+    icon: 'timeline',
+    title: 'Chronologie',
+    detail: 'Histoire complète d’un traitement',
+  },
+  {
+    href: '/statistics',
+    icon: 'chart',
+    title: 'Statistiques',
+    detail: 'Résumé descriptif par semaine ou mois',
   },
   {
     href: '/settings',
@@ -122,12 +139,29 @@ function MenuCard({
 }
 
 function LineIcon({ kind }: { kind: IconName }) {
+  if (kind === 'timeline')
+    return (
+      <View style={styles.timelineIcon}>
+        <View style={styles.timelineLine} />
+        {[0, 1, 2].map((dot) => (
+          <View key={dot} style={[styles.timelineDot, { left: dot * 8 }]} />
+        ))}
+      </View>
+    );
   if (kind === 'calendar')
     return (
       <View style={styles.calendarIcon}>
         <View style={styles.calendarTop} />
         <View style={[styles.calendarRing, styles.calendarRingLeft]} />
         <View style={[styles.calendarRing, styles.calendarRingRight]} />
+      </View>
+    );
+  if (kind === 'chart')
+    return (
+      <View style={styles.chartIcon}>
+        <View style={[styles.chartBar, styles.chartBarShort]} />
+        <View style={[styles.chartBar, styles.chartBarTall]} />
+        <View style={[styles.chartBar, styles.chartBarMedium]} />
       </View>
     );
   if (kind === 'settings')
@@ -279,6 +313,21 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '-48deg' }],
     width: 10,
   },
+  chartIcon: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 3,
+    height: 22,
+    width: 24,
+  },
+  chartBar: {
+    backgroundColor: colors.brand,
+    borderRadius: 2,
+    width: 5,
+  },
+  chartBarShort: { height: 10 },
+  chartBarTall: { height: 22 },
+  chartBarMedium: { height: 16 },
   settingsIcon: { height: 22, position: 'relative', width: 24 },
   settingLine: {
     backgroundColor: colors.brand,
@@ -302,4 +351,21 @@ const styles = StyleSheet.create({
   },
   settingKnobLeft: { left: 3 },
   settingKnobRight: { right: 3 },
+  timelineIcon: { height: 22, position: 'relative', width: 24 },
+  timelineLine: {
+    backgroundColor: colors.brand,
+    height: 2,
+    left: 2,
+    position: 'absolute',
+    right: 2,
+    top: 10,
+  },
+  timelineDot: {
+    backgroundColor: colors.brand,
+    borderRadius: 4,
+    height: 8,
+    position: 'absolute',
+    top: 7,
+    width: 8,
+  },
 });

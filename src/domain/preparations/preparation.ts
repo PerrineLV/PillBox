@@ -104,13 +104,28 @@ export type PreparationSnapshot = Readonly<{
   hasShortages: boolean;
 }>;
 
+/**
+ * Résultat de la vérification d'une boîte face au reste à couvrir pour un
+ * médicament (et non plus face à la totalité de son besoin hebdomadaire) :
+ * - `INSUFFICIENT` : la boîte est vide, elle ne peut rien apporter.
+ * - `PARTIAL` : la boîte est valide mais ne couvre pas tout le reste ; elle
+ *   est utilisée intégralement et une seconde boîte complétera le besoin.
+ * - `VALID` : la boîte couvre entièrement le reste à couvrir.
+ */
 export type BoxVerification =
   | Readonly<{ status: 'EXPIRED'; box: MedicationBox }>
   | Readonly<{ status: 'WRONG_MEDICATION'; box: MedicationBox }>
   | Readonly<{ status: 'INSUFFICIENT'; box: MedicationBox }>
   | Readonly<{
+      status: 'PARTIAL';
+      box: MedicationBox;
+      quantityHalfUnits: number;
+      remainingAfterHalfUnits: number;
+    }>
+  | Readonly<{
       status: 'VALID';
       box: MedicationBox;
+      quantityHalfUnits: number;
       isFefo: boolean;
       recommendedBox: MedicationBox;
     }>;
@@ -173,20 +188,62 @@ export function matchScannedBox(
 }
 
 /**
- * Boîtes du stock rattachées à un médicament, du lot à utiliser en premier
- * (FEFO) vers les boîtes périmées, reléguées à la fin sans être masquées.
+ * Statut d'une boîte face au besoin d'un médicament : périmée (jamais
+ * utilisable), insuffisante seule (quantité restante trop faible) ou
+ * suffisante. Sert à signaler une quantité insuffisante avant même que
+ * l'utilisatrice ne tente de valider la boîte.
+ */
+export type BoxAvailability = 'SUFFICIENT' | 'INSUFFICIENT' | 'EXPIRED';
+
+export function evaluateBoxAvailability(
+  box: MedicationBox,
+  requiredHalfUnits: number,
+  referenceDate: string,
+): BoxAvailability {
+  if (isExpired(box.expirationDate, referenceDate)) return 'EXPIRED';
+  return box.remainingQuantity * 2 >= requiredHalfUnits
+    ? 'SUFFICIENT'
+    : 'INSUFFICIENT';
+}
+
+const BOX_AVAILABILITY_RANK: Record<BoxAvailability, number> = {
+  SUFFICIENT: 0,
+  INSUFFICIENT: 1,
+  EXPIRED: 2,
+};
+
+/**
+ * Boîtes du stock rattachées à un médicament, priorisées selon péremption et
+ * quantité : les boîtes suffisantes et non périmées d'abord (FEFO), puis les
+ * boîtes insuffisantes seules, puis les boîtes périmées en dernier, sans
+ * jamais être masquées.
+ *
+ * `additionalAcceptedCis` liste les CIS d'autres membres du même groupe
+ * générique officiel déjà reconnus pour ce traitement (voir
+ * `verifyPreparationBox`) : leurs boîtes apparaissent dans la même liste,
+ * afin qu'une sélection manuelle bénéficie de la même correspondance qu'un
+ * scan.
  */
 export function listBoxesForMedication(
   specialtyCis: string,
+  requiredHalfUnits: number,
   boxes: readonly MedicationBox[],
   referenceDate: string,
+  additionalAcceptedCis: readonly string[] = [],
 ): readonly MedicationBox[] {
+  const acceptedCis = new Set([specialtyCis, ...additionalAcceptedCis]);
   return boxes
-    .filter((box) => box.specialtyCis === specialtyCis)
+    .filter((box) => acceptedCis.has(box.specialtyCis))
     .sort((left, right) => {
-      const leftExpired = isExpired(left.expirationDate, referenceDate);
-      const rightExpired = isExpired(right.expirationDate, referenceDate);
-      if (leftExpired !== rightExpired) return leftExpired ? 1 : -1;
+      const leftRank =
+        BOX_AVAILABILITY_RANK[
+          evaluateBoxAvailability(left, requiredHalfUnits, referenceDate)
+        ];
+      const rightRank =
+        BOX_AVAILABILITY_RANK[
+          evaluateBoxAvailability(right, requiredHalfUnits, referenceDate)
+        ];
+      if (leftRank !== rightRank) return leftRank - rightRank;
       return (
         left.expirationDate.localeCompare(right.expirationDate) ||
         left.id - right.id
@@ -194,29 +251,62 @@ export function listBoxesForMedication(
     });
 }
 
-/** Vérifie une boîte connue sans jamais accepter une substitution implicite. */
+/**
+ * Vérifie une boîte face au reste à couvrir pour un médicament, sans jamais
+ * accepter une substitution implicite. `remainingHalfUnits` est le besoin qui
+ * n'est pas encore couvert par d'éventuelles boîtes déjà retenues pour ce
+ * médicament dans cette préparation : une boîte insuffisante seule n'est donc
+ * plus bloquée, elle est acceptée comme contribution partielle tant qu'elle
+ * n'est pas vide.
+ *
+ * `acceptedGenericCis` : CIS d'un autre membre du même groupe générique
+ * officiel (BDPM), déjà reconnu comme équivalent pour ce traitement — soit
+ * parce que l'utilisatrice vient de confirmer explicitement cette
+ * correspondance, soit parce qu'elle l'avait déjà confirmée et mémorisée
+ * auparavant. Cette fonction ne décide jamais seule qu'un CIS différent est
+ * acceptable : c'est à l'appelant de résoudre cette correspondance (relation
+ * officielle du groupe générique + confirmation explicite) avant d'appeler
+ * cette fonction avec ce paramètre renseigné.
+ */
 export function verifyPreparationBox(
   specialtyCis: string,
-  requiredHalfUnits: number,
+  remainingHalfUnits: number,
   scannedBox: MedicationBox,
   availableBoxes: readonly MedicationBox[],
   referenceDate: string,
+  acceptedGenericCis: string | null = null,
 ): BoxVerification {
   if (isExpired(scannedBox.expirationDate, referenceDate)) {
     return { status: 'EXPIRED', box: scannedBox };
   }
-  if (scannedBox.specialtyCis !== specialtyCis) {
+  const isAcceptedMedication =
+    scannedBox.specialtyCis === specialtyCis ||
+    (acceptedGenericCis !== null &&
+      scannedBox.specialtyCis === acceptedGenericCis);
+  if (!isAcceptedMedication) {
     return { status: 'WRONG_MEDICATION', box: scannedBox };
   }
-  if (scannedBox.remainingQuantity * 2 < requiredHalfUnits) {
+  const usableHalfUnits = scannedBox.remainingQuantity * 2;
+  if (usableHalfUnits <= 0) {
     return { status: 'INSUFFICIENT', box: scannedBox };
   }
+  if (usableHalfUnits < remainingHalfUnits) {
+    return {
+      status: 'PARTIAL',
+      box: scannedBox,
+      quantityHalfUnits: usableHalfUnits,
+      remainingAfterHalfUnits: remainingHalfUnits - usableHalfUnits,
+    };
+  }
+  // Le lot recommandé (FEFO) ne mélange jamais deux produits différents même
+  // pharmacologiquement équivalents : il porte uniquement sur les boîtes du
+  // même CIS que celle en cours de vérification.
   const eligible = availableBoxes
     .filter(
       (box) =>
-        box.specialtyCis === specialtyCis &&
+        box.specialtyCis === scannedBox.specialtyCis &&
         !isExpired(box.expirationDate, referenceDate) &&
-        box.remainingQuantity * 2 >= requiredHalfUnits,
+        box.remainingQuantity * 2 >= remainingHalfUnits,
     )
     .sort(
       (left, right) =>
@@ -227,9 +317,56 @@ export function verifyPreparationBox(
   return {
     status: 'VALID',
     box: scannedBox,
+    quantityHalfUnits: remainingHalfUnits,
     isFefo: recommendedBox.id === scannedBox.id,
     recommendedBox,
   };
+}
+
+/** Une contribution déjà retenue : la boîte utilisée et la quantité qu'elle couvre. */
+export type PreparationBoxContribution = Readonly<{
+  boxId: number;
+  quantityHalfUnits: number;
+}>;
+
+/** Reste à couvrir pour un médicament compte tenu des contributions déjà retenues. */
+export function remainingHalfUnitsFor(
+  requiredHalfUnits: number,
+  contributions: readonly PreparationBoxContribution[],
+): number {
+  const usedHalfUnits = contributions.reduce(
+    (sum, item) => sum + item.quantityHalfUnits,
+    0,
+  );
+  return Math.max(0, requiredHalfUnits - usedHalfUnits);
+}
+
+/**
+ * Vue du stock où chaque boîte déjà partiellement ou totalement retenue par
+ * cette préparation voit sa quantité restante réduite d'autant : le stock en
+ * base n'est décrémenté qu'à la validation finale, mais une même boîte ne
+ * doit jamais être comptée deux fois au sein d'une même préparation.
+ */
+export function effectiveUsableBoxes(
+  boxes: readonly MedicationBox[],
+  contributions: readonly PreparationBoxContribution[],
+): readonly MedicationBox[] {
+  const reservedHalfUnitsByBoxId = new Map<number, number>();
+  for (const contribution of contributions) {
+    reservedHalfUnitsByBoxId.set(
+      contribution.boxId,
+      (reservedHalfUnitsByBoxId.get(contribution.boxId) ?? 0) +
+        contribution.quantityHalfUnits,
+    );
+  }
+  return boxes.map((box) => {
+    const reservedHalfUnits = reservedHalfUnitsByBoxId.get(box.id);
+    if (!reservedHalfUnits) return box;
+    return {
+      ...box,
+      remainingQuantity: box.remainingQuantity - reservedHalfUnits / 2,
+    };
+  });
 }
 
 /**

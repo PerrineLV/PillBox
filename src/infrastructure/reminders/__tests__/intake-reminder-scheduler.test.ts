@@ -58,6 +58,7 @@ function treatment(id: number): Treatment {
     specialtyCis: String(id),
     specialtyName: `Médicament ${id}`,
     pharmaceuticalForm: null,
+    dosageKind: 'SCHEDULED',
     includedInPillbox: true,
     archivedAt: null,
     phases: [
@@ -69,6 +70,7 @@ function treatment(id: number): Treatment {
         dosage: [{ slot: 'morning', quantityHalfUnits: 2 }],
       },
     ],
+    asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
   };
 }
 

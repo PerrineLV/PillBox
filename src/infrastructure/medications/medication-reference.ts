@@ -22,6 +22,14 @@ export type IdentifiedMedicationPresentation = {
   pharmaceuticalForm: string | null;
 };
 
+export type GenericGroupMember = {
+  groupId: string;
+  groupLabel: string;
+  cis: string;
+  name: string | null;
+  type: string | null;
+};
+
 type SpecialtySearchRow = {
   cis: string;
   name: string;
@@ -40,6 +48,14 @@ type IdentifiedPresentationRow = {
   cis: string;
   name: string;
   pharmaceutical_form: string | null;
+};
+
+type GenericGroupMemberRow = {
+  group_id: string;
+  group_label: string;
+  cis: string;
+  name: string | null;
+  type: string | null;
 };
 
 export async function findMedicationPresentationByCip13(
@@ -106,5 +122,40 @@ export async function searchMedicationReference(
     name: specialty.name,
     pharmaceuticalForm: specialty.pharmaceutical_form,
     presentations: presentationsByCis.get(specialty.cis) ?? [],
+  }));
+}
+
+/**
+ * Membres d'un groupe générique officiel (BDPM), à l'exclusion du CIS demandé.
+ * Une spécialité peut appartenir à plusieurs groupes (ex. complémentarité
+ * posologique entre dosages) : tous sont retournés, sans en privilégier un.
+ * Purement informatif : n'influence ni ne filtre aucune donnée de stock,
+ * boîte ou préparation.
+ */
+export async function getGenericGroupMembers(
+  database: SQLiteDatabase,
+  cis: string,
+): Promise<GenericGroupMember[]> {
+  if (!/^\d{8}$/.test(cis)) return [];
+
+  const rows = await database.getAllAsync<GenericGroupMemberRow>(
+    `SELECT gg.group_id, gg.group_label, gg.cis, s.name, gg.type
+     FROM generic_groups gg
+     LEFT JOIN specialties s ON s.cis = gg.cis
+     WHERE gg.group_id IN (
+       SELECT group_id FROM generic_groups WHERE cis = ?
+     )
+     AND gg.cis != ?
+     ORDER BY gg.group_id, CAST(gg.sort_number AS INTEGER), gg.cis`,
+    cis,
+    cis,
+  );
+
+  return rows.map((row) => ({
+    groupId: row.group_id,
+    groupLabel: row.group_label,
+    cis: row.cis,
+    name: row.name,
+    type: row.type,
   }));
 }

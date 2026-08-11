@@ -28,9 +28,11 @@ function treatment(
     specialtyCis: String(id),
     specialtyName: `Médicament ${id}`,
     pharmaceuticalForm: null,
+    dosageKind: 'SCHEDULED',
     includedInPillbox: true,
     archivedAt: null,
     phases: [scheduledPhase(id * 10, frequency)],
+    asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
     ...overrides,
   };
 }

@@ -222,9 +222,12 @@ describe('suppression d’une boîte du stock', () => {
     await savePreparationProgress(database, preparationId, {
       specialtyCis: manualDraft.specialtyCis,
       boxId: id,
+      quantityHalfUnits: 7,
       verification: 'MANUAL',
       scanRaw: null,
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
     await completePreparation(database, preparationId, '2026-08-10');
 
@@ -250,9 +253,12 @@ describe('suppression d’une boîte du stock', () => {
     await savePreparationProgress(database, preparationId, {
       specialtyCis: manualDraft.specialtyCis,
       boxId: id,
+      quantityHalfUnits: 7,
       verification: 'MANUAL',
       scanRaw: null,
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
 
     expect(await getMedicationBoxRemovalAction(database, id)).toBe(
