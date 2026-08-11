@@ -1,4 +1,4 @@
-import { Link, useFocusEffect } from 'expo-router';
+import { Link, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -36,12 +36,22 @@ import {
 
 export default function InventoryScreen() {
   const database = useSQLiteContext();
+  const { filter: filterParam } = useLocalSearchParams<{ filter?: string }>();
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expiringBoxIds, setExpiringBoxIds] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<'all' | 'renew' | 'expiring'>('all');
   const [forecast, setForecast] = useState<StockForecast | null>(null);
+
+  // Une carte d'attention de l'accueil peut ouvrir directement l'onglet
+  // « À renouveler » : le paramètre n'est appliqué qu'aux valeurs connues.
+  useFocusEffect(
+    useCallback(() => {
+      if (filterParam === 'renew' || filterParam === 'expiring')
+        setFilter(filterParam);
+    }, [filterParam]),
+  );
 
   useFocusEffect(
     useCallback(() => {

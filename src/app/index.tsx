@@ -1,34 +1,39 @@
-import { Link, router, useFocusEffect } from 'expo-router';
+import { Link, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import {
-  buildInventoryAlerts,
-  type InventoryAlerts,
-} from '@/domain/alerts/inventory-alerts';
-import {
-  buildStockForecast,
-  type MedicationForecast,
-} from '@/domain/forecast/stock-forecast';
-import { formatHalfUnits } from '@/domain/treatments/treatment';
-import { todayIso } from '@/domain/inventory/inventory';
-import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
-import { listPreparationWeeks } from '@/infrastructure/preparations/preparation-repository';
-import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
-import { forecastCoverageLabel } from '@/components/inventory/forecast-labels';
-import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
+import { AttentionItemCard } from '@/components/home/attention-item-card';
 import { UpdateNoticeCard } from '@/components/updates/update-notice-card';
 import { useUpdateNotice } from '@/components/updates/use-update-notice';
+import { buildInventoryAlerts } from '@/domain/alerts/inventory-alerts';
+import { buildStockForecast } from '@/domain/forecast/stock-forecast';
+import {
+  buildAttentionItems,
+  isAttentionItemActionRequired,
+  NEXT_INTAKE_LOOKAHEAD_DAYS,
+  type AsNeededTreatmentInput,
+  type AttentionItem,
+} from '@/domain/home/attention-items';
+import { todayIso } from '@/domain/inventory/inventory';
+import { localCivilDate } from '@/domain/reminders/intake-reminder';
+import { buildRenewalList } from '@/domain/renewal/renewal-list';
 import type { UpdateNotice } from '@/domain/updates/update-notice';
+import { getLastAsNeededIntake } from '@/infrastructure/intakes/as-needed-intake-repository';
+import { listPendingIntakeCounts } from '@/infrastructure/intakes/intake-repository';
+import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
   getLatestDraftPreparation,
   listPreparationHistory,
+  listPreparationWeeks,
   type PreparationHistoryEntry,
-  type SavedPreparation,
 } from '@/infrastructure/preparations/preparation-repository';
 import {
-  AppButton,
+  getGlobalIntakeReminderSettings,
+  isIntakeRemindersEnabled,
+} from '@/infrastructure/reminders/intake-reminder-repository';
+import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
+import {
   Badge,
   Card,
   LoadingState,
@@ -36,59 +41,113 @@ import {
   Screen,
   SectionTitle,
   colors,
-  radii,
   spacing,
   typography,
 } from '@/ui';
 
 export default function HomeScreen() {
   const database = useSQLiteContext();
-  const [alerts, setAlerts] = useState<InventoryAlerts | null>(null);
+  const [items, setItems] = useState<AttentionItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<SavedPreparation | null>(null);
   const [lastPreparation, setLastPreparation] =
     useState<PreparationHistoryEntry | null>(null);
-  const [forecasts, setForecasts] = useState<Map<string, MedicationForecast>>(
-    new Map(),
-  );
   const update = useUpdateNotice();
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
       setLoading(true);
+      const now = new Date();
+      const today = todayIso();
+      const lookaheadEnd = new Date(now);
+      lookaheadEnd.setDate(lookaheadEnd.getDate() + NEXT_INTAKE_LOOKAHEAD_DAYS);
       Promise.all([
         listTreatments(database),
         listMedicationBoxes(database),
         getLatestDraftPreparation(database),
         listPreparationHistory(database),
         listPreparationWeeks(database),
+        isIntakeRemindersEnabled(database),
+        getGlobalIntakeReminderSettings(database),
+        listPendingIntakeCounts(
+          database,
+          localCivilDate(now),
+          localCivilDate(lookaheadEnd),
+        ),
       ])
-        .then(([treatments, boxes, savedDraft, history, weeks]) => {
-          if (!active) return;
-          const today = todayIso();
-          setAlerts(buildInventoryAlerts(treatments, boxes, today));
-          setForecasts(
-            new Map(
-              buildStockForecast(
+        .then(
+          async ([
+            treatments,
+            boxes,
+            draft,
+            history,
+            weeks,
+            remindersEnabled,
+            slotTimes,
+            pendingIntakeCounts,
+          ]) => {
+            const asNeededTreatments = treatments.filter(
+              (treatment) =>
+                treatment.dosageKind === 'AS_NEEDED' &&
+                treatment.archivedAt === null,
+            );
+            const lastIntakes = await Promise.all(
+              asNeededTreatments.map((treatment) =>
+                getLastAsNeededIntake(database, treatment.id),
+              ),
+            );
+            if (!active) return;
+
+            const forecast = buildStockForecast(
+              treatments,
+              boxes,
+              today,
+              weeks,
+            );
+            const asNeededInputs: AsNeededTreatmentInput[] =
+              asNeededTreatments.map((treatment, index) => ({
+                treatmentId: treatment.id,
+                specialtyName: treatment.specialtyName,
+                maxQuantityPerDayHalfUnits:
+                  treatment.asNeededInfo.maxQuantityPerDayHalfUnits,
+                minIntervalHours: treatment.asNeededInfo.minIntervalHours,
+                lastIntake: lastIntakes[index],
+              }));
+
+            setItems(
+              buildAttentionItems({
+                referenceDate: today,
+                now,
+                intakeRemindersEnabled: remindersEnabled,
                 treatments,
-                boxes,
-                today,
-                weeks,
-              ).medications.map((item) => [item.specialtyCis, item]),
-            ),
-          );
-          setDraft(savedDraft);
-          setLastPreparation(history[0] ?? null);
-          setError(null);
-        })
+                intakeSlotTimes: slotTimes,
+                pendingIntakeCounts,
+                draftPreparation: draft
+                  ? {
+                      startDate: draft.snapshot.startDate,
+                      endDate: draft.snapshot.endDate,
+                      completedCount: draft.progress.length,
+                      totalCount: draft.snapshot.requirements.length,
+                    }
+                  : null,
+                knownPreparationWeeks: weeks,
+                renewalItems: buildRenewalList(forecast),
+                expirations: buildInventoryAlerts(treatments, boxes, today)
+                  .expirations,
+                asNeededTreatments: asNeededInputs,
+              }),
+            );
+            setLastPreparation(history[0] ?? null);
+            setError(null);
+          },
+        )
         .catch((reason: unknown) => {
           if (!active) return;
           setError(
             reason instanceof Error
               ? reason.message
-              : 'Chargement des alertes impossible.',
+              : 'Chargement de votre situation impossible.',
           );
         })
         .finally(() => {
@@ -102,11 +161,9 @@ export default function HomeScreen() {
 
   return (
     <HomeContent
-      alerts={alerts}
+      items={items}
       loading={loading}
       error={error}
-      draft={draft}
-      forecasts={forecasts}
       lastPreparation={lastPreparation}
       updateNotice={update.notice}
       onDownloadUpdate={update.download}
@@ -116,28 +173,25 @@ export default function HomeScreen() {
 }
 
 export function HomeContent({
-  alerts,
+  items,
   loading,
   error,
-  draft = null,
-  forecasts,
   lastPreparation = null,
   updateNotice = null,
   onDownloadUpdate,
   onPostponeUpdate,
 }: Readonly<{
-  alerts: InventoryAlerts | null;
+  items: AttentionItem[] | null;
   loading: boolean;
   error: string | null;
-  draft?: SavedPreparation | null;
-  forecasts?: ReadonlyMap<string, MedicationForecast>;
   lastPreparation?: PreparationHistoryEntry | null;
   updateNotice?: UpdateNotice | null;
   onDownloadUpdate?: () => void;
   onPostponeUpdate?: () => void;
 }>) {
-  const completedCount = draft?.progress.length ?? 0;
-  const totalCount = draft?.snapshot.requirements.length ?? 0;
+  const calm =
+    items !== null &&
+    !items.some((item) => isAttentionItemActionRequired(item));
   return (
     <Screen
       fixedHeader={
@@ -159,99 +213,23 @@ export function HomeContent({
     >
       {loading ? <LoadingState label="Chargement de votre situation…" /> : null}
       {error ? (
-        <Message tone="error" title="Alertes indisponibles">
+        <Message tone="error" title="Situation indisponible">
           {error}
         </Message>
       ) : null}
-      {!loading ? (
-        <Card style={styles.preparationCard}>
-          <Badge
-            label={draft ? 'Préparation en cours' : 'Prochaine préparation'}
-            tone={draft ? 'warning' : 'neutral'}
-          />
-          <Text style={styles.preparationTitle}>
-            {draft
-              ? `Pilulier du ${formatDate(draft.snapshot.startDate)} au ${formatDate(draft.snapshot.endDate)}`
-              : 'Préparer les 7 prochains jours'}
-          </Text>
-          <Text style={styles.preparationBody}>
-            {draft
-              ? `${completedCount} médicament${completedCount > 1 ? 's' : ''} vérifié${completedCount > 1 ? 's' : ''} sur ${totalCount}. Votre progression est enregistrée.`
-              : 'Vérifiez chaque boîte et chaque lot avant la validation finale.'}
-          </Text>
-          <AppButton
-            label={draft ? 'Reprendre la préparation' : 'Commencer'}
-            variant="secondary"
-            onPress={() => router.push('/preparations/new')}
-            accessibilityHint="Ouvre la préparation guidée du pilulier"
-          />
-        </Card>
-      ) : null}
-      {alerts && (alerts.stock.length > 0 || alerts.expirations.length > 0) ? (
-        <Card style={styles.alerts}>
-          <SectionTitle>À vérifier</SectionTitle>
-          <Text style={styles.period}>
-            Besoin calculé du {formatLongFrenchCivilDate(alerts.startDate)} au{' '}
-            {formatLongFrenchCivilDate(alerts.endDate)}
-          </Text>
-          {alerts.stock.map((alert) => {
-            const forecast = forecasts?.get(alert.specialtyCis);
-            return (
-              <View key={alert.specialtyCis} style={styles.alertItem}>
-                <Text style={styles.alertName}>{alert.specialtyName}</Text>
-                <Badge
-                  label={
-                    alert.status === 'INSUFFICIENT'
-                      ? 'Stock insuffisant'
-                      : 'Stock à surveiller'
-                  }
-                  tone={alert.status === 'INSUFFICIENT' ? 'danger' : 'warning'}
-                />
-                <Text>
-                  {formatHalfUnits(alert.usableStockHalfUnits)} disponible(s)
-                  pour {formatHalfUnits(alert.requiredHalfUnits)} nécessaire(s).
-                </Text>
-                {forecast ? (
-                  <Text style={styles.period}>
-                    {forecastCoverageLabel(forecast.coverage)}
-                  </Text>
-                ) : null}
-              </View>
-            );
-          })}
-          {alerts.expirations.map((alert) => (
-            <Link
-              key={alert.boxId}
-              href={{
-                pathname: '/inventory/[id]',
-                params: { id: String(alert.boxId) },
-              }}
-              style={styles.alertItem}
-            >
-              <Text style={styles.alertName}>{alert.specialtyName}</Text>
-              <Text>
-                Lot {alert.lot ?? 'non renseigné'} : péremption le{' '}
-                {formatLongFrenchCivilDate(alert.expirationDate)}.
-              </Text>
-            </Link>
+      {!loading && !error && items ? (
+        <>
+          {calm ? (
+            <Message tone="success" title="Tout est en ordre">
+              Aucune action urgente pour l’instant.
+            </Message>
+          ) : null}
+          <SectionTitle>À faire</SectionTitle>
+          {items.map((item) => (
+            <AttentionItemCard key={item.id} item={item} />
           ))}
-          <Link href="/inventory" style={styles.alertLink}>
-            Voir le stock
-          </Link>
-        </Card>
-      ) : !loading && !error ? (
-        <Message tone="success" title="Tout est prêt">
-          Aucune alerte de stock ou de péremption pour le prochain pilulier.
-        </Message>
+        </>
       ) : null}
-      <Card tone="muted">
-        <SectionTitle>Cette semaine</SectionTitle>
-        <Text style={typography.body}>
-          {alerts
-            ? `${alerts.stock.length} alerte${alerts.stock.length > 1 ? 's' : ''} de stock · ${alerts.expirations.length} péremption${alerts.expirations.length > 1 ? 's' : ''} à surveiller`
-            : 'Résumé indisponible'}
-        </Text>
-      </Card>
       {lastPreparation ? (
         <LastPreparationCard
           detail={`Validée le ${formatDateTime(lastPreparation.completedAt)} · semaine du ${formatDate(lastPreparation.startDate)}`}
@@ -311,24 +289,6 @@ function LastPreparationCard({ detail }: { detail: string }) {
 }
 
 const styles = StyleSheet.create({
-  alertItem: {
-    backgroundColor: colors.warningSoft,
-    borderRadius: radii.md,
-    gap: spacing.sm,
-    marginTop: 8,
-    padding: 10,
-  },
-  alertName: { fontWeight: '700' },
-  alerts: {
-    alignSelf: 'stretch',
-    borderColor: colors.warning,
-  },
-  alertLink: {
-    color: colors.brand,
-    fontWeight: '700',
-    minHeight: 44,
-    paddingTop: spacing.md,
-  },
   chevron: {
     color: colors.brand,
     flexShrink: 0,
@@ -341,14 +301,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginBottom: spacing.sm,
   },
-  preparationCard: {
-    backgroundColor: colors.brand,
-    borderColor: colors.brandPressed,
-    gap: spacing.md,
-    padding: spacing.xl,
-  },
-  preparationTitle: { ...typography.title, color: colors.surface },
-  preparationBody: { ...typography.body, color: colors.surface },
   heroText: { flex: 1 },
   homeLinkText: { flex: 1, flexShrink: 1, gap: spacing.xs, minWidth: 0 },
   homeLinkTitle: typography.label,
@@ -376,7 +328,6 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 15,
     height: 24,
   },
-  period: typography.caption,
   subtitle: typography.caption,
   title: typography.display,
 });
