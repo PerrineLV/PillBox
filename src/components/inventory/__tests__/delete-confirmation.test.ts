@@ -1,6 +1,4 @@
-import { Alert } from 'react-native';
-
-import { confirmPermanentBoxDeletion } from '../delete-confirmation';
+import { BoxDeletionConfirmation } from '../delete-confirmation';
 
 const box = {
   id: 3,
@@ -20,38 +18,49 @@ const box = {
 describe('confirmation de suppression d’une boîte du stock', () => {
   it('identifie la boîte, précise l’irréversibilité et permet d’annuler sans supprimer', () => {
     const onConfirm = jest.fn();
-    const alert = jest
-      .spyOn(Alert, 'alert')
-      .mockImplementation(() => undefined);
+    const onCancel = jest.fn();
 
-    confirmPermanentBoxDeletion(box, onConfirm);
+    const modal = BoxDeletionConfirmation({
+      visible: true,
+      box,
+      onCancel,
+      onConfirm,
+    });
 
-    const [title, message, buttons] = alert.mock.calls[0];
-    expect(title).toContain('Supprimer définitivement');
-    expect(message).toContain('Alpha');
-    expect(message).toContain('LOT-MANUEL');
-    expect(message).toContain('irréversible');
-    expect(buttons?.map((button) => button.text)).toEqual([
-      'Annuler',
-      'Supprimer définitivement',
-    ]);
-    buttons?.[0].onPress?.();
+    const rendered = JSON.stringify(modal);
+    expect(rendered).toContain('Supprimer définitivement');
+    expect(rendered).toContain('Alpha');
+    expect(rendered).toContain('LOT-MANUEL');
+    expect(rendered).toContain('irréversible');
+
+    modal.props.onCancel();
+    expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onConfirm).not.toHaveBeenCalled();
-    alert.mockRestore();
   });
 
-  it('supprime seulement après le choix explicite de suppression', () => {
+  it('mentionne un lot non renseigné et supprime seulement après le choix explicite', () => {
     const onConfirm = jest.fn();
-    const alert = jest
-      .spyOn(Alert, 'alert')
-      .mockImplementation(() => undefined);
 
-    confirmPermanentBoxDeletion({ ...box, lot: null }, onConfirm);
+    const modal = BoxDeletionConfirmation({
+      visible: true,
+      box: { ...box, lot: null },
+      onCancel: jest.fn(),
+      onConfirm,
+    });
 
-    const [, message, buttons] = alert.mock.calls[0];
-    expect(message).toContain('lot non renseigné');
-    buttons?.[1].onPress?.();
+    expect(JSON.stringify(modal)).toContain('lot non renseigné');
+    modal.props.onPrimary();
     expect(onConfirm).toHaveBeenCalledTimes(1);
-    alert.mockRestore();
+  });
+
+  it('reste masquée tant qu’aucune suppression n’est demandée', () => {
+    const modal = BoxDeletionConfirmation({
+      visible: false,
+      box,
+      onCancel: jest.fn(),
+      onConfirm: jest.fn(),
+    });
+
+    expect(modal.props.visible).toBe(false);
   });
 });

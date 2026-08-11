@@ -1,26 +1,51 @@
-import { Alert } from 'react-native';
-
-import { confirmPermanentTreatmentDeletion } from '@/components/treatments/delete-confirmation';
+import { TreatmentDeletionConfirmation } from '@/components/treatments/delete-confirmation';
 
 describe('confirmation de suppression définitive', () => {
   it('nomme le traitement, précise l’irréversibilité et permet d’annuler sans supprimer', () => {
     const onConfirm = jest.fn();
-    const alert = jest
-      .spyOn(Alert, 'alert')
-      .mockImplementation(() => undefined);
+    const onCancel = jest.fn();
 
-    confirmPermanentTreatmentDeletion('Alpha', onConfirm);
+    const modal = TreatmentDeletionConfirmation({
+      visible: true,
+      treatmentName: 'Alpha',
+      onCancel,
+      onConfirm,
+    });
 
-    const [title, message, buttons] = alert.mock.calls[0];
-    expect(title).toContain('Supprimer définitivement');
-    expect(message).toContain('Alpha');
-    expect(message).toContain('irréversible');
-    expect(buttons?.map((button) => button.text)).toEqual([
-      'Annuler',
-      'Supprimer définitivement',
-    ]);
-    buttons?.[0].onPress?.();
+    const rendered = JSON.stringify(modal);
+    expect(rendered).toContain('Supprimer définitivement');
+    expect(rendered).toContain('Alpha');
+    expect(rendered).toContain('irréversible');
+    expect(modal.props.visible).toBe(true);
+
+    modal.props.onCancel();
+    expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onConfirm).not.toHaveBeenCalled();
-    alert.mockRestore();
+  });
+
+  it('supprime seulement après le choix explicite de suppression', () => {
+    const onConfirm = jest.fn();
+    const onCancel = jest.fn();
+
+    const modal = TreatmentDeletionConfirmation({
+      visible: true,
+      treatmentName: 'Alpha',
+      onCancel,
+      onConfirm,
+    });
+
+    modal.props.onPrimary();
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('reste masquée tant qu’aucune suppression n’est demandée', () => {
+    const modal = TreatmentDeletionConfirmation({
+      visible: false,
+      treatmentName: 'Alpha',
+      onCancel: jest.fn(),
+      onConfirm: jest.fn(),
+    });
+
+    expect(modal.props.visible).toBe(false);
   });
 });

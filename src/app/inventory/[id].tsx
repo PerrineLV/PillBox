@@ -17,7 +17,7 @@ import {
   listStockMovements,
   type MedicationBoxRemovalAction,
 } from '@/infrastructure/inventory/inventory-repository';
-import { confirmPermanentBoxDeletion } from '@/components/inventory/delete-confirmation';
+import { BoxDeletionConfirmation } from '@/components/inventory/delete-confirmation';
 import {
   AppButton,
   AppField,
@@ -46,6 +46,8 @@ export default function BoxDetailScreen() {
     useState<MedicationBoxRemovalAction | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteConfirmationVisible, setDeleteConfirmationVisible] =
+    useState(false);
 
   const load = async () => {
     if (!Number.isInteger(id))
@@ -176,9 +178,18 @@ export default function BoxDetailScreen() {
           label="Supprimer cette boîte"
           variant="danger"
           loading={deleting}
-          onPress={() => confirmPermanentBoxDeletion(box, () => void remove())}
+          onPress={() => setDeleteConfirmationVisible(true)}
         />
       ) : null}
+      <BoxDeletionConfirmation
+        visible={deleteConfirmationVisible}
+        box={box}
+        onCancel={() => setDeleteConfirmationVisible(false)}
+        onConfirm={() => {
+          setDeleteConfirmationVisible(false);
+          void remove();
+        }}
+      />
       {removalAction === 'KEEP_USED_IN_PREPARATION' ? (
         <Message tone="warning" title="Suppression impossible">
           Cette boîte a déjà servi à une préparation : la supprimer effacerait
