@@ -18,6 +18,7 @@ import {
   type MedicationBoxRemovalAction,
 } from '@/infrastructure/inventory/inventory-repository';
 import { BoxDeletionConfirmation } from '@/components/inventory/delete-confirmation';
+import { GenericGroupSectionWithDatabase } from '@/components/medications/generic-group-section';
 import {
   AppButton,
   AppField,
@@ -143,6 +144,7 @@ export default function BoxDetailScreen() {
           pendant une préparation.
         </Message>
       ) : null}
+      <GenericGroupSectionWithDatabase cis={box.specialtyCis} />
 
       <Text style={styles.section}>Ajuster le stock physique</Text>
       <AppField

@@ -3,6 +3,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 
+import { GenericGroupSectionWithDatabase } from '@/components/medications/generic-group-section';
 import { AsNeededIntakeLog } from '@/components/treatments/as-needed-intake-log';
 import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
@@ -120,6 +121,9 @@ export default function EditTreatmentScreen() {
         <Message tone="warning" title="Traitement archivé">
           Ses posologies et son historique sont conservés.
         </Message>
+      ) : null}
+      {treatment ? (
+        <GenericGroupSectionWithDatabase cis={treatment.specialtyCis} />
       ) : null}
       {treatment ? (
         <AppButton

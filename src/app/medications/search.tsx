@@ -4,6 +4,7 @@ import { Link, Stack } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 
+import { GenericGroupSection } from '@/components/medications/generic-group-section';
 import {
   searchMedicationReference,
   type MedicationSearchResult,
@@ -131,6 +132,7 @@ function MedicationResult({ result }: { result: MedicationSearchResult }) {
           <Text>{presentation.label}</Text>
         </View>
       ))}
+      <GenericGroupSection cis={result.cis} />
     </Card>
   );
 }

@@ -16,7 +16,7 @@ React Native + Expo + TypeScript strict + Expo Router + expo-sqlite + expo-camer
 
 # Données médicaments
 
-Référentiel issu de la Base de données publique des médicaments. Distinguer spécialité (CIS) et présentation (CIP13). L'import est préparé hors de l'app puis consommé localement.
+Référentiel issu de la Base de données publique des médicaments. Distinguer spécialité (CIS) et présentation (CIP13). L'import est préparé hors de l'app puis consommé localement. Le référentiel inclut aussi le regroupement officiel des spécialités en groupes génériques (BDPM), utilisé uniquement à titre informatif.
 
 # Modèle fonctionnel
 
@@ -56,6 +56,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 - Une boîte périmée ne peut pas être utilisée pour une préparation.
 - Un médicament différent ne doit jamais être accepté silencieusement.
 - Ne pas automatiser la substitution générique sans règle explicitement validée.
+- Le groupe générique affiché est une information BDPM à titre indicatif ; il ne déclenche, ne suggère ni ne pré-remplit aucun remplacement de médicament, de boîte ou de ligne de stock.
 - Si plusieurs lots conviennent, recommander FEFO mais permettre une autre boîte valide après avertissement.
 - La validation finale est atomique et impossible deux fois.
 - Une seule préparation peut être en cours à la fois ; son annulation ne modifie ni le stock ni l'historique et est refusée dès qu'un mouvement de stock existe pour elle.
