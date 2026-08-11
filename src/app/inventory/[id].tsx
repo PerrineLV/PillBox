@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -11,9 +11,13 @@ import {
 } from '@/domain/inventory/inventory';
 import {
   adjustMedicationBox,
+  deleteUnusedMedicationBox,
   getMedicationBox,
+  getMedicationBoxRemovalAction,
   listStockMovements,
+  type MedicationBoxRemovalAction,
 } from '@/infrastructure/inventory/inventory-repository';
+import { confirmPermanentBoxDeletion } from '@/components/inventory/delete-confirmation';
 import {
   AppButton,
   AppField,
@@ -38,16 +42,22 @@ export default function BoxDetailScreen() {
   const [quantity, setQuantity] = useState('');
   const [explanation, setExplanation] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [removalAction, setRemovalAction] =
+    useState<MedicationBoxRemovalAction | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = async () => {
     if (!Number.isInteger(id))
       throw new Error('Identifiant de boîte invalide.');
-    const [nextBox, nextMovements] = await Promise.all([
+    const [nextBox, nextMovements, nextRemovalAction] = await Promise.all([
       getMedicationBox(database, id),
       listStockMovements(database, id),
+      getMedicationBoxRemovalAction(database, id),
     ]);
     setBox(nextBox);
     setMovements(nextMovements);
+    setRemovalAction(nextRemovalAction);
     if (nextBox) setQuantity(String(nextBox.remainingQuantity));
   };
 
@@ -77,6 +87,25 @@ export default function BoxDetailScreen() {
       setError(
         reason instanceof Error ? reason.message : 'Ajustement impossible.',
       );
+    }
+  };
+
+  /**
+   * En cas de refus, l'écran est rechargé : la raison du refus vient de la base
+   * et non de l'état affiché avant la confirmation.
+   */
+  const remove = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteUnusedMedicationBox(database, id);
+      router.replace('/inventory');
+    } catch (reason: unknown) {
+      setDeleteError(
+        reason instanceof Error ? reason.message : 'Suppression impossible.',
+      );
+      setDeleting(false);
+      await load().catch(() => undefined);
     }
   };
 
@@ -139,6 +168,30 @@ export default function BoxDetailScreen() {
           onPress={() => void adjust('CORRECTION')}
         />
       </View>
+
+      <Text style={styles.section}>Retirer cette boîte du stock</Text>
+      {deleteError ? <Message tone="error">{deleteError}</Message> : null}
+      {removalAction === 'DELETE' ? (
+        <AppButton
+          label="Supprimer cette boîte"
+          variant="danger"
+          loading={deleting}
+          onPress={() => confirmPermanentBoxDeletion(box, () => void remove())}
+        />
+      ) : null}
+      {removalAction === 'KEEP_USED_IN_PREPARATION' ? (
+        <Message tone="warning" title="Suppression impossible">
+          Cette boîte a déjà servi à une préparation : la supprimer effacerait
+          cet historique. Pour la retirer du stock utilisable, ajustez sa
+          quantité restante à 0 ci-dessus.
+        </Message>
+      ) : null}
+      {removalAction === 'KEEP_IN_DRAFT_PREPARATION' ? (
+        <Message tone="warning" title="Suppression impossible">
+          Cette boîte est désignée dans une préparation en cours. Terminez ou
+          annulez cette préparation avant de la supprimer.
+        </Message>
+      ) : null}
 
       <Text style={styles.section}>Mouvements</Text>
       {movements.map((movement) => (

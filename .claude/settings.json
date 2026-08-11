@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx expo *)",
+      "Bash(git -C /home/perrine/codex/PillBox diff --stat)",
+      "Bash(git -C /home/perrine/codex/PillBox status --short)"
+    ]
+  }
+}
