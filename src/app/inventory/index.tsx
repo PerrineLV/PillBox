@@ -17,9 +17,11 @@ import {
   buildStockForecast,
   type StockForecast,
 } from '@/domain/forecast/stock-forecast';
+import { buildRenewalList } from '@/domain/renewal/renewal-list';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import { StockForecastCard } from '@/components/inventory/stock-forecast-card';
 import { StockForecastSummary } from '@/components/inventory/stock-forecast-summary';
+import { RenewalList } from '@/components/inventory/renewal-list';
 import {
   Badge,
   Card,
@@ -37,7 +39,6 @@ export default function InventoryScreen() {
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [renewCis, setRenewCis] = useState<Set<string>>(new Set());
   const [expiringBoxIds, setExpiringBoxIds] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<'all' | 'renew' | 'expiring'>('all');
   const [forecast, setForecast] = useState<StockForecast | null>(null);
@@ -56,7 +57,6 @@ export default function InventoryScreen() {
             setBoxes(items);
             const today = todayIso();
             const alerts = buildInventoryAlerts(treatments, items, today);
-            setRenewCis(new Set(alerts.stock.map((item) => item.specialtyCis)));
             setExpiringBoxIds(
               new Set(alerts.expirations.map((item) => item.boxId)),
             );
@@ -95,13 +95,15 @@ export default function InventoryScreen() {
       boxes.filter(
         (box) =>
           filter === 'all' ||
-          (filter === 'renew'
-            ? renewCis.has(box.specialtyCis)
-            : expiringBoxIds.has(box.id)),
+          (filter === 'expiring' && expiringBoxIds.has(box.id)),
       ),
-    [boxes, expiringBoxIds, filter, renewCis],
+    [boxes, expiringBoxIds, filter],
   );
   const groups = useMemo(() => groupBoxes(filteredBoxes), [filteredBoxes]);
+  const renewalList = useMemo(
+    () => (forecast ? buildRenewalList(forecast) : []),
+    [forecast],
+  );
   const today = todayIso();
 
   return (
@@ -144,19 +146,27 @@ export default function InventoryScreen() {
           {error}
         </Message>
       ) : null}
-      {!loading && !error && boxes.length === 0 ? (
+      {!loading && !error && filter === 'renew' ? (
+        <RenewalList items={renewalList} />
+      ) : null}
+      {!loading && !error && filter !== 'renew' && boxes.length === 0 ? (
         <EmptyState
           title="Aucune boîte enregistrée"
           description="Scannez le DataMatrix d’une boîte, ou ajoutez-la sans DataMatrix, pour suivre son lot, sa péremption et sa quantité."
         />
       ) : null}
-      {!loading && !error && boxes.length > 0 && groups.length === 0 ? (
+      {!loading &&
+      !error &&
+      filter !== 'renew' &&
+      boxes.length > 0 &&
+      groups.length === 0 ? (
         <EmptyState
           title="Aucune boîte pour ce filtre"
           description="Essayez un autre filtre pour retrouver le reste du stock."
         />
       ) : null}
-      {groups.map((medication) => {
+      {filter !== 'renew' &&
+        groups.map((medication) => {
         const medicationForecast = forecastsByCis.get(medication.cis);
         return (
           <View key={medication.cis} style={styles.medication}>

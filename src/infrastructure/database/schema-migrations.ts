@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 17;
+export const LATEST_SCHEMA_VERSION = 19;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -511,6 +511,38 @@ export const SCHEMA_MIGRATIONS = [
         );
 
         INSERT INTO update_check_settings (singleton_id) VALUES (1);
+      `);
+    },
+  },
+  {
+    version: 18,
+    name: 'pont de compatibilité — table de renouvellement retirée',
+    async up(transaction) {
+      // Le ticket 15 a exploré puis abandonné un masquage temporaire des
+      // alertes de renouvellement, appuyé sur cette table. Cette migration ne
+      // sert plus qu'à rester compatible avec les bases locales de test qui
+      // l'avaient déjà appliquée avant l'abandon : elle ne crée aucune
+      // fonctionnalité et aucun code ne lit ou n'écrit dans cette table.
+      await transaction.execute(`
+        CREATE TABLE medication_renewal_dismissals (
+          specialty_cis TEXT PRIMARY KEY NOT NULL,
+          available_half_units_snapshot INTEGER NOT NULL,
+          urgency_snapshot TEXT NOT NULL,
+          dismissed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    },
+  },
+  {
+    version: 19,
+    name: 'suppression de la table de renouvellement inutilisée',
+    async up(transaction) {
+      // La migration 18 créait cette table pour un masquage temporaire des
+      // alertes de renouvellement, abandonné avant toute écriture en dehors
+      // des bases de test locales. Elle est vide sur toute installation
+      // réelle : la supprimer ne perd aucune donnée.
+      await transaction.execute(`
+        DROP TABLE medication_renewal_dismissals;
       `);
     },
   },
