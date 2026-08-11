@@ -7,10 +7,16 @@ import {
   buildInventoryAlerts,
   type InventoryAlerts,
 } from '@/domain/alerts/inventory-alerts';
+import {
+  buildStockForecast,
+  type MedicationForecast,
+} from '@/domain/forecast/stock-forecast';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
 import { todayIso } from '@/domain/inventory/inventory';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
+import { listPreparationWeeks } from '@/infrastructure/preparations/preparation-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
+import { forecastCoverageLabel } from '@/components/inventory/forecast-labels';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import { UpdateNoticeCard } from '@/components/updates/update-notice-card';
 import { useUpdateNotice } from '@/components/updates/use-update-notice';
@@ -43,6 +49,9 @@ export default function HomeScreen() {
   const [draft, setDraft] = useState<SavedPreparation | null>(null);
   const [lastPreparation, setLastPreparation] =
     useState<PreparationHistoryEntry | null>(null);
+  const [forecasts, setForecasts] = useState<Map<string, MedicationForecast>>(
+    new Map(),
+  );
   const update = useUpdateNotice();
 
   useFocusEffect(
@@ -54,10 +63,22 @@ export default function HomeScreen() {
         listMedicationBoxes(database),
         getLatestDraftPreparation(database),
         listPreparationHistory(database),
+        listPreparationWeeks(database),
       ])
-        .then(([treatments, boxes, savedDraft, history]) => {
+        .then(([treatments, boxes, savedDraft, history, weeks]) => {
           if (!active) return;
-          setAlerts(buildInventoryAlerts(treatments, boxes, todayIso()));
+          const today = todayIso();
+          setAlerts(buildInventoryAlerts(treatments, boxes, today));
+          setForecasts(
+            new Map(
+              buildStockForecast(
+                treatments,
+                boxes,
+                today,
+                weeks,
+              ).medications.map((item) => [item.specialtyCis, item]),
+            ),
+          );
           setDraft(savedDraft);
           setLastPreparation(history[0] ?? null);
           setError(null);
@@ -85,6 +106,7 @@ export default function HomeScreen() {
       loading={loading}
       error={error}
       draft={draft}
+      forecasts={forecasts}
       lastPreparation={lastPreparation}
       updateNotice={update.notice}
       onDownloadUpdate={update.download}
@@ -98,6 +120,7 @@ export function HomeContent({
   loading,
   error,
   draft = null,
+  forecasts,
   lastPreparation = null,
   updateNotice = null,
   onDownloadUpdate,
@@ -107,6 +130,7 @@ export function HomeContent({
   loading: boolean;
   error: string | null;
   draft?: SavedPreparation | null;
+  forecasts?: ReadonlyMap<string, MedicationForecast>;
   lastPreparation?: PreparationHistoryEntry | null;
   updateNotice?: UpdateNotice | null;
   onDownloadUpdate?: () => void;
@@ -170,23 +194,31 @@ export function HomeContent({
             Besoin calculé du {formatLongFrenchCivilDate(alerts.startDate)} au{' '}
             {formatLongFrenchCivilDate(alerts.endDate)}
           </Text>
-          {alerts.stock.map((alert) => (
-            <View key={alert.specialtyCis} style={styles.alertItem}>
-              <Text style={styles.alertName}>{alert.specialtyName}</Text>
-              <Badge
-                label={
-                  alert.status === 'INSUFFICIENT'
-                    ? 'Stock insuffisant'
-                    : 'Stock à surveiller'
-                }
-                tone={alert.status === 'INSUFFICIENT' ? 'danger' : 'warning'}
-              />
-              <Text>
-                {formatHalfUnits(alert.usableStockHalfUnits)} disponible(s) pour{' '}
-                {formatHalfUnits(alert.requiredHalfUnits)} nécessaire(s).
-              </Text>
-            </View>
-          ))}
+          {alerts.stock.map((alert) => {
+            const forecast = forecasts?.get(alert.specialtyCis);
+            return (
+              <View key={alert.specialtyCis} style={styles.alertItem}>
+                <Text style={styles.alertName}>{alert.specialtyName}</Text>
+                <Badge
+                  label={
+                    alert.status === 'INSUFFICIENT'
+                      ? 'Stock insuffisant'
+                      : 'Stock à surveiller'
+                  }
+                  tone={alert.status === 'INSUFFICIENT' ? 'danger' : 'warning'}
+                />
+                <Text>
+                  {formatHalfUnits(alert.usableStockHalfUnits)} disponible(s)
+                  pour {formatHalfUnits(alert.requiredHalfUnits)} nécessaire(s).
+                </Text>
+                {forecast ? (
+                  <Text style={styles.period}>
+                    {forecastCoverageLabel(forecast.coverage)}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })}
           {alerts.expirations.map((alert) => (
             <Link
               key={alert.boxId}

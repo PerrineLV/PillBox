@@ -19,6 +19,7 @@ import {
   AppField,
   Card,
   Message,
+  STOCK_MOVEMENT_TYPE_LABELS,
   colors,
   spacing,
   typography,
@@ -142,7 +143,9 @@ export default function BoxDetailScreen() {
       <Text style={styles.section}>Mouvements</Text>
       {movements.map((movement) => (
         <Card key={movement.id} style={styles.movement}>
-          <Text style={styles.movementType}>{movement.type}</Text>
+          <Text style={styles.movementType}>
+            {STOCK_MOVEMENT_TYPE_LABELS[movement.type]}
+          </Text>
           <Text>
             {movement.quantityDelta >= 0 ? '+' : ''}
             {movement.quantityDelta} → reste {movement.quantityAfter}

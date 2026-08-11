@@ -32,4 +32,13 @@ describe('design system PillBox', () => {
       4.5,
     );
   });
+
+  it('conserve un contraste AA pour les bandeaux d’information colorés', () => {
+    expect(contrast(colors.brand, colors.brandSoft)).toBeGreaterThanOrEqual(
+      4.5,
+    );
+    expect(contrast(colors.warning, colors.warningSoft)).toBeGreaterThanOrEqual(
+      4.5,
+    );
+  });
 });

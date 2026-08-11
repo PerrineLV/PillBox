@@ -1,3 +1,4 @@
+import type { StockMovementType } from '@/domain/inventory/inventory';
 import {
   WEEKDAYS,
   type IntakeSlot,
@@ -26,4 +27,12 @@ export const INTAKE_SLOT_LABELS: Record<IntakeSlot, string> = {
   noon: 'Midi',
   evening: 'Soir',
   bedtime: 'Coucher',
+};
+
+/** Libellés affichés pour l’origine d’un mouvement de stock. */
+export const STOCK_MOVEMENT_TYPE_LABELS: Record<StockMovementType, string> = {
+  BOX_ADDED: 'Ajout de la boîte',
+  MANUAL_ADJUSTMENT: 'Ajustement manuel',
+  CORRECTION: 'Correction',
+  PILLBOX_PREPARATION: 'Préparation du pilulier',
 };
