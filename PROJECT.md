@@ -1,6 +1,6 @@
 # Vision
 
-Application mobile personnelle pour assister la préparation hebdomadaire d'un pilulier : traitements réels, scan DataMatrix, lots/péremptions, stock et rappel hebdomadaire.
+Application mobile personnelle pour assister la préparation hebdomadaire d'un pilulier : traitements réels, scan DataMatrix, lots/péremptions, stock, alertes et rappels (préparation hebdomadaire et prises quotidiennes).
 
 # Principes
 
@@ -12,7 +12,7 @@ Application mobile personnelle pour assister la préparation hebdomadaire d'un p
 
 # Stack
 
-React Native + Expo + TypeScript strict + Expo Router + expo-sqlite + expo-camera. Notifications locales Expo pour le rappel hebdomadaire. Ajouter une dépendance seulement lorsqu'elle apporte une vraie valeur au produit.
+React Native + Expo + TypeScript strict + Expo Router + expo-sqlite + expo-camera. Notifications locales Expo pour le rappel hebdomadaire de préparation et pour les rappels de prise quotidiens (avec actions rapides pris/ignoré). Ajouter une dépendance seulement lorsqu'elle apporte une vraie valeur au produit.
 
 # Données médicaments
 
@@ -28,19 +28,28 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 
 **Préparation** : période de 7 jours + snapshot des traitements + progression + boîtes/lots réellement utilisés + statut.
 
+**Prise** : occurrence datée d'un créneau de posologie au sein d'une préparation, de statut en attente / prise / ignorée ; renseignée individuellement ou validée en groupe pour un même créneau, y compris depuis une action rapide de notification.
+
 **Mouvement de stock** : entrée, ajustement, correction ou consommation lors d'une préparation.
 
 # Parcours principal
 
 1. Saisir les traitements à partir du référentiel réel.
 2. Constituer le stock : scanner les boîtes, ou les ajouter manuellement depuis le référentiel lorsque le DataMatrix est absent ou illisible.
-3. Recevoir chaque semaine une notification locale configurable.
-4. Lancer « Préparer mon pilulier ».
+3. Recevoir chaque semaine une notification locale configurable pour lancer la préparation, et à chaque créneau de prise une notification locale rappelant les médicaments à prendre.
+4. Lancer « Préparer mon pilulier » (une seule préparation active à la fois ; elle peut être annulée tant qu'aucun mouvement de stock n'a été enregistré).
 5. L'app calcule les besoins pour 7 jours.
 6. Pour chaque médicament : désigner la boîte utilisée, par scan ou en la choisissant dans le stock, vérifier identité/lot/péremption, afficher les cases et quantités, valider.
 7. Faire un contrôle final.
 8. Valider transactionnellement la préparation et décrémenter les bons lots.
-9. Conserver l'historique.
+9. Marquer chaque prise comme faite ou ignorée au fil de la semaine, individuellement ou en groupe pour un même créneau.
+10. Conserver l'historique des préparations et des prises.
+
+# Suivi et alertes
+
+- Alertes de stock insuffisant (en dessous du besoin de la semaine ou d'une marge basse) et de péremption proche, calculées à partir des traitements actifs et du stock réel.
+- Liste des médicaments à renouveler, classée par urgence (rupture avant la prochaine préparation, rupture proche, stock bas) à partir de la prévision de consommation.
+- Sauvegarde et restauration locales de la base (export/import de fichier), avec conservation volontaire d'une copie de sécurité avant toute restauration.
 
 # Règles critiques
 
@@ -49,6 +58,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 - Ne pas automatiser la substitution générique sans règle explicitement validée.
 - Si plusieurs lots conviennent, recommander FEFO mais permettre une autre boîte valide après avertissement.
 - La validation finale est atomique et impossible deux fois.
+- Une seule préparation peut être en cours à la fois ; son annulation ne modifie ni le stock ni l'historique et est refusée dès qu'un mouvement de stock existe pour elle.
 - Une préparation conserve un snapshot : modifier ensuite un traitement ne modifie jamais l'historique.
 - Les fractions doivent être calculées sans approximation métier silencieuse.
 - Les données RAW du DataMatrix restent disponibles pour diagnostic lorsque nécessaire.
@@ -61,7 +71,7 @@ Conseils médicaux, interactions, diagnostic, lecture automatique d'ordonnance, 
 
 # Definition of Done MVP
 
-Je peux saisir mes traitements, ajouter mes boîtes par scan ou manuellement, suivre lots/péremptions/stocks, recevoir mon rappel hebdomadaire, préparer réellement un pilulier de 7 jours avec vérification des boîtes, valider la préparation et retrouver les lots utilisés dans l'historique, sans connexion à un serveur.
+Je peux saisir mes traitements, ajouter mes boîtes par scan ou manuellement, suivre lots/péremptions/stocks avec alertes et liste de renouvellement, recevoir mon rappel hebdomadaire et mes rappels de prise, préparer réellement un pilulier de 7 jours avec vérification des boîtes, valider la préparation, marquer mes prises, retrouver les lots utilisés dans l'historique, et sauvegarder/restaurer mes données localement, sans connexion à un serveur.
 
 # Confidentialité locale et durcissement Android
 
