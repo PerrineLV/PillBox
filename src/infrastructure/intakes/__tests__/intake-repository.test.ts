@@ -276,7 +276,10 @@ describe('suivi local des prises', () => {
           dosage: [{ slot: 'morning', quantityHalfUnits: 4 }],
         },
       ],
-      asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
+      asNeededInfo: {
+        maxQuantityPerDayHalfUnits: null,
+        minIntervalHours: null,
+      },
     });
     expect(await getTreatmentRemovalAction(database, 1)).toBe('ARCHIVE');
     await archiveTreatment(database, 1);

@@ -130,7 +130,9 @@ function assertValidAsNeededInfo(info: AsNeededInfo): void {
     info.minIntervalHours !== null &&
     (!Number.isSafeInteger(info.minIntervalHours) || info.minIntervalHours <= 0)
   )
-    throw new Error('L’intervalle minimal doit être un nombre d’heures positif.');
+    throw new Error(
+      'L’intervalle minimal doit être un nombre d’heures positif.',
+    );
 }
 
 export function assertValidTreatmentPhases(

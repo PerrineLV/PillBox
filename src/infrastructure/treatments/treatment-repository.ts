@@ -332,7 +332,9 @@ async function hydrateTreatments(
   }
   return rows.map((row) => {
     if (!isTreatmentDosageKind(row.dosage_kind))
-      throw new Error('La base locale contient un type de traitement invalide.');
+      throw new Error(
+        'La base locale contient un type de traitement invalide.',
+      );
     return {
       id: row.id,
       specialtyCis: row.specialty_cis,

@@ -114,7 +114,10 @@ describe('traitements « si besoin »', () => {
   it('rejette un traitement si besoin inclus dans le pilulier', async () => {
     const { database } = await setup();
     await expect(
-      createTreatment(database, { ...AS_NEEDED_DRAFT, includedInPillbox: true }),
+      createTreatment(database, {
+        ...AS_NEEDED_DRAFT,
+        includedInPillbox: true,
+      }),
     ).rejects.toThrow('inclus dans le pilulier');
   });
 

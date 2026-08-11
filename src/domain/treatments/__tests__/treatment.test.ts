@@ -58,18 +58,18 @@ describe('traitement « si besoin »', () => {
     ).toThrow('inclus dans le pilulier');
   });
 
-  it.each([0, -1, 1.5])(
-    'refuse une limite maximale invalide (%s)',
-    (value) => {
-      expect(() =>
-        assertValidAsNeededTreatment({
-          phases: [],
-          includedInPillbox: false,
-          asNeededInfo: { maxQuantityPerDayHalfUnits: value, minIntervalHours: null },
-        }),
-      ).toThrow('limite maximale');
-    },
-  );
+  it.each([0, -1, 1.5])('refuse une limite maximale invalide (%s)', (value) => {
+    expect(() =>
+      assertValidAsNeededTreatment({
+        phases: [],
+        includedInPillbox: false,
+        asNeededInfo: {
+          maxQuantityPerDayHalfUnits: value,
+          minIntervalHours: null,
+        },
+      }),
+    ).toThrow('limite maximale');
+  });
 
   it.each([0, -1, 2.5])(
     'refuse un intervalle minimal invalide (%s)',
@@ -78,7 +78,10 @@ describe('traitement « si besoin »', () => {
         assertValidAsNeededTreatment({
           phases: [],
           includedInPillbox: false,
-          asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: value },
+          asNeededInfo: {
+            maxQuantityPerDayHalfUnits: null,
+            minIntervalHours: value,
+          },
         }),
       ).toThrow('intervalle minimal');
     },

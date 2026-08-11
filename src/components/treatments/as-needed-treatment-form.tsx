@@ -82,9 +82,9 @@ export function AsNeededTreatmentForm({
         onChangeText={setMinIntervalText}
       />
       <Message tone="info">
-        Ces informations sont uniquement affichées à titre indicatif. PillBox
-        ne calcule jamais quand vous pouvez reprendre ce médicament et ne
-        déclenche aucune alerte à partir de ces valeurs.
+        Ces informations sont uniquement affichées à titre indicatif. PillBox ne
+        calcule jamais quand vous pouvez reprendre ce médicament et ne déclenche
+        aucune alerte à partir de ces valeurs.
       </Message>
       {error ? (
         <Message tone="error" title="Traitement non enregistré">
