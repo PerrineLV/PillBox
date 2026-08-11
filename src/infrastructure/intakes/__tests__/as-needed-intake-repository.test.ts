@@ -5,6 +5,7 @@ import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 import {
   getLastAsNeededIntake,
   listAsNeededIntakes,
+  listAsNeededIntakesInRange,
   recordAsNeededIntake,
 } from '../as-needed-intake-repository';
 
@@ -137,5 +138,57 @@ describe('prises ponctuelles « si besoin »', () => {
       }),
     ).rejects.toThrow('quantité');
     expect(await listAsNeededIntakes(database, treatmentId)).toEqual([]);
+  });
+});
+
+describe('prises « si besoin » sur une période, tous traitements confondus', () => {
+  it('filtre par plage de dates et par traitement, pour les statistiques', async () => {
+    const { raw, database, treatmentId } = await setup();
+    const otherTreatmentId = Number(
+      raw
+        .prepare(
+          `INSERT INTO treatments (specialty_cis, specialty_name, dosage_kind, included_in_pillbox)
+           VALUES ('60000003', 'Gamma', 'AS_NEEDED', 0)`,
+        )
+        .run().lastInsertRowid,
+    );
+    await recordAsNeededIntake(database, {
+      treatmentId,
+      takenAt: '2026-08-10T09:00:00.000Z',
+      quantityHalfUnits: 2,
+      note: null,
+    });
+    await recordAsNeededIntake(database, {
+      treatmentId,
+      takenAt: '2026-07-01T09:00:00.000Z',
+      quantityHalfUnits: 1,
+      note: null,
+    });
+    await recordAsNeededIntake(database, {
+      treatmentId: otherTreatmentId,
+      takenAt: '2026-08-11T09:00:00.000Z',
+      quantityHalfUnits: 1,
+      note: null,
+    });
+
+    const inAugust = await listAsNeededIntakesInRange(database, {
+      startAt: '2026-08-01T00:00:00.000Z',
+      endAt: '2026-08-31T23:59:59.999Z',
+      treatmentId: null,
+    });
+    expect(inAugust.map((item) => item.takenAt)).toEqual([
+      '2026-08-11T09:00:00.000Z',
+      '2026-08-10T09:00:00.000Z',
+    ]);
+
+    const onlyFirstTreatment = await listAsNeededIntakesInRange(database, {
+      startAt: null,
+      endAt: '2026-12-31T23:59:59.999Z',
+      treatmentId,
+    });
+    expect(onlyFirstTreatment.map((item) => item.takenAt)).toEqual([
+      '2026-08-10T09:00:00.000Z',
+      '2026-07-01T09:00:00.000Z',
+    ]);
   });
 });

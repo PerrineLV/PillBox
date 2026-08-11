@@ -13,8 +13,12 @@ import {
 } from '@/ui';
 
 type MenuRoute =
-  '/preparations/history' | '/intakes/history' | '/history' | '/settings';
-type IconName = 'calendar' | 'check' | 'timeline' | 'settings';
+  | '/preparations/history'
+  | '/intakes/history'
+  | '/history'
+  | '/statistics'
+  | '/settings';
+type IconName = 'calendar' | 'check' | 'timeline' | 'chart' | 'settings';
 
 const ITEMS: readonly {
   href: MenuRoute;
@@ -39,6 +43,12 @@ const ITEMS: readonly {
     icon: 'timeline',
     title: 'Chronologie',
     detail: 'Histoire complète d’un traitement',
+  },
+  {
+    href: '/statistics',
+    icon: 'chart',
+    title: 'Statistiques',
+    detail: 'Résumé descriptif par semaine ou mois',
   },
   {
     href: '/settings',
@@ -144,6 +154,14 @@ function LineIcon({ kind }: { kind: IconName }) {
         <View style={styles.calendarTop} />
         <View style={[styles.calendarRing, styles.calendarRingLeft]} />
         <View style={[styles.calendarRing, styles.calendarRingRight]} />
+      </View>
+    );
+  if (kind === 'chart')
+    return (
+      <View style={styles.chartIcon}>
+        <View style={[styles.chartBar, styles.chartBarShort]} />
+        <View style={[styles.chartBar, styles.chartBarTall]} />
+        <View style={[styles.chartBar, styles.chartBarMedium]} />
       </View>
     );
   if (kind === 'settings')
@@ -295,6 +313,21 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '-48deg' }],
     width: 10,
   },
+  chartIcon: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 3,
+    height: 22,
+    width: 24,
+  },
+  chartBar: {
+    backgroundColor: colors.brand,
+    borderRadius: 2,
+    width: 5,
+  },
+  chartBarShort: { height: 10 },
+  chartBarTall: { height: 22 },
+  chartBarMedium: { height: 16 },
   settingsIcon: { height: 22, position: 'relative', width: 24 },
   settingLine: {
     backgroundColor: colors.brand,

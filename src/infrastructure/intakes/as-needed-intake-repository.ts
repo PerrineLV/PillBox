@@ -53,6 +53,41 @@ export async function listAsNeededIntakes(
   return rows.map(hydrateAsNeededIntake);
 }
 
+export type AsNeededIntakeRangeFilters = Readonly<{
+  startAt: string | null;
+  endAt: string;
+  treatmentId: number | null;
+}>;
+
+/**
+ * Prises « si besoin » de tous les traitements sur une période, utilisées par
+ * les statistiques descriptives (ticket 20). `startAt`/`endAt` sont des
+ * horodatages ISO comparés tels quels : `taken_at` est déjà stocké au format
+ * ISO, la comparaison lexicographique correspond donc à l'ordre chronologique.
+ */
+export async function listAsNeededIntakesInRange(
+  database: SQLiteDatabase,
+  filters: AsNeededIntakeRangeFilters,
+): Promise<AsNeededIntakeRecord[]> {
+  const conditions = ['taken_at <= ?'];
+  const parameters: (string | number)[] = [filters.endAt];
+  if (filters.startAt !== null) {
+    conditions.push('taken_at >= ?');
+    parameters.push(filters.startAt);
+  }
+  if (filters.treatmentId !== null) {
+    conditions.push('treatment_id = ?');
+    parameters.push(filters.treatmentId);
+  }
+  const rows = await database.getAllAsync<AsNeededIntakeRow>(
+    `SELECT id, treatment_id, taken_at, quantity_half_units, note, created_at
+     FROM as_needed_intake_records WHERE ${conditions.join(' AND ')}
+     ORDER BY taken_at DESC, id DESC`,
+    ...parameters,
+  );
+  return rows.map(hydrateAsNeededIntake);
+}
+
 export async function getLastAsNeededIntake(
   database: SQLiteDatabase,
   treatmentId: number,
