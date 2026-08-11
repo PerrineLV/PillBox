@@ -20,10 +20,12 @@ describe('confidentialité des notifications', () => {
   });
 
   it('n’expose rien de sensible dans les libellés des actions rapides', () => {
-    const titles = INTAKE_ACTION_CATEGORIES.map(
-      (category) => category.buttonTitle,
+    const titles = INTAKE_ACTION_CATEGORIES.flatMap((category) =>
+      category.buttons.map((button) => button.buttonTitle),
     );
-    expect(titles).toEqual(['Valider', 'Tout valider']);
+    expect(new Set(titles)).toEqual(
+      new Set(['Valider', 'Tout valider', 'Ouvrir PillBox']),
+    );
     for (const title of titles) expect(title).not.toMatch(SENSITIVE);
   });
 });

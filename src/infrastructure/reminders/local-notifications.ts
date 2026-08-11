@@ -5,7 +5,7 @@ import {
   INTAKE_ACTION_CATEGORIES,
   intakeActionCategory,
   notificationCommand,
-  VALIDATE_INTAKES_ACTION,
+  OPEN_APP_ACTION,
   type NotificationCommand,
 } from '@/domain/reminders/notification-actions';
 import {
@@ -89,13 +89,22 @@ export function notificationTargetOf(
 }
 
 /**
- * Vrai lorsque la notification a été touchée normalement, et non via un bouton
- * d’action : seul cet appui ouvre l’application.
+ * Manière dont une réponse demande l’ouverture de PillBox, ou `null` lorsqu’elle
+ * ne la demande pas — le bouton de validation, notamment, agit sans ouvrir quoi
+ * que ce soit.
+ *
+ * La distinction compte pour la suite : Android retire lui-même la notification
+ * touchée en son corps (`autoDismiss`), mais laisse affichée celle dont on
+ * presse un bouton.
  */
-export function isDefaultNotificationTap(
+export type NotificationOpening = 'tap' | 'action-button';
+
+export function notificationOpening(
   response: Notifications.NotificationResponse,
-): boolean {
-  return response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER;
+): NotificationOpening | null {
+  if (response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER)
+    return 'tap';
+  return response.actionIdentifier === OPEN_APP_ACTION ? 'action-button' : null;
 }
 
 /** Commande demandée par un bouton d’action, ou `null` pour toute autre réponse. */
@@ -105,6 +114,22 @@ export function notificationCommandOf(
   return notificationCommand(
     response.actionIdentifier,
     response.notification.request.content.data,
+  );
+}
+
+/**
+ * Retire du tiroir Android la notification qui a produit cette réponse.
+ *
+ * Une action rapide ne passe pas l’application au premier plan : sans ce
+ * retrait, la notification resterait affichée avec son bouton actif après une
+ * prise déjà enregistrée. L’identifiant est celui de la demande de notification,
+ * qu’Android réutilise pour la notification affichée.
+ */
+export async function dismissRespondedNotification(
+  response: Notifications.NotificationResponse,
+): Promise<void> {
+  await Notifications.dismissNotificationAsync(
+    response.notification.request.identifier,
   );
 }
 
@@ -132,31 +157,32 @@ export async function schedulePostponedIntakeReminder(
 }
 
 function intakeActionCategoryContent(pendingCount: number): {
-  categoryIdentifier?: string;
+  categoryIdentifier: string;
 } {
-  const categoryIdentifier = intakeActionCategory(pendingCount);
-  return categoryIdentifier === null ? {} : { categoryIdentifier };
+  return { categoryIdentifier: intakeActionCategory(pendingCount) };
 }
 
 /**
- * Déclare les deux catégories d’action, une par libellé possible.
+ * Déclare les catégories d’action, une par combinaison de boutons possible.
  *
- * `opensAppToForeground: false` est le cœur du comportement attendu : Android
- * délivre la réponse au code JavaScript sans passer l’application au premier
- * plan, y compris lorsqu’elle est en arrière-plan. Le périmètre est Android
- * uniquement, comme les canaux de notification.
+ * `opensAppToForeground` porte la différence entre les deux gestes : à `false`,
+ * Android délivre la réponse au code JavaScript sans passer l’application au
+ * premier plan, ce qui permet de valider une prise depuis le tiroir ; à `true`,
+ * il ouvre ou réactive PillBox, comme un appui sur le corps de la notification.
+ * Le périmètre est Android uniquement, comme les canaux de notification.
  */
 async function ensureIntakeActionCategories(): Promise<void> {
   if (Platform.OS !== 'android') return;
   await Promise.all(
     INTAKE_ACTION_CATEGORIES.map((category) =>
-      Notifications.setNotificationCategoryAsync(category.identifier, [
-        {
-          identifier: VALIDATE_INTAKES_ACTION,
-          buttonTitle: category.buttonTitle,
-          options: { opensAppToForeground: false },
-        },
-      ]),
+      Notifications.setNotificationCategoryAsync(
+        category.identifier,
+        category.buttons.map((button) => ({
+          identifier: button.identifier,
+          buttonTitle: button.buttonTitle,
+          options: { opensAppToForeground: button.opensApp },
+        })),
+      ),
     ),
   );
 }
