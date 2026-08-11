@@ -1,4 +1,5 @@
 import { AttentionItemContent } from '../attention-item-card';
+import { formatFrenchDateTime } from '@/components/treatments/civil-date';
 import type { AttentionItem } from '@/domain/home/attention-items';
 
 function render(item: AttentionItem): string {
@@ -7,10 +8,11 @@ function render(item: AttentionItem): string {
 
 describe('AttentionItemContent', () => {
   it('affiche le créneau et le nombre de médicaments de la prochaine prise', () => {
+    const scheduledAt = '2026-08-11T08:00:00.000Z';
     const rendered = render({
       type: 'NEXT_INTAKE_GROUP',
       id: 'next-intake:1',
-      scheduledAt: '2026-08-11T08:00:00.000Z',
+      scheduledAt,
       groups: [{ date: '2026-08-11', slot: 'morning' }],
       medicationCount: 2,
     });
@@ -18,7 +20,9 @@ describe('AttentionItemContent', () => {
     expect(rendered).toContain('Matin');
     expect(rendered).toContain('médicament');
     expect(rendered).toContain('prévu');
-    expect(rendered).toContain('11 août 2026 à 10:00');
+    // L'heure affichée dépend du fuseau d'exécution : on la recalcule avec la
+    // même fonction de formatage plutôt que de figer une heure locale.
+    expect(rendered).toContain(formatFrenchDateTime(scheduledAt));
   });
 
   it('propose de commencer quand la préparation est disponible', () => {
