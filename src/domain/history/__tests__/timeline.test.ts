@@ -226,6 +226,8 @@ describe('buildTimeline', () => {
           expirationDate: '2027-01-01',
           presentationLabel: 'Doliprane 500mg, 16 comprimés',
           quantityHalfUnits: 14,
+          matchedCis: null,
+          matchedSpecialtyName: null,
         },
         {
           treatmentId: 1,
@@ -238,6 +240,8 @@ describe('buildTimeline', () => {
           expirationDate: '2026-09-01',
           presentationLabel: 'Doliprane 500mg, 16 comprimés',
           quantityHalfUnits: 4,
+          matchedCis: null,
+          matchedSpecialtyName: null,
         },
       ],
     };
@@ -259,6 +263,46 @@ describe('buildTimeline', () => {
     if (first.type !== 'BOX_USED') throw new Error('type inattendu');
     expect(first.quantityHalfUnits).toBe(14);
     expect(first.expirationDate).toBe('2027-01-01');
+  });
+
+  it('affiche une équivalence générique confirmée sans la reformuler', () => {
+    const source: TimelineSource = {
+      ...EMPTY_SOURCE,
+      treatments: [
+        {
+          id: 1,
+          specialtyName: 'Zoloft',
+          createdAt: '2026-01-01 08:00:00',
+          phases: [],
+        },
+      ],
+      preparations: [
+        {
+          treatmentId: 1,
+          preparationId: 5,
+          startDate: '2026-08-10',
+          endDate: '2026-08-16',
+          completedAt: '2026-08-16 18:00:00',
+          boxId: 42,
+          lot: 'LOT-SERTRALINE',
+          expirationDate: '2027-01-01',
+          presentationLabel: 'Sertraline 50mg, 28 comprimés',
+          quantityHalfUnits: 14,
+          matchedCis: '60000002',
+          matchedSpecialtyName: 'Sertraline',
+        },
+      ],
+    };
+
+    const events = buildTimeline(source);
+    const boxEvent = events.find((event) => event.type === 'BOX_USED');
+    if (!boxEvent || boxEvent.type !== 'BOX_USED')
+      throw new Error('événement BOX_USED attendu');
+    expect(boxEvent.matchedCis).toBe('60000002');
+    expect(boxEvent.matchedSpecialtyName).toBe('Sertraline');
+    // Le traitement reste celui prescrit à l'origine : la timeline ne
+    // renomme jamais l'événement au nom du médicament réellement utilisé.
+    expect(boxEvent.specialtyName).toBe('Zoloft');
   });
 
   it('exclut une prise jamais renseignée, distincte de « ignorée »', () => {

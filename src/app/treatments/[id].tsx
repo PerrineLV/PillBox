@@ -6,6 +6,7 @@ import { ScrollView, StyleSheet } from 'react-native';
 import { GenericGroupSectionWithDatabase } from '@/components/medications/generic-group-section';
 import { AsNeededIntakeLog } from '@/components/treatments/as-needed-intake-log';
 import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
+import { GenericEquivalenceList } from '@/components/treatments/generic-equivalence-list';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
 import { TreatmentDeletionConfirmation } from '@/components/treatments/delete-confirmation';
 import type { Treatment } from '@/domain/treatments/treatment';
@@ -18,6 +19,11 @@ import {
   type TreatmentRemovalAction,
   updateTreatment,
 } from '@/infrastructure/treatments/treatment-repository';
+import {
+  forgetGenericEquivalence,
+  listGenericEquivalenceConfirmations,
+  type GenericEquivalenceConfirmation,
+} from '@/infrastructure/treatments/generic-equivalence-repository';
 import {
   synchronizeIntakeReminders,
   synchronizeTreatmentIntakeReminders,
@@ -32,6 +38,9 @@ export default function EditTreatmentScreen() {
   const [error, setError] = useState<string | null>(null);
   const [removalAction, setRemovalAction] =
     useState<TreatmentRemovalAction | null>(null);
+  const [genericEquivalences, setGenericEquivalences] = useState<
+    GenericEquivalenceConfirmation[]
+  >([]);
   const [processing, setProcessing] = useState(false);
   const [deleteConfirmationVisible, setDeleteConfirmationVisible] =
     useState(false);
@@ -45,12 +54,14 @@ export default function EditTreatmentScreen() {
     Promise.all([
       getTreatment(database, numericId),
       getTreatmentRemovalAction(database, numericId),
+      listGenericEquivalenceConfirmations(database, numericId),
     ])
-      .then(([value, action]) => {
+      .then(([value, action, equivalences]) => {
         if (value === null) setError('Traitement introuvable.');
         else {
           setTreatment(value);
           setRemovalAction(action);
+          setGenericEquivalences(equivalences);
         }
       })
       .catch((reason: unknown) =>
@@ -59,6 +70,17 @@ export default function EditTreatmentScreen() {
         ),
       );
   }, [database, numericId]);
+
+  async function forgetEquivalence(cis: string): Promise<void> {
+    try {
+      await forgetGenericEquivalence(database, numericId, cis);
+      setGenericEquivalences((previous) =>
+        previous.filter((item) => item.cis !== cis),
+      );
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Oubli impossible.');
+    }
+  }
 
   async function runAction(action: () => Promise<void>, notice: string) {
     setProcessing(true);
@@ -125,6 +147,10 @@ export default function EditTreatmentScreen() {
       {treatment ? (
         <GenericGroupSectionWithDatabase cis={treatment.specialtyCis} />
       ) : null}
+      <GenericEquivalenceList
+        confirmations={genericEquivalences}
+        onForget={(cis) => void forgetEquivalence(cis)}
+      />
       {treatment ? (
         <AppButton
           label="Voir la chronologie"

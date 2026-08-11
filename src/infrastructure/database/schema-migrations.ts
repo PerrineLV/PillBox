@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 22;
+export const LATEST_SCHEMA_VERSION = 23;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -679,6 +679,38 @@ export const SCHEMA_MIGRATIONS = [
 
         INSERT INTO treatment_lifecycle_events (treatment_id, event_type, occurred_at)
         SELECT id, 'ARCHIVED', archived_at FROM treatments WHERE archived_at IS NOT NULL;
+      `);
+    },
+  },
+  {
+    version: 23,
+    name: 'équivalence générique confirmée lors de la vérification d’une boîte',
+    async up(transaction) {
+      // Mémorisation par couple (traitement, CIS précis) : une fois confirmée,
+      // une correspondance générique n'est plus redemandée pour ce couple. Le
+      // libellé du groupe et le nom de la spécialité sont dupliqués ici (comme
+      // déjà pour medication_boxes.specialty_name) pour ne pas dépendre d'une
+      // seconde connexion vers le référentiel BDPM en dehors du moment de la
+      // vérification. Aucune ligne existante n'est retouchée : cette table
+      // démarre vide, il n'y a pas d'équivalence passée à reconstituer.
+      // Les nouvelles colonnes matched_cis/matched_specialty_name restent NULL
+      // pour toute ligne déjà enregistrée, ce qui décrit exactement l'existant
+      // : jusqu'ici, une boîte retenue avait toujours le CIS strictement
+      // attendu, jamais un équivalent générique.
+      await transaction.execute(`
+        CREATE TABLE generic_equivalence_confirmations (
+          treatment_id INTEGER NOT NULL REFERENCES treatments(id) ON DELETE CASCADE,
+          cis TEXT NOT NULL CHECK (length(cis) = 8),
+          specialty_name TEXT NOT NULL,
+          group_label TEXT NOT NULL,
+          confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (treatment_id, cis)
+        );
+
+        ALTER TABLE preparation_progress ADD COLUMN matched_cis TEXT;
+        ALTER TABLE preparation_progress ADD COLUMN matched_specialty_name TEXT;
+        ALTER TABLE preparation_box_usages ADD COLUMN matched_cis TEXT;
+        ALTER TABLE preparation_box_usages ADD COLUMN matched_specialty_name TEXT;
       `);
     },
   },

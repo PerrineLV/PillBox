@@ -62,13 +62,14 @@ describe('initialisation de la connexion locale', () => {
     rmSync(directory, { force: true, recursive: true });
   });
 
-  it('active le mode WAL et un délai d’attente avant de migrer', async () => {
+  it('active le mode WAL, les clés étrangères et un délai d’attente avant de migrer', async () => {
     await initializeSQLiteDatabase(adapter(raw));
 
     expect(raw.pragma('journal_mode', { simple: true })).toBe('wal');
     expect(raw.pragma('busy_timeout', { simple: true })).toBe(
       SQLITE_BUSY_TIMEOUT_MS,
     );
+    expect(raw.pragma('foreign_keys', { simple: true })).toBe(1);
   });
 
   it('applique bien les migrations jusqu’à la dernière version', async () => {
@@ -79,5 +80,35 @@ describe('initialisation de la connexion locale', () => {
         .prepare('SELECT MAX(version) AS version FROM schema_migrations')
         .get(),
     ).toEqual({ version: LATEST_SCHEMA_VERSION });
+  });
+
+  it("supprime en cascade les données d'un traitement, sans qu'aucun appel manuel ne soit nécessaire", async () => {
+    await initializeSQLiteDatabase(adapter(raw));
+
+    const treatment = raw
+      .prepare(
+        `INSERT INTO treatments (specialty_cis, specialty_name) VALUES ('60000001', 'Doliprane')`,
+      )
+      .run();
+    const treatmentId = treatment.lastInsertRowid;
+    raw
+      .prepare(
+        `INSERT INTO treatment_phases (treatment_id, position, start_date, frequency_type)
+         VALUES (?, 0, '2026-08-01', 'daily')`,
+      )
+      .run(treatmentId);
+    raw
+      .prepare(
+        `INSERT INTO treatment_lifecycle_events (treatment_id, event_type)
+         VALUES (?, 'DOSAGE_MODIFIED')`,
+      )
+      .run(treatmentId);
+
+    raw.prepare('DELETE FROM treatments WHERE id = ?').run(treatmentId);
+
+    expect(raw.prepare('SELECT * FROM treatment_phases').all()).toEqual([]);
+    expect(
+      raw.prepare('SELECT * FROM treatment_lifecycle_events').all(),
+    ).toEqual([]);
   });
 });

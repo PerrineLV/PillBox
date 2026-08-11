@@ -243,7 +243,11 @@ function describeEvent(event: TimelineEvent): {
     case 'BOX_USED':
       return {
         title: `Boîte utilisée · lot ${event.lot ?? 'non renseigné'}`,
-        detail: `${event.presentationLabel} · ${formatHalfUnits(event.quantityHalfUnits)} unité(s) · péremption ${formatLongFrenchCivilDate(event.expirationDate)}`,
+        detail:
+          `${event.presentationLabel} · ${formatHalfUnits(event.quantityHalfUnits)} unité(s) · péremption ${formatLongFrenchCivilDate(event.expirationDate)}` +
+          (event.matchedSpecialtyName
+            ? ` · équivalence générique confirmée : ${event.matchedSpecialtyName}`
+            : ''),
         tone: 'success',
       };
     case 'STOCK_MOVEMENT':

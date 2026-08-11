@@ -142,6 +142,8 @@ async function buildFullHistory(
     verification: 'MANUAL',
     scanRaw: null,
     nonFefoAcknowledged: false,
+    matchedCis: null,
+    matchedSpecialtyName: null,
   });
   await completePreparation(database, preparationId, '2026-08-16');
 

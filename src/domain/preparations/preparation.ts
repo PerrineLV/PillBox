@@ -217,15 +217,23 @@ const BOX_AVAILABILITY_RANK: Record<BoxAvailability, number> = {
  * quantité : les boîtes suffisantes et non périmées d'abord (FEFO), puis les
  * boîtes insuffisantes seules, puis les boîtes périmées en dernier, sans
  * jamais être masquées.
+ *
+ * `additionalAcceptedCis` liste les CIS d'autres membres du même groupe
+ * générique officiel déjà reconnus pour ce traitement (voir
+ * `verifyPreparationBox`) : leurs boîtes apparaissent dans la même liste,
+ * afin qu'une sélection manuelle bénéficie de la même correspondance qu'un
+ * scan.
  */
 export function listBoxesForMedication(
   specialtyCis: string,
   requiredHalfUnits: number,
   boxes: readonly MedicationBox[],
   referenceDate: string,
+  additionalAcceptedCis: readonly string[] = [],
 ): readonly MedicationBox[] {
+  const acceptedCis = new Set([specialtyCis, ...additionalAcceptedCis]);
   return boxes
-    .filter((box) => box.specialtyCis === specialtyCis)
+    .filter((box) => acceptedCis.has(box.specialtyCis))
     .sort((left, right) => {
       const leftRank =
         BOX_AVAILABILITY_RANK[
@@ -250,6 +258,15 @@ export function listBoxesForMedication(
  * médicament dans cette préparation : une boîte insuffisante seule n'est donc
  * plus bloquée, elle est acceptée comme contribution partielle tant qu'elle
  * n'est pas vide.
+ *
+ * `acceptedGenericCis` : CIS d'un autre membre du même groupe générique
+ * officiel (BDPM), déjà reconnu comme équivalent pour ce traitement — soit
+ * parce que l'utilisatrice vient de confirmer explicitement cette
+ * correspondance, soit parce qu'elle l'avait déjà confirmée et mémorisée
+ * auparavant. Cette fonction ne décide jamais seule qu'un CIS différent est
+ * acceptable : c'est à l'appelant de résoudre cette correspondance (relation
+ * officielle du groupe générique + confirmation explicite) avant d'appeler
+ * cette fonction avec ce paramètre renseigné.
  */
 export function verifyPreparationBox(
   specialtyCis: string,
@@ -257,11 +274,16 @@ export function verifyPreparationBox(
   scannedBox: MedicationBox,
   availableBoxes: readonly MedicationBox[],
   referenceDate: string,
+  acceptedGenericCis: string | null = null,
 ): BoxVerification {
   if (isExpired(scannedBox.expirationDate, referenceDate)) {
     return { status: 'EXPIRED', box: scannedBox };
   }
-  if (scannedBox.specialtyCis !== specialtyCis) {
+  const isAcceptedMedication =
+    scannedBox.specialtyCis === specialtyCis ||
+    (acceptedGenericCis !== null &&
+      scannedBox.specialtyCis === acceptedGenericCis);
+  if (!isAcceptedMedication) {
     return { status: 'WRONG_MEDICATION', box: scannedBox };
   }
   const usableHalfUnits = scannedBox.remainingQuantity * 2;
@@ -276,10 +298,13 @@ export function verifyPreparationBox(
       remainingAfterHalfUnits: remainingHalfUnits - usableHalfUnits,
     };
   }
+  // Le lot recommandé (FEFO) ne mélange jamais deux produits différents même
+  // pharmacologiquement équivalents : il porte uniquement sur les boîtes du
+  // même CIS que celle en cours de vérification.
   const eligible = availableBoxes
     .filter(
       (box) =>
-        box.specialtyCis === specialtyCis &&
+        box.specialtyCis === scannedBox.specialtyCis &&
         !isExpired(box.expirationDate, referenceDate) &&
         box.remainingQuantity * 2 >= remainingHalfUnits,
     )

@@ -59,11 +59,16 @@ export async function getTreatmentRemovalAction(
   database: SQLiteDatabase,
   treatmentId: number,
 ): Promise<TreatmentRemovalAction> {
+  // Une ligne `UNSET` dans intake_records n'est qu'un aide-mémoire de
+  // planification matérialisé par la synchronisation des rappels (jusqu'à
+  // 30 jours à l'avance) : elle ne prouve aucune prise réelle et ne doit pas
+  // empêcher la suppression d'un traitement jamais réellement pris ni
+  // ignoré. Seules les lignes TAKEN/SKIPPED comptent comme un usage réel.
   const row = await database.getFirstAsync<{ used: number }>(
     `SELECT EXISTS(
        SELECT 1 FROM preparation_items WHERE source_treatment_id = ?
        UNION ALL
-       SELECT 1 FROM intake_records WHERE source_treatment_id = ?
+       SELECT 1 FROM intake_records WHERE source_treatment_id = ? AND status <> 'UNSET'
        UNION ALL
        SELECT 1 FROM as_needed_intake_records WHERE treatment_id = ?
      ) AS used`,
@@ -85,6 +90,15 @@ export async function deleteUnusedTreatment(
       throw new Error(
         'Ce traitement a déjà été utilisé et ne peut pas être supprimé définitivement.',
       );
+    // intake_records n'a pas de clé étrangère vers treatments (une prise
+    // réelle doit survivre à la suppression de son traitement, comme
+    // preparation_items) : les lignes UNSET restantes, simples aide-mémoire
+    // de planification jamais transformés en prise réelle, sont donc
+    // supprimées explicitement pour ne rien laisser d'orphelin.
+    await transaction.runAsync(
+      `DELETE FROM intake_records WHERE source_treatment_id = ? AND status = 'UNSET'`,
+      treatmentId,
+    );
     const result = await transaction.runAsync(
       'DELETE FROM treatments WHERE id = ?',
       treatmentId,

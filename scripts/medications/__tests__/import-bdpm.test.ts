@@ -279,7 +279,7 @@ function genericGroupRow(
   type: string,
   sortNumber: string,
 ): string {
-  return [groupId, groupLabel, cis, type, sortNumber, ''].join('\t');
+  return [groupId, groupLabel, cis, type, sortNumber].join('\t');
 }
 
 function importOptions(paths: {

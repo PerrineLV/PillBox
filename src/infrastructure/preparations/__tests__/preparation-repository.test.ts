@@ -430,6 +430,116 @@ describe('validation transactionnelle d’une préparation', () => {
     raw.close();
   });
 
+  it('accepte une correspondance générique confirmée et la trace jusqu’à l’historique', async () => {
+    const { raw, database } = await createDatabase();
+    const preparationId = Number(
+      raw
+        .prepare(
+          `INSERT INTO preparations (start_date, end_date) VALUES ('2026-08-10', '2026-08-16')`,
+        )
+        .run().lastInsertRowid,
+    );
+    raw
+      .prepare(
+        `INSERT INTO preparation_requirements VALUES (?, '60000001', 'Zoloft', 7, 20, 0)`,
+      )
+      .run(preparationId);
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000002',
+      lot: 'SERTRALINE-1',
+    });
+    raw
+      .prepare(
+        `INSERT INTO preparation_progress
+         (preparation_id, specialty_cis, box_id, quantity_half_units,
+          verification, scan_raw, matched_cis, matched_specialty_name)
+         VALUES (?, '60000001', ?, 7, 'SCAN', 'scan', '60000002', 'Sertraline')`,
+      )
+      .run(preparationId, boxId);
+
+    await completePreparation(database, preparationId, '2026-08-09');
+
+    const history = await listPreparationHistory(database);
+    expect(history[0].medications[0]).toMatchObject({
+      specialtyCis: '60000001',
+      specialtyName: 'Zoloft',
+      matchedCis: '60000002',
+      matchedSpecialtyName: 'Sertraline',
+    });
+    raw.close();
+  });
+
+  it('refuse la validation si la boîte ne correspond ni au CIS attendu ni au CIS confirmé', async () => {
+    const { raw, database } = await createDatabase();
+    const preparationId = Number(
+      raw
+        .prepare(
+          `INSERT INTO preparations (start_date, end_date) VALUES ('2026-08-10', '2026-08-16')`,
+        )
+        .run().lastInsertRowid,
+    );
+    raw
+      .prepare(
+        `INSERT INTO preparation_requirements VALUES (?, '60000001', 'Zoloft', 7, 20, 0)`,
+      )
+      .run(preparationId);
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000002',
+      lot: 'SERTRALINE-1',
+    });
+    // matched_cis pointe vers un troisième CIS, différent de celui de la boîte
+    // réellement liée : incohérence détectée à la validation.
+    raw
+      .prepare(
+        `INSERT INTO preparation_progress
+         (preparation_id, specialty_cis, box_id, quantity_half_units,
+          verification, scan_raw, matched_cis, matched_specialty_name)
+         VALUES (?, '60000001', ?, 7, 'SCAN', 'scan', '60000003', 'Autre générique')`,
+      )
+      .run(preparationId, boxId);
+
+    await expect(
+      completePreparation(database, preparationId, '2026-08-09'),
+    ).rejects.toThrow('ne correspond plus au médicament attendu');
+    raw.close();
+  });
+
+  it('refuse de sauvegarder une correspondance générique identique au CIS attendu', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+    await expect(
+      savePreparationProgress(database, id, {
+        specialtyCis: '60000001',
+        boxId: 1,
+        quantityHalfUnits: 7,
+        verification: 'SCAN',
+        scanRaw: 'scan',
+        nonFefoAcknowledged: false,
+        matchedCis: '60000001',
+        matchedSpecialtyName: 'Médicament 1',
+      }),
+    ).rejects.toThrow('correspondance exacte');
+    raw.close();
+  });
+
+  it('refuse une correspondance générique incomplète (CIS sans nom ou l’inverse)', async () => {
+    const { raw, database } = await createDatabase();
+    const id = seedPreparation(raw);
+    await expect(
+      savePreparationProgress(database, id, {
+        specialtyCis: '60000001',
+        boxId: 1,
+        quantityHalfUnits: 7,
+        verification: 'SCAN',
+        scanRaw: 'scan',
+        nonFefoAcknowledged: false,
+        matchedCis: '60000002',
+        matchedSpecialtyName: null,
+      }),
+    ).rejects.toThrow('ensemble');
+    raw.close();
+  });
+
   it('refuse d’enregistrer une vérification par scan sans chaîne brute', async () => {
     const { raw, database } = await createDatabase();
     const id = seedPreparation(raw);
@@ -442,6 +552,8 @@ describe('validation transactionnelle d’une préparation', () => {
         verification: 'SCAN',
         scanRaw: null,
         nonFefoAcknowledged: false,
+        matchedCis: null,
+        matchedSpecialtyName: null,
       }),
     ).rejects.toThrow('brute');
     raw.close();
@@ -458,6 +570,8 @@ describe('validation transactionnelle d’une préparation', () => {
       verification: 'MANUAL',
       scanRaw: null,
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
 
     const saved = await getLatestDraftPreparation(database);
@@ -531,6 +645,8 @@ describe('reprise d’une préparation après fermeture de l’application', () 
       verification: 'SCAN',
       scanRaw: 'raw',
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
 
     // Simule une fermeture puis réouverture de l’app : tout est relu depuis
@@ -568,6 +684,8 @@ describe('reprise d’une préparation après fermeture de l’application', () 
       verification: 'SCAN',
       scanRaw: 'raw',
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
     await savePreparationProgress(database, id, {
       specialtyCis: '60000002',
@@ -576,6 +694,8 @@ describe('reprise d’une préparation après fermeture de l’application', () 
       verification: 'MANUAL',
       scanRaw: null,
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
 
     const reopened = await getLatestDraftPreparation(database);
@@ -615,6 +735,8 @@ describe('fin d’une boîte et relais par une seconde pour un même médicament
       verification: 'SCAN',
       scanRaw: 'raw-1',
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
     await savePreparationProgress(database, id, {
       specialtyCis: '60000001',
@@ -623,6 +745,8 @@ describe('fin d’une boîte et relais par une seconde pour un même médicament
       verification: 'SCAN',
       scanRaw: 'raw-2',
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
     await savePreparationProgress(database, id, {
       specialtyCis: '60000002',
@@ -631,6 +755,8 @@ describe('fin d’une boîte et relais par une seconde pour un même médicament
       verification: 'SCAN',
       scanRaw: 'raw-3',
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
 
     // Reprise après fermeture : les deux contributions du même médicament
@@ -703,6 +829,8 @@ describe('fin d’une boîte et relais par une seconde pour un même médicament
       verification: 'SCAN',
       scanRaw: 'raw-1',
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
     await savePreparationProgress(database, id, {
       specialtyCis: '60000002',
@@ -711,6 +839,8 @@ describe('fin d’une boîte et relais par une seconde pour un même médicament
       verification: 'SCAN',
       scanRaw: 'raw-2',
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
 
     await expect(
@@ -745,6 +875,8 @@ describe('plusieurs préparations se succèdent sans interférence', () => {
       verification: 'SCAN',
       scanRaw: 'raw-semaine-2',
       nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
     });
     await completePreparation(database, secondId, '2026-08-16');
 

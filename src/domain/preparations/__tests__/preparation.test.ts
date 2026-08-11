@@ -402,6 +402,83 @@ describe('vérification des boîtes pendant la préparation', () => {
     ).toBe('SUFFICIENT');
   });
 
+  it('refuse un CIS différent hors groupe générique même avec un acceptedGenericCis renseigné pour un autre CIS', () => {
+    expect(
+      verifyPreparationBox(
+        '60000001',
+        14,
+        box({ specialtyCis: 'AUTRE' }),
+        [box()],
+        '2026-08-03',
+        'GENERIQUE_ATTENDU',
+      ).status,
+    ).toBe('WRONG_MEDICATION');
+  });
+
+  it('accepte un CIS différent explicitement reconnu comme équivalent générique', () => {
+    const generic = box({ specialtyCis: 'GENERIQUE', remainingQuantity: 20 });
+    const result = verifyPreparationBox(
+      '60000001',
+      14,
+      generic,
+      [generic],
+      '2026-08-03',
+      'GENERIQUE',
+    );
+    expect(result).toMatchObject({ status: 'VALID', quantityHalfUnits: 14 });
+  });
+
+  it('recommande le lot FEFO parmi les boîtes du même CIS que celle acceptée, sans les mélanger à celles du CIS attendu', () => {
+    const expectedSoonest = box({
+      id: 1,
+      specialtyCis: '60000001',
+      expirationDate: '2026-08-10',
+    });
+    const genericLater = box({
+      id: 2,
+      specialtyCis: 'GENERIQUE',
+      expirationDate: '2027-01-01',
+      remainingQuantity: 20,
+    });
+    const result = verifyPreparationBox(
+      '60000001',
+      14,
+      genericLater,
+      [expectedSoonest, genericLater],
+      '2026-08-03',
+      'GENERIQUE',
+    );
+    expect(result).toMatchObject({
+      status: 'VALID',
+      isFefo: true,
+      recommendedBox: genericLater,
+    });
+  });
+
+  it('élargit la liste des boîtes du stock aux CIS génériques déjà reconnus', () => {
+    const expected = box({ id: 1, specialtyCis: '60000001' });
+    const genericMember = box({ id: 2, specialtyCis: 'GENERIQUE' });
+    const unrelated = box({ id: 3, specialtyCis: 'SANS_RAPPORT' });
+    expect(
+      listBoxesForMedication(
+        '60000001',
+        14,
+        [expected, genericMember, unrelated],
+        '2026-08-03',
+        ['GENERIQUE'],
+      ).map((item) => item.id),
+    ).toEqual(expect.arrayContaining([1, 2]));
+    expect(
+      listBoxesForMedication(
+        '60000001',
+        14,
+        [expected, genericMember, unrelated],
+        '2026-08-03',
+        ['GENERIQUE'],
+      ).map((item) => item.id),
+    ).not.toContain(3);
+  });
+
   it('refuse de présenter une sélection manuelle comme une vérification par scan', () => {
     expect(() => assertVerificationEvidence('SCAN', 'raw')).not.toThrow();
     expect(() => assertVerificationEvidence('MANUAL', null)).not.toThrow();

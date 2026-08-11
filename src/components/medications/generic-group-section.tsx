@@ -3,6 +3,7 @@ import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { groupNamedGenericGroupMembers } from '@/domain/medications/generic-group-display';
 import {
   getGenericGroupMembers,
   type GenericGroupMember,
@@ -36,14 +37,8 @@ export function GenericGroupSection({ cis }: { cis: string }) {
     };
   }, [database, cis]);
 
-  if (members.length === 0) return null;
-
-  const groups = new Map<string, GenericGroupMember[]>();
-  for (const member of members) {
-    const bucket = groups.get(member.groupId) ?? [];
-    bucket.push(member);
-    groups.set(member.groupId, bucket);
-  }
+  const groups = groupNamedGenericGroupMembers(members);
+  if (groups.length === 0) return null;
 
   return (
     <Card tone="muted" style={styles.card}>
@@ -53,13 +48,13 @@ export function GenericGroupSection({ cis }: { cis: string }) {
         recommandation de substitution : PillBox ne remplace et ne suggère de
         remplacer aucun médicament, boîte ou ligne de stock.
       </Text>
-      {[...groups.values()].map((groupMembers) => (
+      {groups.map((groupMembers) => (
         <View key={groupMembers[0].groupId} style={styles.group}>
           <Text style={styles.groupLabel}>{groupMembers[0].groupLabel}</Text>
           {groupMembers.map((member) => (
             <Text key={member.cis} style={styles.member}>
-              {member.name ?? 'Nom indisponible dans le référentiel'} — CIS{' '}
-              {member.cis} — type source : {member.type ?? 'non renseigné'}
+              {member.name} — CIS {member.cis} — type source :{' '}
+              {member.type ?? 'non renseigné'}
             </Text>
           ))}
         </View>

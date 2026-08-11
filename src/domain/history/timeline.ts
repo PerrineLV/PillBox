@@ -35,6 +35,13 @@ export type TimelineEvent =
       expirationDate: string;
       presentationLabel: string;
       quantityHalfUnits: number;
+      /**
+       * Non nul lorsque la boîte utilisée est un autre membre du même groupe
+       * générique officiel (BDPM), confirmé explicitement, plutôt que le CIS
+       * strictement attendu.
+       */
+      matchedCis: string | null;
+      matchedSpecialtyName: string | null;
     })
   | (TimelineEventBase & {
       type: 'STOCK_MOVEMENT';
@@ -100,6 +107,8 @@ export type TimelinePreparationSource = Readonly<{
   expirationDate: string | null;
   presentationLabel: string | null;
   quantityHalfUnits: number | null;
+  matchedCis: string | null;
+  matchedSpecialtyName: string | null;
 }>;
 
 export type TimelineStockMovementSource = Readonly<{
@@ -234,6 +243,8 @@ export function buildTimeline(source: TimelineSource): TimelineEvent[] {
         expirationDate: row.expirationDate,
         presentationLabel: row.presentationLabel,
         quantityHalfUnits: row.quantityHalfUnits,
+        matchedCis: row.matchedCis,
+        matchedSpecialtyName: row.matchedSpecialtyName,
       });
     }
   }

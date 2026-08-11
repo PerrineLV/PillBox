@@ -281,6 +281,12 @@ describe('suivi local des prises', () => {
         minIntervalHours: null,
       },
     });
+    // Une prise UNSET (jamais prise ni ignorée) n'empêche plus la suppression
+    // définitive : ce n'est qu'un aide-mémoire de planification. On marque
+    // donc ici la prise comme réellement effectuée, pour vérifier que
+    // l'archivage (seule option restante) préserve bien le snapshot
+    // d'origine, comme la suppression le ferait pour une prise jamais prise.
+    await updateIntakeStatus(database, snapshot.key, 'TAKEN');
     expect(await getTreatmentRemovalAction(database, 1)).toBe('ARCHIVE');
     await archiveTreatment(database, 1);
     const record = (

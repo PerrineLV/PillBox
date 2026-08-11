@@ -1,10 +1,13 @@
+import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import type { BarcodeScanningResult } from 'expo-camera';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Stack } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { GenericMatchConfirmation } from '@/components/preparations/generic-match-confirmation';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import {
   formatFrenchCivilPeriod,
@@ -41,6 +44,10 @@ import {
 } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
+  getGenericGroupMembers,
+  type GenericGroupMember,
+} from '@/infrastructure/medications/medication-reference';
+import {
   cancelPreparation,
   createPreparation,
   completePreparation,
@@ -49,6 +56,10 @@ import {
   savePreparationProgress,
   type SavedPreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
+import {
+  confirmGenericEquivalence,
+  isGenericEquivalenceConfirmed,
+} from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
   AppButton,
@@ -82,6 +93,18 @@ type PendingBox = Readonly<{
   /** Preuve brute du DataMatrix, absente lorsque la boîte est choisie dans le stock. */
   raw: string | null;
   verification: Extract<BoxVerification, { status: 'VALID' | 'PARTIAL' }>;
+  /** Renseigné lorsque la boîte est un autre membre du groupe générique attendu, confirmé. */
+  matchedCis: string | null;
+  matchedSpecialtyName: string | null;
+}>;
+
+/** Boîte en attente d'une confirmation explicite de correspondance générique. */
+type PendingGenericMatch = Readonly<{
+  box: MedicationBox;
+  method: BoxVerificationMethod;
+  raw: string | null;
+  treatmentId: number;
+  groupLabel: string;
 }>;
 
 /**
@@ -94,8 +117,31 @@ type CurrentRequirement = MedicationRequirement & {
   contributions: readonly SavedPreparationProgress[];
 };
 
+/**
+ * Ouvre une seconde connexion, vers le référentiel médicaments en lecture
+ * seule (`medication-reference.db`, distinct de `pillbox.db`), nécessaire
+ * pour reconnaître un autre membre du même groupe générique officiel (BDPM)
+ * lors de la vérification d'une boîte.
+ */
 export default function NewPreparationScreen() {
-  const database = useSQLiteContext();
+  const personalDatabase = useSQLiteContext();
+  return (
+    <SQLiteProvider
+      databaseName="medication-reference.db"
+      assetSource={{ assetId: medicationReferenceAsset, forceOverwrite: true }}
+      options={{ useNewConnection: true }}
+    >
+      <NewPreparationScreenContent personalDatabase={personalDatabase} />
+    </SQLiteProvider>
+  );
+}
+
+function NewPreparationScreenContent({
+  personalDatabase,
+}: {
+  personalDatabase: SQLiteDatabase;
+}) {
+  const referenceDatabase = useSQLiteContext();
   const [permission, requestPermission] = useCameraPermissions();
   const [snapshot, setSnapshot] = useState<PreparationSnapshot | null>(null);
   const [preparationId, setPreparationId] = useState<number | null>(null);
@@ -114,15 +160,21 @@ export default function NewPreparationScreen() {
   const [cancelConfirmationVisible, setCancelConfirmationVisible] =
     useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [genericCandidates, setGenericCandidates] = useState<
+    readonly GenericGroupMember[]
+  >([]);
+  const [pendingGenericMatch, setPendingGenericMatch] =
+    useState<PendingGenericMatch | null>(null);
+  const [confirmingGenericMatch, setConfirmingGenericMatch] = useState(false);
   const scanLocked = useRef(false);
   const options = useMemo(() => preparationWeeks(todayIso()), []);
 
   useEffect(() => {
     let active = true;
     Promise.all([
-      getLatestDraftPreparation(database),
-      listMedicationBoxes(database),
-      listPreparationWeeks(database),
+      getLatestDraftPreparation(personalDatabase),
+      listMedicationBoxes(personalDatabase),
+      listPreparationWeeks(personalDatabase),
     ])
       .then(([saved, inventory, knownWeeks]) => {
         if (!active) return;
@@ -150,7 +202,7 @@ export default function NewPreparationScreen() {
     return () => {
       active = false;
     };
-  }, [database, options]);
+  }, [personalDatabase, options]);
 
   const current = useMemo<CurrentRequirement | null>(() => {
     if (!snapshot) return null;
@@ -168,6 +220,41 @@ export default function NewPreparationScreen() {
     }
     return null;
   }, [progress, snapshot]);
+
+  const currentSpecialtyCis = current?.specialtyCis ?? null;
+  useEffect(() => {
+    let active = true;
+    if (currentSpecialtyCis === null) {
+      setGenericCandidates([]);
+      return;
+    }
+    getGenericGroupMembers(referenceDatabase, currentSpecialtyCis)
+      .then((members) => {
+        if (active) setGenericCandidates(members);
+      })
+      .catch(() => {
+        // Purement informatif : si le référentiel des groupes génériques est
+        // indisponible, la vérification se comporte comme avant ce ticket
+        // (CIS différent toujours refusé), sans bloquer la préparation.
+        if (active) setGenericCandidates([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [referenceDatabase, currentSpecialtyCis]);
+
+  const genericCandidatesByCis = useMemo(
+    () => new Map(genericCandidates.map((member) => [member.cis, member])),
+    [genericCandidates],
+  );
+
+  /** Traitement à l'origine du besoin pour ce CIS, pour mémoriser une équivalence à son nom. */
+  function treatmentIdForSpecialty(specialtyCis: string): number | null {
+    return (
+      snapshot?.items.find((item) => item.specialtyCis === specialtyCis)
+        ?.treatmentId ?? null
+    );
+  }
 
   /**
    * Vue du stock où chaque boîte déjà retenue par cette préparation (en tout
@@ -204,14 +291,14 @@ export default function NewPreparationScreen() {
     setError(null);
     try {
       const referenceDate = todayIso();
-      const treatments = await listTreatments(database);
+      const treatments = await listTreatments(personalDatabase);
       const generated = generatePreparationSnapshot(
         treatments,
         boxes,
         selectedWeek.startDate,
         referenceDate,
       );
-      const id = await createPreparation(database, generated);
+      const id = await createPreparation(personalDatabase, generated);
       setSnapshot(generated);
       setPreparationId(id);
     } catch (reason: unknown) {
@@ -222,7 +309,7 @@ export default function NewPreparationScreen() {
     // Après une création comme après un refus de doublon, l'écran doit refléter
     // l'état réel de la base locale.
     try {
-      setWeeks(await listPreparationWeeks(database));
+      setWeeks(await listPreparationWeeks(personalDatabase));
     } catch {
       // Les semaines déjà chargées restent affichées.
     }
@@ -262,10 +349,10 @@ export default function NewPreparationScreen() {
     setSaving(true);
     setError(null);
     try {
-      await cancelPreparation(database, preparationId);
+      await cancelPreparation(personalDatabase, preparationId);
       setCancelConfirmationVisible(false);
       resetToWeekChoice();
-      const known = await listPreparationWeeks(database);
+      const known = await listPreparationWeeks(personalDatabase);
       setWeeks(known);
       selectFirstAvailableWeek(known);
     } catch (reason: unknown) {
@@ -278,7 +365,7 @@ export default function NewPreparationScreen() {
   async function prepareAnotherWeek(): Promise<void> {
     resetToWeekChoice();
     try {
-      const known = await listPreparationWeeks(database);
+      const known = await listPreparationWeeks(personalDatabase);
       setWeeks(known);
       selectFirstAvailableWeek(known);
     } catch (reason: unknown) {
@@ -302,12 +389,70 @@ export default function NewPreparationScreen() {
 
   /**
    * Applique les mêmes contrôles de médicament, de lot et de péremption quelle
-   * que soit la manière dont la boîte a été désignée.
+   * que soit la manière dont la boîte a été désignée. Un CIS différent de
+   * celui attendu n'est jamais accepté silencieusement : s'il appartient au
+   * même groupe générique officiel (BDPM), une confirmation explicite est
+   * exigée la première fois, puis mémorisée pour ce couple (traitement, CIS).
    */
-  function verifyBox(
+  async function verifyBox(
     box: MedicationBox,
     method: BoxVerificationMethod,
     raw: string | null,
+  ): Promise<void> {
+    if (current === null) return;
+    if (box.specialtyCis === current.specialtyCis) {
+      runVerification(box, method, raw, null);
+      return;
+    }
+    const candidate = genericCandidatesByCis.get(box.specialtyCis);
+    if (candidate === undefined) {
+      rejectBox(
+        `Produit différent détecté : ${box.specialtyName}. Boîte refusée.`,
+        method,
+      );
+      return;
+    }
+    const treatmentId = treatmentIdForSpecialty(current.specialtyCis);
+    if (treatmentId === null) {
+      // Ne devrait jamais arriver : chaque besoin provient d'au moins une
+      // ligne de préparation_items rattachée à un traitement.
+      rejectBox(
+        `Produit différent détecté : ${box.specialtyName}. Boîte refusée.`,
+        method,
+      );
+      return;
+    }
+    try {
+      const alreadyConfirmed = await isGenericEquivalenceConfirmed(
+        personalDatabase,
+        treatmentId,
+        box.specialtyCis,
+      );
+      if (alreadyConfirmed) {
+        runVerification(box, method, raw, box.specialtyCis);
+        return;
+      }
+      setScanning(false);
+      setChoosing(false);
+      setPendingGenericMatch({
+        box,
+        method,
+        raw,
+        treatmentId,
+        groupLabel: candidate.groupLabel,
+      });
+    } catch (reason: unknown) {
+      setError(
+        message(reason, 'Vérification de la correspondance impossible.'),
+      );
+    }
+  }
+
+  function runVerification(
+    box: MedicationBox,
+    method: BoxVerificationMethod,
+    raw: string | null,
+    matchedCis: string | null,
   ): void {
     if (current === null) return;
     const verification = verifyPreparationBox(
@@ -316,6 +461,7 @@ export default function NewPreparationScreen() {
       box,
       effectiveBoxes,
       todayIso(),
+      matchedCis,
     );
     if (verification.status === 'EXPIRED') {
       rejectBox(
@@ -335,8 +481,44 @@ export default function NewPreparationScreen() {
     } else {
       setScanning(false);
       setChoosing(false);
-      setPending({ method, raw, verification });
+      setPending({
+        method,
+        raw,
+        verification,
+        matchedCis,
+        matchedSpecialtyName: matchedCis !== null ? box.specialtyName : null,
+      });
     }
+  }
+
+  async function confirmGenericMatch(): Promise<void> {
+    if (!pendingGenericMatch) return;
+    setConfirmingGenericMatch(true);
+    setError(null);
+    try {
+      await confirmGenericEquivalence(personalDatabase, {
+        treatmentId: pendingGenericMatch.treatmentId,
+        cis: pendingGenericMatch.box.specialtyCis,
+        specialtyName: pendingGenericMatch.box.specialtyName,
+        groupLabel: pendingGenericMatch.groupLabel,
+      });
+      const { box, method, raw } = pendingGenericMatch;
+      setPendingGenericMatch(null);
+      runVerification(box, method, raw, box.specialtyCis);
+    } catch (reason: unknown) {
+      setError(message(reason, 'Confirmation impossible.'));
+    } finally {
+      setConfirmingGenericMatch(false);
+    }
+  }
+
+  function cancelGenericMatch(): void {
+    if (!pendingGenericMatch) return;
+    setPendingGenericMatch(null);
+    rejectBox(
+      `Produit différent détecté : ${pendingGenericMatch.box.specialtyName}. Boîte refusée.`,
+      pendingGenericMatch.method,
+    );
   }
 
   function handleScan(result: BarcodeScanningResult): void {
@@ -380,7 +562,7 @@ export default function NewPreparationScreen() {
     }
     const effectiveBox =
       effectiveBoxes.find((box) => box.id === match.box.id) ?? match.box;
-    verifyBox(effectiveBox, 'SCAN', result.data);
+    void verifyBox(effectiveBox, 'SCAN', result.data);
   }
 
   /**
@@ -416,8 +598,10 @@ export default function NewPreparationScreen() {
         scanRaw: pending.raw,
         nonFefoAcknowledged:
           verification.status === 'VALID' ? acknowledgeNonFefo : false,
+        matchedCis: pending.matchedCis,
+        matchedSpecialtyName: pending.matchedSpecialtyName,
       };
-      await savePreparationProgress(database, preparationId, entry);
+      await savePreparationProgress(personalDatabase, preparationId, entry);
       setProgress((previous) => [...previous, entry]);
       setPending(null);
       // Une contribution partielle laisse le médicament ouvert : proposer
@@ -437,10 +621,10 @@ export default function NewPreparationScreen() {
     setSaving(true);
     setError(null);
     try {
-      await completePreparation(database, preparationId, todayIso());
+      await completePreparation(personalDatabase, preparationId, todayIso());
       setFinalized(true);
       setFinalConfirmationVisible(false);
-      setBoxes(await listMedicationBoxes(database));
+      setBoxes(await listMedicationBoxes(personalDatabase));
     } catch (reason: unknown) {
       setError(message(reason, 'Validation finale impossible.'));
     } finally {
@@ -595,10 +779,12 @@ export default function NewPreparationScreen() {
             current.remainingHalfUnits,
             effectiveBoxes,
             todayIso(),
+            [...genericCandidatesByCis.keys()],
           )}
+          expectedSpecialtyCis={current.specialtyCis}
           requiredHalfUnits={current.remainingHalfUnits}
           onCancel={() => setChoosing(false)}
-          onSelect={(box) => verifyBox(box, 'MANUAL', null)}
+          onSelect={(box) => void verifyBox(box, 'MANUAL', null)}
         />
       ) : null}
       {pending && current ? (
@@ -607,6 +793,17 @@ export default function NewPreparationScreen() {
           saving={saving}
           onRestart={pending.method === 'SCAN' ? beginScan : beginChoice}
           onValidate={validateMedication}
+        />
+      ) : null}
+      {pendingGenericMatch && current ? (
+        <GenericMatchConfirmation
+          visible
+          expectedSpecialtyName={current.specialtyName}
+          scannedSpecialtyName={pendingGenericMatch.box.specialtyName}
+          groupLabel={pendingGenericMatch.groupLabel}
+          busy={confirmingGenericMatch}
+          onCancel={cancelGenericMatch}
+          onConfirm={() => void confirmGenericMatch()}
         />
       ) : null}
       {snapshot && current === null && !finalized ? (
@@ -907,11 +1104,13 @@ function UsageSummary({
  */
 function StockBoxChoice({
   boxes,
+  expectedSpecialtyCis,
   requiredHalfUnits,
   onCancel,
   onSelect,
 }: {
   boxes: readonly MedicationBox[];
+  expectedSpecialtyCis: string;
   requiredHalfUnits: number;
   onCancel(): void;
   onSelect(box: MedicationBox): void;
@@ -922,7 +1121,8 @@ function StockBoxChoice({
       <Text style={styles.casesTitle}>Boîtes enregistrées dans le stock</Text>
       <Text style={typography.caption}>
         Aucune lecture de DataMatrix ne sera enregistrée : les contrôles de
-        médicament, de lot et de péremption restent appliqués.
+        médicament, de lot et de péremption restent appliqués. Un autre membre
+        du même groupe générique officiel exige une confirmation explicite.
       </Text>
       {boxes.length === 0 ? (
         <Text style={styles.case}>
@@ -957,6 +1157,12 @@ function StockBoxChoice({
             ) : null}
             {box.origin === 'MANUAL' ? (
               <Badge label="Ajoutée sans DataMatrix" />
+            ) : null}
+            {box.specialtyCis !== expectedSpecialtyCis ? (
+              <Badge
+                label={`Autre spécialité du même groupe générique : ${box.specialtyName}`}
+                tone="warning"
+              />
             ) : null}
           </Pressable>
         );
@@ -999,6 +1205,12 @@ function BoxConfirmation({
           Lot {box.lot ?? 'non renseigné'} · péremption{' '}
           {formatLongFrenchCivilDate(box.expirationDate)}
         </Text>
+        {pending.matchedSpecialtyName ? (
+          <Badge
+            label={`Équivalence générique confirmée : ${pending.matchedSpecialtyName}`}
+            tone="warning"
+          />
+        ) : null}
         <Text>
           Cette boîte couvre {formatHalfUnits(quantityHalfUnits)}. Il restera{' '}
           {formatHalfUnits(remainingAfterHalfUnits)} à couvrir avec une seconde
@@ -1038,6 +1250,12 @@ function BoxConfirmation({
         Lot {box.lot ?? 'non renseigné'} · péremption{' '}
         {formatLongFrenchCivilDate(box.expirationDate)}
       </Text>
+      {pending.matchedSpecialtyName ? (
+        <Badge
+          label={`Équivalence générique confirmée : ${pending.matchedSpecialtyName}`}
+          tone="warning"
+        />
+      ) : null}
       {!isFefo ? (
         <Text>
           Lot recommandé : {recommendedBox.lot ?? 'non renseigné'} · péremption{' '}

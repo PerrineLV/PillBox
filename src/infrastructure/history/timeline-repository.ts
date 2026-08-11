@@ -95,11 +95,13 @@ export async function listTimelineEvents(
     expiration_date: string | null;
     presentation_label: string | null;
     quantity_half_units: number | null;
+    matched_cis: string | null;
+    matched_specialty_name: string | null;
   }>(
     `SELECT items.source_treatment_id AS treatment_id, prep.id AS preparation_id,
       prep.start_date, prep.end_date, prep.completed_at,
       usage.box_id, usage.lot, usage.expiration_date, usage.presentation_label,
-      usage.quantity_half_units
+      usage.quantity_half_units, usage.matched_cis, usage.matched_specialty_name
      FROM (SELECT DISTINCT preparation_id, source_treatment_id, specialty_cis
            FROM preparation_items) items
      JOIN preparations prep ON prep.id = items.preparation_id AND prep.status = 'COMPLETED'
@@ -122,6 +124,8 @@ export async function listTimelineEvents(
       expirationDate: row.expiration_date,
       presentationLabel: row.presentation_label,
       quantityHalfUnits: row.quantity_half_units,
+      matchedCis: row.matched_cis,
+      matchedSpecialtyName: row.matched_specialty_name,
     }),
   );
 

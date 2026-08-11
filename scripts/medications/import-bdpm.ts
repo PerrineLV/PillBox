@@ -7,7 +7,7 @@ import { normalizeMedicationSearch } from '../../src/domain/medications/normaliz
 
 const SPECIALTY_COLUMN_COUNT = 12;
 const PRESENTATION_COLUMN_COUNT = 13;
-const GENERIC_GROUP_COLUMN_COUNT = 6;
+const GENERIC_GROUP_COLUMN_COUNT = 5;
 
 export type ImportOptions = {
   specialtiesPath: string;

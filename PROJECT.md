@@ -55,7 +55,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 
 - Une boîte périmée ne peut pas être utilisée pour une préparation.
 - Un médicament différent ne doit jamais être accepté silencieusement.
-- Ne pas automatiser la substitution générique sans règle explicitement validée.
+- Lors de la vérification d'une boîte pendant une préparation, une boîte d'un autre membre du même groupe générique officiel (BDPM) que la spécialité attendue peut être acceptée pour un traitement, mais seulement après confirmation explicite de l'utilisatrice lors de la première rencontre de ce couple (traitement, CIS) précis ; aucune acceptation automatique ou silencieuse. Cette confirmation est ensuite mémorisée pour ce couple précis et n'est plus redemandée, mais reste consultable et révocable individuellement depuis la fiche du traitement ; elle ne s'étend jamais automatiquement à un autre membre du groupe non encore confirmé. Le traitement conserve la spécialité prescrite d'origine : seule la boîte, le mouvement de stock ou la préparation trace l'équivalence confirmée, distinctement d'une correspondance exacte. Hors groupe générique officiel, un CIS différent reste toujours refusé.
 - Le groupe générique affiché est une information BDPM à titre indicatif ; il ne déclenche, ne suggère ni ne pré-remplit aucun remplacement de médicament, de boîte ou de ligne de stock.
 - Si plusieurs lots conviennent, recommander FEFO mais permettre une autre boîte valide après avertissement.
 - La validation finale est atomique et impossible deux fois.
