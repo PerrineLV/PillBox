@@ -5,6 +5,9 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 const DEFAULT_ANDROID_VERSION_CODE = 1;
 const MAX_ANDROID_VERSION_CODE = 2_100_000_000;
 const VERSION_LINE_PATTERN = /^(\d+)\.(\d+)\.0$/;
+// Dupliqué depuis colors.brand (src/ui/theme.ts) : ce fichier n'a pas de résolution
+// des imports relatifs (voir commentaire en tête de fichier).
+const DATE_TIME_PICKER_ACCENT_COLOR = '#376B5B';
 
 export default ({ config }: ConfigContext): ExpoConfig => {
   const versionCode = resolveAndroidVersionCode(
@@ -28,8 +31,29 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       versionCode,
     },
     plugins: appendPlugin(
-      appendPlugin(config.plugins, 'expo-notifications'),
-      'expo-local-authentication',
+      appendPlugin(
+        appendPlugin(config.plugins, 'expo-notifications'),
+        'expo-local-authentication',
+      ),
+      [
+        '@react-native-community/datetimepicker',
+        {
+          android: {
+            datePicker: {
+              colorAccent: {
+                light: DATE_TIME_PICKER_ACCENT_COLOR,
+                dark: DATE_TIME_PICKER_ACCENT_COLOR,
+              },
+            },
+            timePicker: {
+              numbersSelectorColor: {
+                light: DATE_TIME_PICKER_ACCENT_COLOR,
+                dark: DATE_TIME_PICKER_ACCENT_COLOR,
+              },
+            },
+          },
+        },
+      ],
     ),
   };
 };
@@ -43,11 +67,12 @@ function appendValue(
 
 function appendPlugin(
   plugins: ExpoConfig['plugins'],
-  plugin: string,
+  plugin: string | [string, unknown],
 ): NonNullable<ExpoConfig['plugins']> {
   const configured = plugins ?? [];
+  const name = typeof plugin === 'string' ? plugin : plugin[0];
   return configured.some((entry) =>
-    typeof entry === 'string' ? entry === plugin : entry[0] === plugin,
+    typeof entry === 'string' ? entry === name : entry[0] === name,
   )
     ? configured
     : [...configured, plugin];
