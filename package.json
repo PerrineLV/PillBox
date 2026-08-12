@@ -19,6 +19,8 @@
     "test": "jest --runInBand",
     "app:version": "tsx scripts/print-app-version.ts",
     "medications:import": "tsx scripts/medications/import-bdpm-cli.ts",
+    "medications:check-dates": "tsx scripts/medications/check-bdpm-dates-cli.ts",
+    "medications:record-dates": "tsx scripts/medications/record-bdpm-source-dates-cli.ts",
     "build:android:check": "expo export --platform android --clear --output-dir dist",
     "android:release:validate-signing": "node ./scripts/android-signing.mjs --validate",
     "android:release:prebuild": "expo prebuild --platform android --no-install --clean",

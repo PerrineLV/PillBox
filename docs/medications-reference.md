@@ -98,3 +98,13 @@ npm run medications:import -- \
 
 L'importeur valide le nombre de colonnes, le format numérique des CIS/CIP7/CIP13, les doublons et l'encodage. Il écrit d'abord un fichier temporaire puis remplace le snapshot uniquement après une construction réussie.
 
+## Détection automatique d'une mise à jour BDPM
+
+En complément de la procédure manuelle ci-dessus, un workflow GitHub Actions (`.github/workflows/update-medications.yml`) vérifie une fois par mois (et sur déclenchement manuel `workflow_dispatch`) si la BDPM a publié de nouvelles dates pour les trois fichiers utilisés.
+
+- `npm run medications:check-dates` récupère les dates actuellement affichées sur la page officielle de téléchargement et les compare aux dernières dates connues, enregistrées dans `assets/medications/source-dates.json` (fichier d'état versionné, distinct des métadonnées binaires de `medications.db` qui changeraient à chaque exécution même sans changement de données sources). Si la page est injoignable ou que son format a changé de façon inattendue, le script échoue explicitement plutôt que de deviner une date.
+- Si aucune des trois dates n'a changé, le workflow s'arrête sans rien télécharger, régénérer ni pousser, et n'ouvre aucune issue.
+- Si au moins une date a changé, le workflow télécharge les fichiers concernés, relance l'import existant (`npm run medications:import`) avec les nouvelles dates, met à jour `assets/medications/source-dates.json` et la phrase des dates ci-dessus dans ce document via `npm run medications:record-dates`, exécute formatage/lint/typecheck/tests, puis pousse `medications.db`, `source-dates.json` et ce document sur la branche dédiée `bot/update-medications` (force-push), sans jamais toucher à `dev` ni à `main`. Une issue de suivi unique est ouverte ou mise à jour avec un lien vers le run.
+- Cette mise à jour automatique ne régénère pas la section « Incertitude constatée » ci-dessus (analyse des CIS orphelins), qui reste à vérifier et documenter manuellement lors de la relecture, comme le reste de la procédure manuelle.
+- Le workflow ne publie jamais automatiquement : relire le diff sur `bot/update-medications`, ouvrir une PR vers `dev` si tout est bon, merger, puis déclencher une nouvelle release Android restent des actions manuelles indispensables pour que la mise à jour atteigne le téléphone.
+
