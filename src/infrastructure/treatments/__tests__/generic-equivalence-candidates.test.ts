@@ -4,7 +4,10 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 
 import { confirmGenericEquivalence } from '../generic-equivalence-repository';
-import { findGenericEquivalenceCandidates } from '../generic-equivalence-candidates';
+import {
+  findGenericEquivalenceBoxCandidates,
+  findGenericEquivalenceCandidates,
+} from '../generic-equivalence-candidates';
 
 type SqlParameters = readonly (string | number | null)[];
 
@@ -61,6 +64,21 @@ function insertTreatment(
       overrides.specialtyName,
       overrides.archivedAt ?? null,
     );
+  return Number(result.lastInsertRowid);
+}
+
+function insertBox(
+  raw: Database.Database,
+  overrides: Readonly<{ specialtyCis: string; specialtyName: string }>,
+): number {
+  const result = raw
+    .prepare(
+      `INSERT INTO medication_boxes
+       (specialty_cis, specialty_name, presentation_cip13, presentation_label,
+        expiration_date, initial_quantity, remaining_quantity, scan_raw)
+       VALUES (?, ?, '3400000000000', 'Boîte', '2027-01-01', 30, 30, '')`,
+    )
+    .run(overrides.specialtyCis, overrides.specialtyName);
   return Number(result.lastInsertRowid);
 }
 
@@ -245,5 +263,185 @@ describe('findGenericEquivalenceCandidates', () => {
     expect(candidates).toEqual([
       { treatmentId, treatmentName: 'Zoloft', groupLabel: 'Groupe sertraline' },
     ]);
+  });
+});
+
+describe('findGenericEquivalenceBoxCandidates', () => {
+  it('propose une boîte du stock dont le CIS appartient au même groupe générique que le traitement, jamais encore confirmée', async () => {
+    const { raw: personalRaw, database: personalDatabase } =
+      await createPersonalDatabase();
+    const { raw: referenceRaw, database: referenceDatabase } =
+      createReferenceDatabase();
+    const treatmentId = insertTreatment(personalRaw, {
+      specialtyCis: '60000001',
+      specialtyName: 'Zoloft',
+    });
+    insertBox(personalRaw, {
+      specialtyCis: '60000002',
+      specialtyName: 'Sertraline',
+    });
+    referenceRaw.exec(`
+      INSERT INTO generic_groups (group_id, cis, group_label, sort_number) VALUES
+        ('10', '60000001', 'Groupe sertraline', '1'),
+        ('10', '60000002', 'Groupe sertraline', '2');
+    `);
+
+    const candidates = await findGenericEquivalenceBoxCandidates(
+      personalDatabase,
+      referenceDatabase,
+      treatmentId,
+      '60000001',
+    );
+
+    expect(candidates).toEqual([
+      {
+        specialtyCis: '60000002',
+        specialtyName: 'Sertraline',
+        groupLabel: 'Groupe sertraline',
+      },
+    ]);
+  });
+
+  it('exclut une boîte dont le CIS est identique à celui du traitement', async () => {
+    const { raw: personalRaw, database: personalDatabase } =
+      await createPersonalDatabase();
+    const { database: referenceDatabase } = createReferenceDatabase();
+    const treatmentId = insertTreatment(personalRaw, {
+      specialtyCis: '60000001',
+      specialtyName: 'Zoloft',
+    });
+    insertBox(personalRaw, {
+      specialtyCis: '60000001',
+      specialtyName: 'Zoloft',
+    });
+
+    expect(
+      await findGenericEquivalenceBoxCandidates(
+        personalDatabase,
+        referenceDatabase,
+        treatmentId,
+        '60000001',
+      ),
+    ).toEqual([]);
+  });
+
+  it('exclut une boîte hors groupe générique commun', async () => {
+    const { raw: personalRaw, database: personalDatabase } =
+      await createPersonalDatabase();
+    const { raw: referenceRaw, database: referenceDatabase } =
+      createReferenceDatabase();
+    const treatmentId = insertTreatment(personalRaw, {
+      specialtyCis: '60000001',
+      specialtyName: 'Zoloft',
+    });
+    insertBox(personalRaw, {
+      specialtyCis: '60000099',
+      specialtyName: 'Sans rapport',
+    });
+    referenceRaw.exec(`
+      INSERT INTO generic_groups (group_id, cis, group_label, sort_number) VALUES
+        ('10', '60000001', 'Groupe sertraline', '1'),
+        ('10', '60000002', 'Groupe sertraline', '2');
+    `);
+
+    expect(
+      await findGenericEquivalenceBoxCandidates(
+        personalDatabase,
+        referenceDatabase,
+        treatmentId,
+        '60000001',
+      ),
+    ).toEqual([]);
+  });
+
+  it('exclut un couple (traitement, CIS de la boîte) déjà confirmé et mémorisé', async () => {
+    const { raw: personalRaw, database: personalDatabase } =
+      await createPersonalDatabase();
+    const { raw: referenceRaw, database: referenceDatabase } =
+      createReferenceDatabase();
+    const treatmentId = insertTreatment(personalRaw, {
+      specialtyCis: '60000001',
+      specialtyName: 'Zoloft',
+    });
+    insertBox(personalRaw, {
+      specialtyCis: '60000002',
+      specialtyName: 'Sertraline',
+    });
+    referenceRaw.exec(`
+      INSERT INTO generic_groups (group_id, cis, group_label, sort_number) VALUES
+        ('10', '60000001', 'Groupe sertraline', '1'),
+        ('10', '60000002', 'Groupe sertraline', '2');
+    `);
+    await confirmGenericEquivalence(personalDatabase, {
+      treatmentId,
+      cis: '60000002',
+      specialtyName: 'Sertraline',
+      groupLabel: 'Groupe sertraline',
+    });
+
+    expect(
+      await findGenericEquivalenceBoxCandidates(
+        personalDatabase,
+        referenceDatabase,
+        treatmentId,
+        '60000001',
+      ),
+    ).toEqual([]);
+  });
+
+  it('ne propose une seule fois un CIS que plusieurs boîtes du stock partagent', async () => {
+    const { raw: personalRaw, database: personalDatabase } =
+      await createPersonalDatabase();
+    const { raw: referenceRaw, database: referenceDatabase } =
+      createReferenceDatabase();
+    const treatmentId = insertTreatment(personalRaw, {
+      specialtyCis: '60000001',
+      specialtyName: 'Zoloft',
+    });
+    insertBox(personalRaw, {
+      specialtyCis: '60000002',
+      specialtyName: 'Sertraline',
+    });
+    insertBox(personalRaw, {
+      specialtyCis: '60000002',
+      specialtyName: 'Sertraline',
+    });
+    referenceRaw.exec(`
+      INSERT INTO generic_groups (group_id, cis, group_label, sort_number) VALUES
+        ('10', '60000001', 'Groupe sertraline', '1'),
+        ('10', '60000002', 'Groupe sertraline', '2');
+    `);
+
+    const candidates = await findGenericEquivalenceBoxCandidates(
+      personalDatabase,
+      referenceDatabase,
+      treatmentId,
+      '60000001',
+    );
+
+    expect(candidates).toHaveLength(1);
+  });
+
+  it('ne propose rien quand le référentiel des groupes génériques est vide pour ce CIS', async () => {
+    const { raw: personalRaw, database: personalDatabase } =
+      await createPersonalDatabase();
+    const { database: referenceDatabase } = createReferenceDatabase();
+    const treatmentId = insertTreatment(personalRaw, {
+      specialtyCis: '60000001',
+      specialtyName: 'Zoloft',
+    });
+    insertBox(personalRaw, {
+      specialtyCis: '60000002',
+      specialtyName: 'Sertraline',
+    });
+
+    expect(
+      await findGenericEquivalenceBoxCandidates(
+        personalDatabase,
+        referenceDatabase,
+        treatmentId,
+        '60000001',
+      ),
+    ).toEqual([]);
   });
 });

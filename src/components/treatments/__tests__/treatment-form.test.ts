@@ -2,6 +2,9 @@ import type { ScheduledTreatmentPhase } from '@/domain/treatments/treatment';
 
 import { PhaseEditor, initialPhases, nextPhase } from '../treatment-form';
 
+jest.mock('expo-sqlite', () => ({ useSQLiteContext: jest.fn() }));
+jest.mock('expo-router', () => ({ useRouter: jest.fn() }));
+
 const PHASE: ScheduledTreatmentPhase = {
   id: null,
   startDate: '2026-08-10',

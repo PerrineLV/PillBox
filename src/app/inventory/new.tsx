@@ -1,7 +1,7 @@
 import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import type { BarcodeScanningResult } from 'expo-camera';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { router, Stack } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import {
   SQLiteProvider,
   type SQLiteDatabase,
@@ -19,6 +19,7 @@ import {
 
 import { ExpirationField } from '@/components/inventory/expiration-field';
 import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
+import { useDraftGenericEquivalencePrompt } from '@/components/medications/use-draft-generic-equivalence-prompt';
 import { useGenericEquivalenceGate } from '@/components/medications/use-generic-equivalence-gate';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import { buildAttachedSpecialtyCisSet } from '@/domain/inventory/box-attachment';
@@ -85,24 +86,42 @@ const SCREEN_TITLE = 'Ajouter une boîte';
 
 export default function AddBoxScreen() {
   const personalDatabase = useSQLiteContext();
+  const { draftTreatmentCis, draftTreatmentName } = useLocalSearchParams<{
+    draftTreatmentCis?: string;
+    draftTreatmentName?: string;
+  }>();
   return (
     <SQLiteProvider
       databaseName="medication-reference.db"
       assetSource={{ assetId: medicationReferenceAsset, forceOverwrite: true }}
       options={{ useNewConnection: true }}
     >
-      <AddBox personalDatabase={personalDatabase} />
+      <AddBox
+        personalDatabase={personalDatabase}
+        draftTreatmentCis={draftTreatmentCis}
+        draftTreatmentName={draftTreatmentName}
+      />
     </SQLiteProvider>
   );
 }
 
-function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
+function AddBox({
+  personalDatabase,
+  draftTreatmentCis,
+  draftTreatmentName,
+}: {
+  personalDatabase: SQLiteDatabase;
+  draftTreatmentCis?: string;
+  draftTreatmentName?: string;
+}) {
   const [mode, setMode] = useState<AddBoxMode>('CHOICE');
 
   if (mode === 'SCAN')
     return (
       <ScanBox
         personalDatabase={personalDatabase}
+        draftTreatmentCis={draftTreatmentCis}
+        draftTreatmentName={draftTreatmentName}
         onLeave={() => setMode('CHOICE')}
       />
     );
@@ -110,6 +129,8 @@ function AddBox({ personalDatabase }: { personalDatabase: SQLiteDatabase }) {
     return (
       <ManualBox
         personalDatabase={personalDatabase}
+        draftTreatmentCis={draftTreatmentCis}
+        draftTreatmentName={draftTreatmentName}
         onLeave={() => setMode('CHOICE')}
       />
     );
@@ -149,9 +170,13 @@ function ModeChoice({ onSelect }: { onSelect(mode: AddBoxMode): void }) {
 
 function ManualBox({
   personalDatabase,
+  draftTreatmentCis,
+  draftTreatmentName,
   onLeave,
 }: {
   personalDatabase: SQLiteDatabase;
+  draftTreatmentCis?: string;
+  draftTreatmentName?: string;
   onLeave(): void;
 }) {
   const referenceDatabase = useSQLiteContext();
@@ -169,6 +194,11 @@ function ManualBox({
   const genericGate = useGenericEquivalenceGate(
     personalDatabase,
     referenceDatabase,
+  );
+  const draftPrompt = useDraftGenericEquivalencePrompt(
+    referenceDatabase,
+    draftTreatmentCis,
+    draftTreatmentName,
   );
 
   useEffect(() => {
@@ -202,6 +232,10 @@ function ManualBox({
     setError(null);
     try {
       await genericGate.checkBeforeSave(medication.cis, medication.name);
+      const draftOutcome = await draftPrompt.checkBeforeSave(
+        medication.cis,
+        medication.name,
+      );
       await addMedicationBox(personalDatabase, {
         specialtyCis: medication.cis,
         specialtyName: medication.name,
@@ -214,12 +248,14 @@ function ManualBox({
         origin: 'MANUAL',
         scanRaw: null,
       });
-      await notifyIfOrphanMedication(
-        personalDatabase,
-        medication.cis,
-        showToast,
-      );
-      router.replace('/inventory');
+      if (draftOutcome !== 'confirmed')
+        await notifyIfOrphanMedication(
+          personalDatabase,
+          medication.cis,
+          showToast,
+        );
+      if (router.canGoBack()) router.back();
+      else router.replace('/inventory');
     } catch (reason: unknown) {
       setError(
         reason instanceof Error ? reason.message : 'Enregistrement impossible.',
@@ -355,15 +391,30 @@ function ManualBox({
           onConfirm={() => void genericGate.confirmCurrent()}
         />
       ) : null}
+      {draftPrompt.pendingMatch ? (
+        <GenericMatchConfirmation
+          visible
+          expectedSpecialtyName={draftPrompt.pendingMatch.expectedSpecialtyName}
+          scannedSpecialtyName={draftPrompt.pendingMatch.scannedSpecialtyName}
+          groupLabel={draftPrompt.pendingMatch.groupLabel}
+          busy={false}
+          onCancel={draftPrompt.skip}
+          onConfirm={draftPrompt.confirm}
+        />
+      ) : null}
     </Screen>
   );
 }
 
 function ScanBox({
   personalDatabase,
+  draftTreatmentCis,
+  draftTreatmentName,
   onLeave,
 }: {
   personalDatabase: SQLiteDatabase;
+  draftTreatmentCis?: string;
+  draftTreatmentName?: string;
   onLeave(): void;
 }) {
   const referenceDatabase = useSQLiteContext();
@@ -382,6 +433,11 @@ function ScanBox({
   const genericGate = useGenericEquivalenceGate(
     personalDatabase,
     referenceDatabase,
+  );
+  const draftPrompt = useDraftGenericEquivalencePrompt(
+    referenceDatabase,
+    draftTreatmentCis,
+    draftTreatmentName,
   );
 
   useEffect(() => {
@@ -444,6 +500,10 @@ function ScanBox({
     setSaving(true);
     try {
       await genericGate.checkBeforeSave(medication.cis, medication.name);
+      const draftOutcome = await draftPrompt.checkBeforeSave(
+        medication.cis,
+        medication.name,
+      );
       await addMedicationBox(personalDatabase, {
         specialtyCis: medication.cis,
         specialtyName: medication.name,
@@ -456,12 +516,14 @@ function ScanBox({
         origin: 'SCAN',
         scanRaw: scan.data,
       });
-      await notifyIfOrphanMedication(
-        personalDatabase,
-        medication.cis,
-        showToast,
-      );
-      router.replace('/inventory');
+      if (draftOutcome !== 'confirmed')
+        await notifyIfOrphanMedication(
+          personalDatabase,
+          medication.cis,
+          showToast,
+        );
+      if (router.canGoBack()) router.back();
+      else router.replace('/inventory');
     } catch (reason: unknown) {
       setError(
         reason instanceof Error ? reason.message : 'Enregistrement impossible.',
@@ -576,6 +638,17 @@ function ScanBox({
           busy={genericGate.busy}
           onCancel={genericGate.skipCurrent}
           onConfirm={() => void genericGate.confirmCurrent()}
+        />
+      ) : null}
+      {draftPrompt.pendingMatch ? (
+        <GenericMatchConfirmation
+          visible
+          expectedSpecialtyName={draftPrompt.pendingMatch.expectedSpecialtyName}
+          scannedSpecialtyName={draftPrompt.pendingMatch.scannedSpecialtyName}
+          groupLabel={draftPrompt.pendingMatch.groupLabel}
+          busy={false}
+          onCancel={draftPrompt.skip}
+          onConfirm={draftPrompt.confirm}
         />
       ) : null}
     </View>

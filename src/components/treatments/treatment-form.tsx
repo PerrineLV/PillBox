@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
 import {
   Platform,
   Pressable,
@@ -12,6 +14,7 @@ import {
   View,
 } from 'react-native';
 
+import { isTreatmentWithoutStock } from '@/domain/inventory/box-attachment';
 import {
   INTAKE_SLOTS,
   assertValidTreatmentPhases,
@@ -22,6 +25,8 @@ import {
   type TreatmentDraft,
   type TreatmentPhase,
 } from '@/domain/treatments/treatment';
+import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
+import { listGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import {
   AppButton,
   AppField,
@@ -48,17 +53,84 @@ import {
 
 type Props = {
   initialValue: TreatmentDraft;
+  /**
+   * `null` pour un traitement en cours de création, pas encore enregistré :
+   * transmis au calcul du signal de stock manquant (ticket 29), qui ne peut
+   * alors s'appuyer sur aucune équivalence générique mémorisée pour lui.
+   */
+  treatmentId: number | null;
+  /**
+   * CIS d'équivalences génériques déjà confirmées explicitement pendant
+   * cette création (ticket 29), en attente d'écriture en base faute
+   * d'identifiant : comptent comme couvrant le traitement au même titre
+   * qu'une équivalence mémorisée, pour ne jamais afficher un signal que
+   * cette confirmation contredirait. Sans effet une fois `treatmentId` connu.
+   */
+  pendingEquivalenceCis?: readonly string[];
   submitLabel: string;
   onSubmit: (value: TreatmentDraft) => Promise<void>;
 };
 
-export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
+export function TreatmentForm({
+  initialValue,
+  treatmentId,
+  pendingEquivalenceCis = [],
+  submitLabel,
+  onSubmit,
+}: Props) {
+  const database = useSQLiteContext();
+  const router = useRouter();
   const [phases, setPhases] = useState<TreatmentPhase[]>(() =>
     initialPhases(initialValue.phases),
   );
   const [included, setIncluded] = useState(initialValue.includedInPillbox);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [withoutStock, setWithoutStock] = useState<boolean | null>(null);
+  // Recréé à chaque rendu par l'écran de création : comparer son contenu
+  // plutôt que sa référence évite de recharger le stock à chaque frappe dans
+  // le formulaire.
+  const pendingEquivalenceCisKey = pendingEquivalenceCis.join(',');
+
+  // Recalculé à chaque focus, pas seulement au montage : l'écran reste monté
+  // dans la pile de navigation pendant un aller-retour vers l'ajout de boîte
+  // (ticket 29), un simple useEffect ne se redéclencherait donc jamais au
+  // retour.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      Promise.all([
+        listMedicationBoxes(database),
+        treatmentId === null
+          ? Promise.resolve([])
+          : listGenericEquivalenceConfirmations(database, treatmentId),
+      ])
+        .then(([boxes, equivalences]) => {
+          if (!cancelled)
+            setWithoutStock(
+              isTreatmentWithoutStock(
+                initialValue.specialtyCis,
+                treatmentId,
+                boxes,
+                equivalences,
+                pendingEquivalenceCis,
+              ),
+            );
+        })
+        .catch(() => {
+          if (!cancelled) setWithoutStock(null);
+        });
+      return () => {
+        cancelled = true;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+      database,
+      initialValue.specialtyCis,
+      treatmentId,
+      pendingEquivalenceCisKey,
+    ]),
+  );
 
   async function submit() {
     try {
@@ -97,6 +169,30 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
         La posologie est saisie par vous. Elle n’est jamais déduite du
         médicament.
       </Message>
+      {withoutStock && included ? (
+        <>
+          <Message tone="warning" title="Aucune boîte en stock">
+            Aucune boîte en stock ne correspond actuellement à cette spécialité.
+          </Message>
+          <AppButton
+            label="Ajouter une boîte au stock"
+            variant="secondary"
+            onPress={() =>
+              router.push(
+                treatmentId === null
+                  ? {
+                      pathname: '/inventory/new',
+                      params: {
+                        draftTreatmentCis: initialValue.specialtyCis,
+                        draftTreatmentName: initialValue.specialtyName,
+                      },
+                    }
+                  : '/inventory/new',
+              )
+            }
+          />
+        </>
+      ) : null}
       <Text style={styles.heading}>Phases de traitement</Text>
       {[...phases]
         .map((phase, originalIndex) => ({ phase, originalIndex }))

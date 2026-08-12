@@ -1,4 +1,8 @@
-import { buildAttachedSpecialtyCisSet, isOrphanBox } from '../box-attachment';
+import {
+  buildAttachedSpecialtyCisSet,
+  isOrphanBox,
+  isTreatmentWithoutStock,
+} from '../box-attachment';
 import type { MedicationBox } from '../inventory';
 import type { Treatment } from '@/domain/treatments/treatment';
 
@@ -111,5 +115,85 @@ describe('rattachement d’une boîte à un traitement actif', () => {
     expect(isOrphanBox(box({ specialtyCis: '60000001' }), attachedAfter)).toBe(
       false,
     );
+  });
+});
+
+describe('absence de boîte en stock pour un traitement (ticket 29)', () => {
+  it('signale l’absence de boîte quand aucune ne correspond au CIS du traitement', () => {
+    expect(isTreatmentWithoutStock('60000001', 1, [], [])).toBe(true);
+  });
+
+  it('ne signale rien dès qu’une boîte porte le CIS exact du traitement', () => {
+    expect(
+      isTreatmentWithoutStock(
+        '60000001',
+        1,
+        [box({ specialtyCis: '60000001' })],
+        [],
+      ),
+    ).toBe(false);
+  });
+
+  it('ne signale rien quand une boîte correspond via une équivalence générique mémorisée pour ce traitement précis', () => {
+    expect(
+      isTreatmentWithoutStock(
+        '60000001',
+        1,
+        [box({ specialtyCis: '60000002' })],
+        [{ treatmentId: 1, cis: '60000002' }],
+      ),
+    ).toBe(false);
+  });
+
+  it('ignore une équivalence mémorisée pour un autre traitement', () => {
+    expect(
+      isTreatmentWithoutStock(
+        '60000001',
+        1,
+        [box({ specialtyCis: '60000002' })],
+        [{ treatmentId: 99, cis: '60000002' }],
+      ),
+    ).toBe(true);
+  });
+
+  it('n’utilise jamais d’équivalence pour un traitement pas encore enregistré (treatmentId null)', () => {
+    expect(
+      isTreatmentWithoutStock(
+        '60000001',
+        null,
+        [box({ specialtyCis: '60000002' })],
+        [{ treatmentId: 1, cis: '60000002' }],
+      ),
+    ).toBe(true);
+  });
+
+  it('reste sans boîte pour un traitement nouvellement créé sans équivalence, mais couvert dès qu’une boîte au CIS exact existe', () => {
+    expect(isTreatmentWithoutStock('60000001', null, [], [])).toBe(true);
+    expect(
+      isTreatmentWithoutStock(
+        '60000001',
+        null,
+        [box({ specialtyCis: '60000001' })],
+        [],
+      ),
+    ).toBe(false);
+  });
+
+  it('couvre un traitement pas encore enregistré dès qu’une équivalence vient d’être confirmée, même en attente d’écriture en base', () => {
+    expect(
+      isTreatmentWithoutStock(
+        '60000001',
+        null,
+        [box({ specialtyCis: '60000002' })],
+        [],
+        ['60000002'],
+      ),
+    ).toBe(false);
+  });
+
+  it('ignore une équivalence en attente pour un CIS qu’aucune boîte du stock ne porte réellement', () => {
+    expect(
+      isTreatmentWithoutStock('60000001', null, [], [], ['60000002']),
+    ).toBe(true);
   });
 });

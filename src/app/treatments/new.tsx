@@ -1,13 +1,24 @@
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import {
+  Stack,
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
+} from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { TreatmentBoxGenericMatchWithDatabase } from '@/components/medications/treatment-box-generic-match';
 import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
 import type { TreatmentDosageKind } from '@/domain/treatments/treatment';
-import { createTreatment } from '@/infrastructure/treatments/treatment-repository';
 import { synchronizeTreatmentIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
+import { confirmGenericEquivalence } from '@/infrastructure/treatments/generic-equivalence-repository';
+import {
+  drainPendingGenericEquivalenceDrafts,
+  type PendingGenericEquivalenceDraft,
+} from '@/infrastructure/treatments/pending-generic-equivalence-draft';
+import { createTreatment } from '@/infrastructure/treatments/treatment-repository';
 import { AppButton, spacing } from '@/ui';
 
 export default function NewTreatmentScreen() {
@@ -19,6 +30,26 @@ export default function NewTreatmentScreen() {
   const database = useSQLiteContext();
   const router = useRouter();
   const [kind, setKind] = useState<TreatmentDosageKind>('SCHEDULED');
+  const [createdTreatment, setCreatedTreatment] = useState<{
+    id: number;
+    specialtyCis: string;
+    specialtyName: string;
+  } | null>(null);
+  const [pendingEquivalences, setPendingEquivalences] = useState<
+    readonly PendingGenericEquivalenceDraft[]
+  >([]);
+
+  // Dépile les équivalences confirmées pendant un aller-retour vers l'ajout
+  // de boîte (ticket 29) : elles ne peuvent être enregistrées qu'une fois le
+  // traitement effectivement créé, faute d'identifiant avant cela.
+  useFocusEffect(
+    useCallback(() => {
+      const drained = drainPendingGenericEquivalenceDrafts();
+      if (drained.length > 0)
+        setPendingEquivalences((previous) => [...previous, ...drained]);
+    }, []),
+  );
+
   if (!params.cis || !params.name)
     return <Text>Spécialité manquante. Revenez à la recherche.</Text>;
 
@@ -57,6 +88,10 @@ export default function NewTreatmentScreen() {
         />
       ) : (
         <TreatmentForm
+          treatmentId={null}
+          pendingEquivalenceCis={pendingEquivalences.map(
+            (equivalence) => equivalence.cis,
+          )}
           initialValue={{
             ...base,
             dosageKind: 'SCHEDULED',
@@ -71,10 +106,31 @@ export default function NewTreatmentScreen() {
           onSubmit={async (draft) => {
             const treatmentId = await createTreatment(database, draft);
             await synchronizeTreatmentIntakeReminders(database, treatmentId);
-            router.replace('/treatments');
+            for (const equivalence of pendingEquivalences) {
+              await confirmGenericEquivalence(database, {
+                treatmentId,
+                cis: equivalence.cis,
+                specialtyName: equivalence.specialtyName,
+                groupLabel: equivalence.groupLabel,
+              });
+            }
+            setCreatedTreatment({
+              id: treatmentId,
+              specialtyCis: draft.specialtyCis,
+              specialtyName: draft.specialtyName,
+            });
           }}
         />
       )}
+      {createdTreatment ? (
+        <TreatmentBoxGenericMatchWithDatabase
+          personalDatabase={database}
+          treatmentId={createdTreatment.id}
+          specialtyCis={createdTreatment.specialtyCis}
+          specialtyName={createdTreatment.specialtyName}
+          onDone={() => router.replace('/treatments')}
+        />
+      ) : null}
     </ScrollView>
   );
 }

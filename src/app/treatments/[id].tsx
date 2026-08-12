@@ -125,6 +125,7 @@ export default function EditTreatmentScreen() {
           />
         ) : (
           <TreatmentForm
+            treatmentId={treatment.id}
             initialValue={treatment}
             submitLabel="Enregistrer les modifications"
             onSubmit={async (draft) => {
