@@ -50,6 +50,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
                 light: DATE_TIME_PICKER_ACCENT_COLOR,
                 dark: DATE_TIME_PICKER_ACCENT_COLOR,
               },
+              headerBackground: {
+                light: DATE_TIME_PICKER_ACCENT_COLOR,
+                dark: DATE_TIME_PICKER_ACCENT_COLOR,
+              },
             },
           },
         },
