@@ -1,7 +1,7 @@
 import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { groupNamedGenericGroupMembers } from '@/domain/medications/generic-group-display';
 import {
@@ -22,6 +22,7 @@ import { Card, colors, spacing, typography } from '@/ui';
 export function GenericGroupSection({ cis }: { cis: string }) {
   const database = useSQLiteContext();
   const [members, setMembers] = useState<GenericGroupMember[]>([]);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,25 +41,53 @@ export function GenericGroupSection({ cis }: { cis: string }) {
   const groups = groupNamedGenericGroupMembers(members);
   if (groups.length === 0) return null;
 
+  const memberCount = groups.reduce((total, group) => total + group.length, 0);
+  const action = expanded ? 'Replier' : 'Déplier';
+
   return (
     <Card tone="muted" style={styles.card}>
-      <Text style={styles.title}>Groupe générique</Text>
-      <Text style={styles.disclaimer}>
-        Information issue de la BDPM, à titre indicatif. Ce n’est pas une
-        recommandation de substitution : PillBox ne remplace et ne suggère de
-        remplacer aucun médicament, boîte ou ligne de stock.
-      </Text>
-      {groups.map((groupMembers) => (
-        <View key={groupMembers[0].groupId} style={styles.group}>
-          <Text style={styles.groupLabel}>{groupMembers[0].groupLabel}</Text>
-          {groupMembers.map((member) => (
-            <Text key={member.cis} style={styles.member}>
-              {member.name} — CIS {member.cis} — type source :{' '}
-              {member.type ?? 'non renseigné'}
-            </Text>
-          ))}
+      <Pressable
+        accessibilityLabel={`${action} la section Groupe générique, ${memberCount} spécialité${memberCount > 1 ? 's' : ''}`}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        onPress={() => setExpanded((current) => !current)}
+        style={styles.header}
+      >
+        <Text style={styles.title}>Groupe générique</Text>
+        <View style={styles.headerRight}>
+          <Text style={styles.count}>
+            {memberCount} spécialité{memberCount > 1 ? 's' : ''}
+          </Text>
+          <Text
+            accessibilityElementsHidden
+            style={[styles.chevron, expanded && styles.chevronExpanded]}
+          >
+            ›
+          </Text>
         </View>
-      ))}
+      </Pressable>
+      {expanded ? (
+        <>
+          <Text style={styles.disclaimer}>
+            Information issue de la BDPM, à titre indicatif. Ce n’est pas une
+            recommandation de substitution : PillBox ne remplace et ne suggère
+            de remplacer aucun médicament, boîte ou ligne de stock.
+          </Text>
+          {groups.map((groupMembers) => (
+            <View key={groupMembers[0].groupId} style={styles.group}>
+              <Text style={styles.groupLabel}>
+                {groupMembers[0].groupLabel}
+              </Text>
+              {groupMembers.map((member) => (
+                <Text key={member.cis} style={styles.member}>
+                  {member.name} — CIS {member.cis} — type source :{' '}
+                  {member.type ?? 'non renseigné'}
+                </Text>
+              ))}
+            </View>
+          ))}
+        </>
+      ) : null}
     </Card>
   );
 }
@@ -82,13 +111,28 @@ export function GenericGroupSectionWithDatabase({ cis }: { cis: string }) {
 
 const styles = StyleSheet.create({
   card: { marginTop: spacing.sm },
+  chevron: {
+    color: colors.brand,
+    flexShrink: 0,
+    fontSize: 22,
+    marginLeft: spacing.xs,
+  },
+  chevronExpanded: { transform: [{ rotate: '90deg' }] },
+  count: { color: colors.textMuted, fontSize: 13 },
   disclaimer: {
     color: colors.textMuted,
     fontSize: 13,
     marginBottom: spacing.sm,
+    marginTop: spacing.sm,
   },
   group: { marginTop: spacing.xs },
   groupLabel: { fontWeight: '700' },
+  header: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  headerRight: { alignItems: 'center', flexDirection: 'row' },
   member: { color: colors.text, marginTop: 2 },
-  title: { ...typography.heading, marginBottom: spacing.xs },
+  title: { ...typography.heading },
 });
