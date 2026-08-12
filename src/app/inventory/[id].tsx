@@ -1,14 +1,21 @@
+import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
-import { useEffect, useState } from 'react';
+import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
+import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import {
+  buildAttachedSpecialtyCisSet,
+  isOrphanBox,
+} from '@/domain/inventory/box-attachment';
 import {
   isExpired,
   todayIso,
   type MedicationBox,
   type StockMovement,
 } from '@/domain/inventory/inventory';
+import type { TreatmentGenericEquivalence } from '@/domain/preparations/preparation';
+import type { Treatment } from '@/domain/treatments/treatment';
 import {
   adjustMedicationBox,
   deleteUnusedMedicationBox,
@@ -17,8 +24,11 @@ import {
   listStockMovements,
   type MedicationBoxRemovalAction,
 } from '@/infrastructure/inventory/inventory-repository';
+import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
+import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import { BoxDeletionConfirmation } from '@/components/inventory/delete-confirmation';
-import { GenericGroupSectionWithDatabase } from '@/components/medications/generic-group-section';
+import { GenericGroupSection } from '@/components/medications/generic-group-section';
+import { OrphanBoxGenericMatch } from '@/components/medications/orphan-box-generic-match';
 import {
   AppButton,
   AppField,
@@ -42,6 +52,10 @@ export default function BoxDetailScreen() {
   const id = Number(idParam);
   const [box, setBox] = useState<MedicationBox | null>(null);
   const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [treatments, setTreatments] = useState<Treatment[]>([]);
+  const [equivalences, setEquivalences] = useState<
+    TreatmentGenericEquivalence[]
+  >([]);
   const [quantity, setQuantity] = useState('');
   const [explanation, setExplanation] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -55,14 +69,29 @@ export default function BoxDetailScreen() {
   const load = async () => {
     if (!Number.isInteger(id))
       throw new Error('Identifiant de boîte invalide.');
-    const [nextBox, nextMovements, nextRemovalAction] = await Promise.all([
+    const [
+      nextBox,
+      nextMovements,
+      nextRemovalAction,
+      nextTreatments,
+      nextConfirmations,
+    ] = await Promise.all([
       getMedicationBox(database, id),
       listStockMovements(database, id),
       getMedicationBoxRemovalAction(database, id),
+      listTreatments(database),
+      listAllGenericEquivalenceConfirmations(database),
     ]);
     setBox(nextBox);
     setMovements(nextMovements);
     setRemovalAction(nextRemovalAction);
+    setTreatments(nextTreatments);
+    setEquivalences(
+      nextConfirmations.map((confirmation) => ({
+        treatmentId: confirmation.treatmentId,
+        cis: confirmation.cis,
+      })),
+    );
     if (nextBox) setQuantity(String(nextBox.remainingQuantity));
   };
 
@@ -115,6 +144,11 @@ export default function BoxDetailScreen() {
     }
   };
 
+  const attachedCis = useMemo(
+    () => buildAttachedSpecialtyCisSet(treatments, equivalences),
+    [treatments, equivalences],
+  );
+
   if (!box)
     return (
       <View style={styles.center}>
@@ -122,6 +156,7 @@ export default function BoxDetailScreen() {
       </View>
     );
   const expired = isExpired(box.expirationDate, todayIso());
+  const orphan = isOrphanBox(box, attachedCis);
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Stack.Screen
@@ -147,7 +182,43 @@ export default function BoxDetailScreen() {
           pendant une préparation.
         </Message>
       ) : null}
-      <GenericGroupSectionWithDatabase cis={box.specialtyCis} />
+      {orphan ? (
+        <Message tone="warning" title="Aucun traitement actif associé">
+          Ce médicament ne correspond, ni par CIS exact ni par équivalence
+          générique confirmée, à aucun traitement actif : cette boîte ne
+          participe à aucun calcul de besoin pour l’instant.
+        </Message>
+      ) : null}
+      {/*
+        Une seule connexion partagée vers medication-reference.db pour cette
+        section : deux `SQLiteProvider` distincts ouverts en parallèle avec
+        `forceOverwrite` sur le même fichier entrent en course et font
+        planter l'import (constaté en combinant deux providers séparés ici).
+      */}
+      <SQLiteProvider
+        databaseName="medication-reference.db"
+        assetSource={{
+          assetId: medicationReferenceAsset,
+          forceOverwrite: true,
+        }}
+        options={{ useNewConnection: true }}
+      >
+        {orphan ? (
+          <OrphanBoxGenericMatch
+            personalDatabase={database}
+            specialtyCis={box.specialtyCis}
+            specialtyName={box.specialtyName}
+            onConfirmed={() => {
+              void load();
+              showToast(
+                'Équivalence générique confirmée pour ce traitement.',
+                'success',
+              );
+            }}
+          />
+        ) : null}
+        <GenericGroupSection cis={box.specialtyCis} />
+      </SQLiteProvider>
 
       <Text style={styles.section}>Ajuster le stock physique</Text>
       <AppField

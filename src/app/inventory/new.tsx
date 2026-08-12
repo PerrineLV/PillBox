@@ -21,6 +21,7 @@ import { ExpirationField } from '@/components/inventory/expiration-field';
 import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
 import { useGenericEquivalenceGate } from '@/components/medications/use-generic-equivalence-gate';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
+import { buildAttachedSpecialtyCisSet } from '@/domain/inventory/box-attachment';
 import { parseGs1Expiration } from '@/domain/inventory/inventory';
 import { normalizeScannedGtinToCip13 } from '@/domain/medications/normalize-scanned-identifier';
 import { addMedicationBox } from '@/infrastructure/inventory/inventory-repository';
@@ -30,6 +31,8 @@ import {
   type IdentifiedMedicationPresentation,
   type MedicationSearchResult,
 } from '@/infrastructure/medications/medication-reference';
+import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
+import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
   AppButton,
   AppField,
@@ -42,7 +45,39 @@ import {
   radii,
   spacing,
   typography,
+  useToast,
+  type ToastTone,
 } from '@/ui';
+
+/**
+ * Signale, sans jamais bloquer l'ajout ni créer de lien, qu'une boîte vient
+ * d'être ajoutée pour un médicament sans traitement actif ni équivalence
+ * générique mémorisée (ticket 28). Recalculé à chaque ajout à partir de
+ * l'état courant : ne préjuge jamais qu'un traitement sera créé ensuite.
+ */
+async function notifyIfOrphanMedication(
+  personalDatabase: SQLiteDatabase,
+  specialtyCis: string,
+  showToast: (message: string, tone?: ToastTone) => void,
+): Promise<void> {
+  const [treatments, confirmations] = await Promise.all([
+    listTreatments(personalDatabase),
+    listAllGenericEquivalenceConfirmations(personalDatabase),
+  ]);
+  const attachedCis = buildAttachedSpecialtyCisSet(
+    treatments,
+    confirmations.map((confirmation) => ({
+      treatmentId: confirmation.treatmentId,
+      cis: confirmation.cis,
+    })),
+  );
+  if (!attachedCis.has(specialtyCis)) {
+    showToast(
+      'Boîte ajoutée : aucun traitement actif ne correspond à ce médicament pour le moment.',
+      'warning',
+    );
+  }
+}
 
 type AddBoxMode = 'CHOICE' | 'SCAN' | 'MANUAL';
 
@@ -120,6 +155,7 @@ function ManualBox({
   onLeave(): void;
 }) {
   const referenceDatabase = useSQLiteContext();
+  const { showToast } = useToast();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MedicationSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -178,6 +214,11 @@ function ManualBox({
         origin: 'MANUAL',
         scanRaw: null,
       });
+      await notifyIfOrphanMedication(
+        personalDatabase,
+        medication.cis,
+        showToast,
+      );
       router.replace('/inventory');
     } catch (reason: unknown) {
       setError(
@@ -326,6 +367,7 @@ function ScanBox({
   onLeave(): void;
 }) {
   const referenceDatabase = useSQLiteContext();
+  const { showToast } = useToast();
   const [permission, requestPermission] = useCameraPermissions();
   const [scan, setScan] = useState<BarcodeScanningResult | null>(null);
   const [medication, setMedication] =
@@ -414,6 +456,11 @@ function ScanBox({
         origin: 'SCAN',
         scanRaw: scan.data,
       });
+      await notifyIfOrphanMedication(
+        personalDatabase,
+        medication.cis,
+        showToast,
+      );
       router.replace('/inventory');
     } catch (reason: unknown) {
       setError(

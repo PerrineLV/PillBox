@@ -4,6 +4,10 @@ import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
+  buildAttachedSpecialtyCisSet,
+  isOrphanBox,
+} from '@/domain/inventory/box-attachment';
+import {
   isExpired,
   todayIso,
   usableQuantity,
@@ -44,6 +48,9 @@ export default function InventoryScreen() {
   const [expiringBoxIds, setExpiringBoxIds] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<'all' | 'renew' | 'expiring'>('all');
   const [forecast, setForecast] = useState<StockForecast | null>(null);
+  const [attachedCis, setAttachedCis] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
 
   // Une carte d'attention de l'accueil peut ouvrir directement l'onglet
   // « À renouveler » : le paramètre n'est appliqué qu'aux valeurs connues.
@@ -84,6 +91,9 @@ export default function InventoryScreen() {
               buildStockForecast(treatments, items, today, preparations, {
                 equivalences,
               }),
+            );
+            setAttachedCis(
+              buildAttachedSpecialtyCisSet(treatments, equivalences),
             );
             setError(null);
           }
@@ -209,6 +219,7 @@ export default function InventoryScreen() {
                     </Text>
                     {lot.boxes.map((box) => {
                       const expired = isExpired(box.expirationDate, today);
+                      const orphan = isOrphanBox(box, attachedCis);
                       return (
                         <Link
                           key={box.id}
@@ -236,6 +247,12 @@ export default function InventoryScreen() {
                               <Badge
                                 label="Périmée — stock inutilisable"
                                 tone="danger"
+                              />
+                            ) : null}
+                            {!expired && orphan ? (
+                              <Badge
+                                label="Aucun traitement actif associé"
+                                tone="warning"
                               />
                             ) : null}
                           </View>
