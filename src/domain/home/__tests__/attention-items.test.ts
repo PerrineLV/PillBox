@@ -39,6 +39,7 @@ function treatment(id: number, overrides: Partial<Treatment> = {}): Treatment {
     archivedAt: null,
     phases: [scheduledPhase(id * 10)],
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
+    controlledDispensing: null,
     ...overrides,
   };
 }
@@ -60,6 +61,7 @@ function renewalItem(overrides: Partial<RenewalItem> = {}): RenewalItem {
     missingHalfUnits: 0,
     ruptureDate: '2026-03-10',
     ruptureCause: 'CONSUMED',
+    theoreticalRenewalDate: null,
     ...overrides,
   };
 }

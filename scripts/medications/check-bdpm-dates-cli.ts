@@ -36,6 +36,7 @@ async function main(): Promise<void> {
     specialties_source_date: current.specialtiesSourceDate,
     presentations_source_date: current.presentationsSourceDate,
     generics_source_date: current.genericsSourceDate,
+    conditions_source_date: current.conditionsSourceDate,
   });
 }
 

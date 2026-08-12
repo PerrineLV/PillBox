@@ -34,7 +34,8 @@ type Props = Readonly<{
  *
  * Ouvre sa propre connexion à `medication-reference.db` : suppose qu'aucune
  * autre connexion `forceOverwrite` vers ce même fichier n'est ouverte en
- * parallèle sur cet écran.
+ * parallèle sur cet écran (sinon, utiliser `TreatmentBoxGenericMatch` sous
+ * un `SQLiteProvider` ancêtre partagé).
  */
 export function TreatmentBoxGenericMatchWithDatabase({
   personalDatabase,
@@ -60,7 +61,8 @@ export function TreatmentBoxGenericMatchWithDatabase({
   );
 }
 
-function TreatmentBoxGenericMatch({
+/** Suppose que la connexion `medication-reference.db` est déjà fournie par un `SQLiteProvider` ancêtre. */
+export function TreatmentBoxGenericMatch({
   personalDatabase,
   treatmentId,
   specialtyCis,

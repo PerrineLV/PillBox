@@ -13,6 +13,7 @@ import {
   usableQuantity,
   type MedicationBox,
 } from '@/domain/inventory/inventory';
+import type { Treatment } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { listPreparationWeeks } from '@/infrastructure/preparations/preparation-repository';
 import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
@@ -51,6 +52,7 @@ export default function InventoryScreen() {
   const [attachedCis, setAttachedCis] = useState<ReadonlySet<string>>(
     new Set(),
   );
+  const [treatments, setTreatments] = useState<Treatment[]>([]);
 
   // Une carte d'attention de l'accueil peut ouvrir directement l'onglet
   // « À renouveler » : le paramètre n'est appliqué qu'aux valeurs connues.
@@ -74,6 +76,7 @@ export default function InventoryScreen() {
         .then(([items, treatments, preparations, equivalenceConfirmations]) => {
           if (active) {
             setBoxes(items);
+            setTreatments(treatments);
             const today = todayIso();
             const equivalences = equivalenceConfirmations.map(
               (confirmation) => ({
@@ -133,8 +136,8 @@ export default function InventoryScreen() {
   );
   const groups = useMemo(() => groupBoxes(filteredBoxes), [filteredBoxes]);
   const renewalList = useMemo(
-    () => (forecast ? buildRenewalList(forecast) : []),
-    [forecast],
+    () => (forecast ? buildRenewalList(forecast, treatments) : []),
+    [forecast, treatments],
   );
   const today = todayIso();
 

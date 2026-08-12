@@ -18,6 +18,10 @@ async function main(): Promise<void> {
       '--presentations-source-date',
     ),
     genericsSourceDate: requireArgument(arguments_, '--generics-source-date'),
+    conditionsSourceDate: requireArgument(
+      arguments_,
+      '--conditions-source-date',
+    ),
   };
   const statePath = arguments_.get('--state-path') ?? DEFAULT_STATE_PATH;
   const docPath = arguments_.get('--doc-path') ?? DEFAULT_DOC_PATH;
@@ -40,7 +44,7 @@ function parseArguments(arguments_: string[]): Map<string, string> {
     if (key === undefined || value === undefined || !key.startsWith('--')) {
       throw new Error(
         'Arguments attendus: --specialties-source-date, --presentations-source-date, ' +
-          '--generics-source-date [--state-path] [--doc-path].',
+          '--generics-source-date, --conditions-source-date [--state-path] [--doc-path].',
       );
     }
     values.set(key, value);

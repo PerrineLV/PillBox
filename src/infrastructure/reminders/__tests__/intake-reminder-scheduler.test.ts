@@ -71,6 +71,7 @@ function treatment(id: number): Treatment {
       },
     ],
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
+    controlledDispensing: null,
   };
 }
 

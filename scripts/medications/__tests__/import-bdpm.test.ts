@@ -28,6 +28,9 @@ describe('importBdpm', () => {
       orphanPresentations: 0,
       genericGroups: 2,
       orphanGenericGroups: 0,
+      dispensingConditions: 0,
+      orphanDispensingConditions: 0,
+      controlledDispensingSpecialties: 0,
     });
     expect(
       database
@@ -72,6 +75,16 @@ describe('importBdpm', () => {
         )
         .get(),
     ).toEqual({ value: '2026-08-05' });
+    expect(
+      database
+        .prepare(
+          "SELECT value FROM metadata WHERE key = 'conditions_source_date'",
+        )
+        .get(),
+    ).toBeUndefined();
+    expect(
+      database.prepare('SELECT COUNT(*) AS n FROM dispensing_conditions').get(),
+    ).toEqual({ n: 0 });
     database.close();
   });
 
@@ -183,7 +196,211 @@ describe('importBdpm', () => {
       /colonnes attendues/,
     );
   });
+
+  it('--conditions et --conditions-source-date doivent être fournis ensemble', async () => {
+    const paths = await writeFixtures(directory);
+    await expect(
+      importBdpm({ ...importOptions(paths), conditionsPath: '/tmp/x.txt' }),
+    ).rejects.toThrow(/ensemble/);
+    await expect(
+      importBdpm({
+        ...importOptions(paths),
+        conditionsSourceDate: '2026-08-10',
+      }),
+    ).rejects.toThrow(/ensemble/);
+  });
 });
+
+describe('conditions de délivrance encadrée (CIS_CPD_bdpm, ticket 30)', () => {
+  let directory: string;
+
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'pillbox-bdpm-cpd-'));
+  });
+
+  afterEach(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('détecte une spécialité mentionnée stupéfiants et compte les conditions sans rapport', async () => {
+    const paths = await writeFixtures(directory);
+    const conditionsPath = join(directory, 'CIS_CPD_bdpm.txt');
+    await writeFile(
+      conditionsPath,
+      Buffer.from(
+        [
+          conditionRow('61234567', 'liste I'),
+          conditionRow('61234567', 'stupéfiants'),
+          conditionRow('67654321', 'prescription hospitalière'),
+        ].join('\r\n'),
+        'latin1',
+      ),
+    );
+
+    const summary = await importBdpm({
+      ...importOptions(paths),
+      conditionsPath,
+      conditionsSourceDate: '2026-08-10',
+    });
+
+    expect(summary).toEqual({
+      specialties: 2,
+      presentations: 2,
+      orphanPresentations: 0,
+      genericGroups: 2,
+      orphanGenericGroups: 0,
+      dispensingConditions: 3,
+      orphanDispensingConditions: 0,
+      controlledDispensingSpecialties: 1,
+    });
+
+    const database = new Database(paths.outputPath, { readonly: true });
+    expect(
+      database
+        .prepare(
+          'SELECT condition_text, controlled_dispensing_mention FROM dispensing_conditions WHERE cis = ? ORDER BY condition_text',
+        )
+        .all('61234567'),
+    ).toEqual([
+      { condition_text: 'liste I', controlled_dispensing_mention: 0 },
+      { condition_text: 'stupéfiants', controlled_dispensing_mention: 1 },
+    ]);
+    expect(
+      database
+        .prepare(
+          "SELECT value FROM metadata WHERE key = 'conditions_source_date'",
+        )
+        .get(),
+    ).toEqual({ value: '2026-08-10' });
+    database.close();
+  });
+
+  it('détecte une délivrance fractionnée', async () => {
+    const paths = await writeFixtures(directory);
+    const conditionsPath = join(directory, 'CIS_CPD_bdpm.txt');
+    await writeFile(
+      conditionsPath,
+      Buffer.from(
+        conditionRow('61234567', 'délivrance fractionnée de 7 jours'),
+        'latin1',
+      ),
+    );
+
+    const summary = await importBdpm({
+      ...importOptions(paths),
+      conditionsPath,
+      conditionsSourceDate: '2026-08-10',
+    });
+
+    expect(summary.controlledDispensingSpecialties).toBe(1);
+  });
+
+  it('conserve et compte une ligne de condition liée à un CIS absent', async () => {
+    const paths = await writeFixtures(directory);
+    const conditionsPath = join(directory, 'CIS_CPD_bdpm.txt');
+    await writeFile(
+      conditionsPath,
+      Buffer.from(conditionRow('69999999', 'stupéfiants'), 'latin1'),
+    );
+
+    const summary = await importBdpm({
+      ...importOptions(paths),
+      conditionsPath,
+      conditionsSourceDate: '2026-08-10',
+    });
+
+    expect(summary.orphanDispensingConditions).toBe(1);
+    expect(summary.controlledDispensingSpecialties).toBe(1);
+  });
+
+  it('accepte un même CIS présent sur plusieurs lignes de conditions distinctes', async () => {
+    const paths = await writeFixtures(directory);
+    const conditionsPath = join(directory, 'CIS_CPD_bdpm.txt');
+    await writeFile(
+      conditionsPath,
+      Buffer.from(
+        [
+          conditionRow('61234567', 'liste I'),
+          conditionRow('61234567', 'stupéfiants'),
+          conditionRow('61234567', 'prescription sur ordonnance sécurisée'),
+        ].join('\r\n'),
+        'latin1',
+      ),
+    );
+
+    const summary = await importBdpm({
+      ...importOptions(paths),
+      conditionsPath,
+      conditionsSourceDate: '2026-08-10',
+    });
+
+    expect(summary.dispensingConditions).toBe(3);
+  });
+
+  it('rejette une ligne de condition strictement dupliquée', async () => {
+    const paths = await writeFixtures(directory);
+    const conditionsPath = join(directory, 'CIS_CPD_bdpm.txt');
+    await writeFile(
+      conditionsPath,
+      Buffer.from(
+        [
+          conditionRow('61234567', 'stupéfiants'),
+          conditionRow('61234567', 'stupéfiants'),
+        ].join('\r\n'),
+        'latin1',
+      ),
+    );
+
+    await expect(
+      importBdpm({
+        ...importOptions(paths),
+        conditionsPath,
+        conditionsSourceDate: '2026-08-10',
+      }),
+    ).rejects.toThrow(/dupliquée/);
+  });
+
+  it('ignore les lignes vides parasites du fichier source réel', async () => {
+    const paths = await writeFixtures(directory);
+    const conditionsPath = join(directory, 'CIS_CPD_bdpm.txt');
+    await writeFile(
+      conditionsPath,
+      Buffer.from(
+        [conditionRow('61234567', 'stupéfiants'), '\r', ''].join('\r\n'),
+        'latin1',
+      ),
+    );
+
+    const summary = await importBdpm({
+      ...importOptions(paths),
+      conditionsPath,
+      conditionsSourceDate: '2026-08-10',
+    });
+
+    expect(summary.dispensingConditions).toBe(1);
+  });
+
+  it('rejette un fichier de conditions avec un nombre de colonnes invalide', async () => {
+    const paths = await writeFixtures(directory);
+    const conditionsPath = join(directory, 'CIS_CPD_bdpm.txt');
+    await writeFile(
+      conditionsPath,
+      Buffer.from('61234567\tstupéfiants\ttrop', 'latin1'),
+    );
+
+    await expect(
+      importBdpm({
+        ...importOptions(paths),
+        conditionsPath,
+        conditionsSourceDate: '2026-08-10',
+      }),
+    ).rejects.toThrow(/colonnes attendues/);
+  });
+});
+
+function conditionRow(cis: string, conditionText: string): string {
+  return [cis, conditionText].join('\t');
+}
 
 describe('normalizeMedicationSearch', () => {
   it('retire accents, casse et ponctuation sans modifier la source stockée', () => {

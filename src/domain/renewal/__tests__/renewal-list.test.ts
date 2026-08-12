@@ -4,6 +4,7 @@ import type {
   MedicationForecast,
   StockForecast,
 } from '@/domain/forecast/stock-forecast';
+import type { Treatment } from '@/domain/treatments/treatment';
 
 function coverageRunsOut(
   overrides: Partial<Extract<ForecastCoverage, { status: 'RUNS_OUT' }>> = {},
@@ -30,6 +31,22 @@ function medication(
     coverage: { status: 'BEYOND_HORIZON', horizonDays: 14 },
     ...overrides,
   } satisfies MedicationForecast;
+}
+
+function treatment(overrides: Partial<Treatment> = {}): Treatment {
+  return {
+    id: 1,
+    specialtyCis: '60000001',
+    specialtyName: 'Alpha',
+    pharmaceuticalForm: null,
+    dosageKind: 'SCHEDULED',
+    includedInPillbox: true,
+    archivedAt: null,
+    phases: [],
+    asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
+    controlledDispensing: null,
+    ...overrides,
+  } satisfies Treatment;
 }
 
 function forecast(
@@ -162,5 +179,71 @@ describe('buildRenewalList', () => {
       ]),
     );
     expect(after).toHaveLength(0);
+  });
+
+  it('n’attache aucune date théorique sans traitement fourni', () => {
+    const [item] = buildRenewalList(
+      forecast([medication({ coverage: coverageRunsOut() })]),
+    );
+
+    expect(item.theoreticalRenewalDate).toBeNull();
+  });
+
+  it('joint la date théorique d’une délivrance encadrée activée, sans changer l’urgence ni le tri', () => {
+    const [item] = buildRenewalList(
+      forecast([
+        medication({ coverage: coverageRunsOut({ date: '2026-01-05' }) }),
+      ]),
+      [
+        treatment({
+          controlledDispensing: {
+            enabled: true,
+            periodicityDays: 28,
+            lastDispensedAt: '2026-01-01',
+            theoreticalRenewalDate: '2026-01-29',
+          },
+        }),
+      ],
+    );
+
+    expect(item.theoreticalRenewalDate).toBe('2026-01-29');
+    expect(item.urgency).toBe('RUNS_OUT_SOON');
+  });
+
+  it('ignore la date théorique d’un traitement dont l’indicateur est décoché', () => {
+    const [item] = buildRenewalList(
+      forecast([medication({ coverage: coverageRunsOut() })]),
+      [
+        treatment({
+          controlledDispensing: {
+            enabled: false,
+            periodicityDays: 28,
+            lastDispensedAt: '2026-01-01',
+            theoreticalRenewalDate: '2026-01-29',
+          },
+        }),
+      ],
+    );
+
+    expect(item.theoreticalRenewalDate).toBeNull();
+  });
+
+  it('ignore un traitement sans rapport avec un autre CIS', () => {
+    const [item] = buildRenewalList(
+      forecast([medication({ coverage: coverageRunsOut() })]),
+      [
+        treatment({
+          specialtyCis: 'autre-cis',
+          controlledDispensing: {
+            enabled: true,
+            periodicityDays: 28,
+            lastDispensedAt: '2026-01-01',
+            theoreticalRenewalDate: '2026-01-29',
+          },
+        }),
+      ],
+    );
+
+    expect(item.theoreticalRenewalDate).toBeNull();
   });
 });

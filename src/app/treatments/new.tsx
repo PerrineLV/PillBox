@@ -1,14 +1,15 @@
+import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import {
   Stack,
   useFocusEffect,
   useLocalSearchParams,
   useRouter,
 } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { TreatmentBoxGenericMatchWithDatabase } from '@/components/medications/treatment-box-generic-match';
+import { TreatmentBoxGenericMatch } from '@/components/medications/treatment-box-generic-match';
 import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
 import type { TreatmentDosageKind } from '@/domain/treatments/treatment';
@@ -79,6 +80,7 @@ export default function NewTreatmentScreen() {
               maxQuantityPerDayHalfUnits: null,
               minIntervalHours: null,
             },
+            controlledDispensing: null,
           }}
           submitLabel="Créer le traitement"
           onSubmit={async (draft) => {
@@ -87,50 +89,66 @@ export default function NewTreatmentScreen() {
           }}
         />
       ) : (
-        <TreatmentForm
-          treatmentId={null}
-          pendingEquivalenceCis={pendingEquivalences.map(
-            (equivalence) => equivalence.cis,
-          )}
-          initialValue={{
-            ...base,
-            dosageKind: 'SCHEDULED',
-            includedInPillbox: true,
-            phases: [],
-            asNeededInfo: {
-              maxQuantityPerDayHalfUnits: null,
-              minIntervalHours: null,
-            },
+        // Une seule connexion partagée vers medication-reference.db pour
+        // TreatmentForm (section délivrance encadrée, ticket 30) et la
+        // confirmation d'équivalence générique après création (ticket 29) :
+        // deux `SQLiteProvider` distincts avec `forceOverwrite` sur le même
+        // fichier entrent en course et font planter l'import.
+        <SQLiteProvider
+          databaseName="medication-reference.db"
+          assetSource={{
+            assetId: medicationReferenceAsset,
+            forceOverwrite: true,
           }}
-          submitLabel="Créer le traitement"
-          onSubmit={async (draft) => {
-            const treatmentId = await createTreatment(database, draft);
-            await synchronizeTreatmentIntakeReminders(database, treatmentId);
-            for (const equivalence of pendingEquivalences) {
-              await confirmGenericEquivalence(database, {
-                treatmentId,
-                cis: equivalence.cis,
-                specialtyName: equivalence.specialtyName,
-                groupLabel: equivalence.groupLabel,
+          options={{ useNewConnection: true }}
+        >
+          <TreatmentForm
+            personalDatabase={database}
+            treatmentId={null}
+            pendingEquivalenceCis={pendingEquivalences.map(
+              (equivalence) => equivalence.cis,
+            )}
+            initialValue={{
+              ...base,
+              dosageKind: 'SCHEDULED',
+              includedInPillbox: true,
+              phases: [],
+              asNeededInfo: {
+                maxQuantityPerDayHalfUnits: null,
+                minIntervalHours: null,
+              },
+              controlledDispensing: null,
+            }}
+            submitLabel="Créer le traitement"
+            onSubmit={async (draft) => {
+              const treatmentId = await createTreatment(database, draft);
+              await synchronizeTreatmentIntakeReminders(database, treatmentId);
+              for (const equivalence of pendingEquivalences) {
+                await confirmGenericEquivalence(database, {
+                  treatmentId,
+                  cis: equivalence.cis,
+                  specialtyName: equivalence.specialtyName,
+                  groupLabel: equivalence.groupLabel,
+                });
+              }
+              setCreatedTreatment({
+                id: treatmentId,
+                specialtyCis: draft.specialtyCis,
+                specialtyName: draft.specialtyName,
               });
-            }
-            setCreatedTreatment({
-              id: treatmentId,
-              specialtyCis: draft.specialtyCis,
-              specialtyName: draft.specialtyName,
-            });
-          }}
-        />
+            }}
+          />
+          {createdTreatment ? (
+            <TreatmentBoxGenericMatch
+              personalDatabase={database}
+              treatmentId={createdTreatment.id}
+              specialtyCis={createdTreatment.specialtyCis}
+              specialtyName={createdTreatment.specialtyName}
+              onDone={() => router.replace('/treatments')}
+            />
+          ) : null}
+        </SQLiteProvider>
       )}
-      {createdTreatment ? (
-        <TreatmentBoxGenericMatchWithDatabase
-          personalDatabase={database}
-          treatmentId={createdTreatment.id}
-          specialtyCis={createdTreatment.specialtyCis}
-          specialtyName={createdTreatment.specialtyName}
-          onDone={() => router.replace('/treatments')}
-        />
-      ) : null}
     </ScrollView>
   );
 }

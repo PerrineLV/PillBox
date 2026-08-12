@@ -36,6 +36,7 @@ function treatment(overrides: Partial<Treatment> = {}): Treatment {
       },
     ],
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
+    controlledDispensing: null,
     ...overrides,
   };
 }

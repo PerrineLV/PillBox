@@ -4,6 +4,7 @@ export type SourceDates = {
   specialtiesSourceDate: string;
   presentationsSourceDate: string;
   genericsSourceDate: string;
+  conditionsSourceDate: string;
 };
 
 export type SourceDatesComparison = {
@@ -15,6 +16,7 @@ const SOURCE_FILES: Array<{ filename: string; field: keyof SourceDates }> = [
   { filename: 'CIS_bdpm.txt', field: 'specialtiesSourceDate' },
   { filename: 'CIS_CIP_bdpm.txt', field: 'presentationsSourceDate' },
   { filename: 'CIS_GENER_bdpm.txt', field: 'genericsSourceDate' },
+  { filename: 'CIS_CPD_bdpm.txt', field: 'conditionsSourceDate' },
 ];
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;

@@ -61,6 +61,8 @@ jobs:
             https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_CIP_bdpm.txt
           curl -fsSL -o "$RUNNER_TEMP/bdpm/CIS_GENER_bdpm.txt" \
             https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_GENER_bdpm.txt
+          curl -fsSL -o "$RUNNER_TEMP/bdpm/CIS_CPD_bdpm.txt" \
+            https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_CPD_bdpm.txt
 
       - name: Regenerate medications.db
         if: steps.check-dates.outputs.changed == 'true'
@@ -69,16 +71,19 @@ jobs:
           SPECIALTIES_SOURCE_DATE: ${{ steps.check-dates.outputs.specialties_source_date }}
           PRESENTATIONS_SOURCE_DATE: ${{ steps.check-dates.outputs.presentations_source_date }}
           GENERICS_SOURCE_DATE: ${{ steps.check-dates.outputs.generics_source_date }}
+          CONDITIONS_SOURCE_DATE: ${{ steps.check-dates.outputs.conditions_source_date }}
         run: |
           set -euo pipefail
           npm run medications:import -- \
             --specialties "$RUNNER_TEMP/bdpm/CIS_bdpm.txt" \
             --presentations "$RUNNER_TEMP/bdpm/CIS_CIP_bdpm.txt" \
             --generics "$RUNNER_TEMP/bdpm/CIS_GENER_bdpm.txt" \
+            --conditions "$RUNNER_TEMP/bdpm/CIS_CPD_bdpm.txt" \
             --output assets/medications/medications.db \
             --specialties-source-date "$SPECIALTIES_SOURCE_DATE" \
             --presentations-source-date "$PRESENTATIONS_SOURCE_DATE" \
-            --generics-source-date "$GENERICS_SOURCE_DATE"
+            --generics-source-date "$GENERICS_SOURCE_DATE" \
+            --conditions-source-date "$CONDITIONS_SOURCE_DATE"
 
       - name: Record new source dates and update reference doc
         if: steps.check-dates.outputs.changed == 'true'
@@ -87,12 +92,14 @@ jobs:
           SPECIALTIES_SOURCE_DATE: ${{ steps.check-dates.outputs.specialties_source_date }}
           PRESENTATIONS_SOURCE_DATE: ${{ steps.check-dates.outputs.presentations_source_date }}
           GENERICS_SOURCE_DATE: ${{ steps.check-dates.outputs.generics_source_date }}
+          CONDITIONS_SOURCE_DATE: ${{ steps.check-dates.outputs.conditions_source_date }}
         run: |
           set -euo pipefail
           npm run medications:record-dates -- \
             --specialties-source-date "$SPECIALTIES_SOURCE_DATE" \
             --presentations-source-date "$PRESENTATIONS_SOURCE_DATE" \
-            --generics-source-date "$GENERICS_SOURCE_DATE"
+            --generics-source-date "$GENERICS_SOURCE_DATE" \
+            --conditions-source-date "$CONDITIONS_SOURCE_DATE"
 
       - name: Check formatting
         if: steps.check-dates.outputs.changed == 'true'

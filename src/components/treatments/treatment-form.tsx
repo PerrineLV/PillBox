@@ -1,11 +1,7 @@
 import { useCallback, useState } from 'react';
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from '@react-native-community/datetimepicker';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import {
-  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -14,12 +10,14 @@ import {
   View,
 } from 'react-native';
 
+import { ControlledDispensingField } from '@/components/medications/controlled-dispensing-field';
 import { isTreatmentWithoutStock } from '@/domain/inventory/box-attachment';
 import {
   INTAKE_SLOTS,
   assertValidTreatmentPhases,
   formatHalfUnits,
   isLegacyTreatmentPhase,
+  type ControlledDispensingInfo,
   type IntakeSlot,
   type ScheduledTreatmentPhase,
   type TreatmentDraft,
@@ -44,14 +42,17 @@ import {
   typography,
 } from '@/ui';
 
-import {
-  civilDateToPickerDate,
-  formatFrenchCivilDate,
-  nextCivilDay,
-  pickerDateToCivilDate,
-} from './civil-date';
+import { nextCivilDay } from './civil-date';
+import { DateField } from './date-field';
 
 type Props = {
+  /**
+   * Reçue en prop plutôt que lue via `useSQLiteContext()` : cet écran ouvre
+   * aussi une connexion dédiée à `medication-reference.db` (pour la section
+   * délivrance encadrée, ticket 30) et deux `SQLiteProvider` imbriqués
+   * rendraient ambigu le contexte SQLite actif pour ce composant.
+   */
+  personalDatabase: SQLiteDatabase;
   initialValue: TreatmentDraft;
   /**
    * `null` pour un traitement en cours de création, pas encore enregistré :
@@ -72,18 +73,23 @@ type Props = {
 };
 
 export function TreatmentForm({
+  personalDatabase,
   initialValue,
   treatmentId,
   pendingEquivalenceCis = [],
   submitLabel,
   onSubmit,
 }: Props) {
-  const database = useSQLiteContext();
+  const database = personalDatabase;
   const router = useRouter();
   const [phases, setPhases] = useState<TreatmentPhase[]>(() =>
     initialPhases(initialValue.phases),
   );
   const [included, setIncluded] = useState(initialValue.includedInPillbox);
+  const [controlledDispensing, setControlledDispensing] =
+    useState<ControlledDispensingInfo | null>(
+      initialValue.controlledDispensing,
+    );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [withoutStock, setWithoutStock] = useState<boolean | null>(null);
@@ -142,6 +148,7 @@ export function TreatmentForm({
         ...initialValue,
         includedInPillbox: included,
         phases: orderedPhases,
+        controlledDispensing,
       });
     } catch (reason: unknown) {
       setError(
@@ -169,6 +176,18 @@ export function TreatmentForm({
         La posologie est saisie par vous. Elle n’est jamais déduite du
         médicament.
       </Message>
+      {/*
+        Suppose que la connexion medication-reference.db est déjà fournie par
+        un SQLiteProvider ancêtre, partagé avec le reste de l'écran (voir
+        treatments/new.tsx et treatments/[id].tsx) : ce composant n'ouvre pas
+        sa propre connexion pour éviter deux `forceOverwrite` en parallèle
+        sur le même fichier.
+      */}
+      <ControlledDispensingField
+        specialtyCis={initialValue.specialtyCis}
+        value={controlledDispensing}
+        onChange={setControlledDispensing}
+      />
       {withoutStock && included ? (
         <>
           <Message tone="warning" title="Aucune boîte en stock">
@@ -446,93 +465,6 @@ function orderPhases(phases: readonly TreatmentPhase[]): TreatmentPhase[] {
   );
 }
 
-function DateField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const [pickerVisible, setPickerVisible] = useState(false);
-  const selectedDate = civilDateToPickerDate(value);
-
-  function selectDate(event: DateTimePickerEvent, date?: Date) {
-    if (Platform.OS !== 'ios') setPickerVisible(false);
-    if (event.type === 'set' && date !== undefined)
-      onChange(pickerDateToCivilDate(date));
-  }
-
-  if (Platform.OS === 'web')
-    return (
-      <View style={styles.dateField}>
-        <Text style={styles.label}>{label}</Text>
-        <TextInput
-          accessibilityLabel={`${label} au format JJ/MM/AAAA`}
-          placeholder="JJ/MM/AAAA"
-          style={styles.dateInput}
-          value={value === '' ? '' : formatFrenchCivilDate(value)}
-          onChangeText={(text) => onChange(frenchInputToCivilDate(text))}
-        />
-      </View>
-    );
-
-  return (
-    <View style={styles.dateField}>
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.dateActions}>
-        <Pressable
-          accessibilityLabel={`${label}, ${value === '' ? 'aucune date' : formatFrenchCivilDate(value)}`}
-          accessibilityRole="button"
-          onPress={() => setPickerVisible(true)}
-          style={styles.dateButton}
-        >
-          <Text style={value === '' ? styles.datePlaceholder : undefined}>
-            {value === '' ? 'Choisir une date' : formatFrenchCivilDate(value)}
-          </Text>
-        </Pressable>
-        {value !== '' ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => onChange('')}
-            style={styles.clearDate}
-          >
-            <Text style={styles.clearDateText}>Effacer</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {pickerVisible ? (
-        <>
-          <DateTimePicker
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            locale="fr-FR"
-            mode="date"
-            onChange={selectDate}
-            value={selectedDate ?? new Date()}
-          />
-          {Platform.OS === 'ios' ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setPickerVisible(false)}
-              style={styles.closePicker}
-            >
-              <Text style={styles.secondaryButtonText}>
-                Fermer le calendrier
-              </Text>
-            </Pressable>
-          ) : null}
-        </>
-      ) : null}
-    </View>
-  );
-}
-
-function frenchInputToCivilDate(value: string): string {
-  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
-  if (match === null) return value;
-  return `${match[3]}-${match[2]}-${match[1]}`;
-}
 function Choice({
   label,
   selected,
@@ -593,25 +525,6 @@ const styles = StyleSheet.create({
     borderColor: colors.brand,
     borderWidth: 2,
   },
-  clearDate: { paddingHorizontal: 8, paddingVertical: 12 },
-  clearDateText: { color: '#b91c1c' },
-  closePicker: { alignItems: 'center', padding: 10 },
-  dateActions: { alignItems: 'center', flexDirection: 'row', gap: 6 },
-  dateButton: {
-    borderColor: '#9ca3af',
-    borderRadius: 8,
-    borderWidth: 1,
-    flex: 1,
-    padding: 12,
-  },
-  dateField: { gap: 4 },
-  dateInput: {
-    borderColor: '#9ca3af',
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 10,
-  },
-  datePlaceholder: { color: '#6b7280' },
   compactInput: { width: 100 },
   slotInput: {
     backgroundColor: colors.surface,
@@ -641,11 +554,6 @@ const styles = StyleSheet.create({
   },
   phaseTitle: { fontSize: 16, fontWeight: '700' },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  secondaryButtonText: {
-    color: '#1d4ed8',
-    fontWeight: '700',
-    textAlign: 'center',
-  },
   toggle: {
     alignItems: 'center',
     flexDirection: 'row',

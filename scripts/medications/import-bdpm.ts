@@ -3,11 +3,13 @@ import { mkdir, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 
+import { mentionsControlledDispensing } from '../../src/domain/medications/controlled-dispensing-detection';
 import { normalizeMedicationSearch } from '../../src/domain/medications/normalize-medication-search';
 
 const SPECIALTY_COLUMN_COUNT = 12;
 const PRESENTATION_COLUMN_COUNT = 13;
 const GENERIC_GROUP_COLUMN_COUNT = 5;
+const CONDITION_COLUMN_COUNT = 2;
 
 export type ImportOptions = {
   specialtiesPath: string;
@@ -17,6 +19,17 @@ export type ImportOptions = {
   specialtiesSourceDate: string;
   presentationsSourceDate: string;
   genericsSourceDate: string;
+  /**
+   * `CIS_CPD_bdpm` (conditions de prescription et de délivrance, ticket 30).
+   * Optionnel pour ne pas casser le workflow automatisé existant
+   * (.github/workflows/update-medications.yml), qui n'appelle l'import
+   * qu'avec les trois fichiers historiques : sans ce fichier, aucune
+   * spécialité n'est détectée comme concernée par une délivrance encadrée,
+   * plutôt que d'échouer ou de deviner. `conditionsPath` et
+   * `conditionsSourceDate` doivent être fournis ensemble ou pas du tout.
+   */
+  conditionsPath?: string;
+  conditionsSourceDate?: string;
 };
 
 export type ImportSummary = {
@@ -25,6 +38,10 @@ export type ImportSummary = {
   orphanPresentations: number;
   genericGroups: number;
   orphanGenericGroups: number;
+  dispensingConditions: number;
+  orphanDispensingConditions: number;
+  /** Nombre de spécialités distinctes détectées, à confirmer par l'utilisatrice (ticket 30). */
+  controlledDispensingSpecialties: number;
 };
 
 type SpecialtyRow = {
@@ -60,12 +77,28 @@ type GenericGroupRow = {
   sortNumber: string | null;
 };
 
+type ConditionRow = {
+  cis: string;
+  conditionText: string;
+};
+
 export async function importBdpm(
   options: ImportOptions,
 ): Promise<ImportSummary> {
   validateSourceDate(options.specialtiesSourceDate);
   validateSourceDate(options.presentationsSourceDate);
   validateSourceDate(options.genericsSourceDate);
+  if (
+    (options.conditionsPath === undefined) !==
+    (options.conditionsSourceDate === undefined)
+  ) {
+    throw new Error(
+      '--conditions et --conditions-source-date doivent être fournis ensemble.',
+    );
+  }
+  if (options.conditionsSourceDate !== undefined)
+    validateSourceDate(options.conditionsSourceDate);
+
   const specialtyRows = parseSpecialties(
     await readFile(options.specialtiesPath),
     options.specialtiesPath,
@@ -78,6 +111,13 @@ export async function importBdpm(
     await readFile(options.genericsPath),
     options.genericsPath,
   );
+  const conditionRows =
+    options.conditionsPath === undefined
+      ? []
+      : parseConditions(
+          await readFile(options.conditionsPath),
+          options.conditionsPath,
+        );
   const specialtyIds = new Set(specialtyRows.map((row) => row.cis));
 
   const orphanPresentations = presentationRows.filter(
@@ -86,6 +126,16 @@ export async function importBdpm(
   const orphanGenericGroups = genericGroupRows.filter(
     (genericGroup) => !specialtyIds.has(genericGroup.cis),
   ).length;
+  const orphanDispensingConditions = conditionRows.filter(
+    (condition) => !specialtyIds.has(condition.cis),
+  ).length;
+  const controlledDispensingSpecialties = new Set(
+    conditionRows
+      .filter((condition) =>
+        mentionsControlledDispensing(condition.conditionText),
+      )
+      .map((condition) => condition.cis),
+  ).size;
 
   const outputPath = resolve(options.outputPath);
   const temporaryPath = `${outputPath}.tmp`;
@@ -101,10 +151,12 @@ export async function importBdpm(
         options,
         orphanPresentations,
         orphanGenericGroups,
+        orphanDispensingConditions,
       );
       insertSpecialties(database, specialtyRows);
       insertPresentations(database, presentationRows);
       insertGenericGroups(database, genericGroupRows);
+      insertDispensingConditions(database, conditionRows);
       database.exec(
         "INSERT INTO medication_search(medication_search) VALUES ('optimize')",
       );
@@ -125,6 +177,9 @@ export async function importBdpm(
     orphanPresentations,
     genericGroups: genericGroupRows.length,
     orphanGenericGroups,
+    dispensingConditions: conditionRows.length,
+    orphanDispensingConditions,
+    controlledDispensingSpecialties,
   };
 }
 
@@ -187,6 +242,51 @@ function parseGenericGroups(
       sortNumber: optionalText(columns[4]),
     };
   });
+}
+
+/**
+ * Format observé sur le fichier officiel actuel : 2 colonnes tabulées (CIS,
+ * condition de prescription/délivrance), encodage windows-1252, fins de
+ * ligne CRLF. Un même CIS apparaît légitimement sur plusieurs lignes (une
+ * spécialité peut cumuler plusieurs conditions, ex. « stupéfiants » et
+ * « liste I ») : contrairement à `parseLines`, un CIS répété n'est jamais
+ * rejeté ici, seule une ligne strictement identique l'est. Quelques lignes
+ * vides parasites (un retour chariot isolé) existent dans le fichier source
+ * réel : elles sont ignorées comme des lignes vides plutôt que rejetées.
+ */
+function parseConditions(contents: Buffer, sourcePath: string): ConditionRow[] {
+  const text = new TextDecoder('windows-1252').decode(contents);
+  const rows: ConditionRow[] = [];
+  const seen = new Set<string>();
+
+  for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
+    const line = rawLine.trim();
+    if (line.length === 0) continue;
+    const columns = line.split('\t');
+    if (columns.length !== CONDITION_COLUMN_COUNT) {
+      throw new Error(
+        `${sourcePath}, ligne ${index + 1}: ${CONDITION_COLUMN_COUNT} colonnes attendues, ${columns.length} reçues.`,
+      );
+    }
+    const cis = requiredIdentifier(columns[0], 'CIS', /^\d{8}$/);
+    const conditionText = requiredText(
+      columns[1],
+      'condition de prescription/délivrance',
+      cis,
+    );
+    const identifier = `${cis} ${conditionText}`;
+    if (seen.has(identifier)) {
+      throw new Error(
+        `${sourcePath}, ligne ${index + 1}: ligne dupliquée pour ${cis}.`,
+      );
+    }
+    seen.add(identifier);
+    rows.push({ cis, conditionText });
+  }
+
+  if (rows.length === 0)
+    throw new Error(`${sourcePath} ne contient aucune donnée.`);
+  return rows;
 }
 
 function parseLines<T>(
@@ -306,6 +406,14 @@ function createSchema(database: Database.Database): void {
       PRIMARY KEY (group_id, cis)
     ) WITHOUT ROWID;
     CREATE INDEX generic_groups_by_cis ON generic_groups(cis);
+    CREATE TABLE dispensing_conditions (
+      cis TEXT NOT NULL CHECK(length(cis) = 8),
+      condition_text TEXT NOT NULL,
+      controlled_dispensing_mention INTEGER NOT NULL CHECK (controlled_dispensing_mention IN (0, 1)),
+      PRIMARY KEY (cis, condition_text)
+    ) WITHOUT ROWID;
+    CREATE INDEX dispensing_conditions_controlled_idx
+      ON dispensing_conditions(cis) WHERE controlled_dispensing_mention = 1;
     CREATE VIRTUAL TABLE medication_search USING fts5(
       cis UNINDEXED,
       search_text,
@@ -319,6 +427,7 @@ function insertMetadata(
   options: ImportOptions,
   orphanPresentations: number,
   orphanGenericGroups: number,
+  orphanDispensingConditions: number,
 ): void {
   const insert = database.prepare(
     'INSERT INTO metadata (key, value) VALUES (?, ?)',
@@ -330,6 +439,14 @@ function insertMetadata(
   insert.run('generics_source_date', options.genericsSourceDate);
   insert.run('orphan_presentations', String(orphanPresentations));
   insert.run('orphan_generic_groups', String(orphanGenericGroups));
+  // Absente plutôt que vide quand --conditions n'a pas été fourni : ne pas
+  // inventer une date source pour un fichier qui n'a pas été lu.
+  if (options.conditionsSourceDate !== undefined)
+    insert.run('conditions_source_date', options.conditionsSourceDate);
+  insert.run(
+    'orphan_dispensing_conditions',
+    String(orphanDispensingConditions),
+  );
   insert.run('generated_at', new Date().toISOString());
 }
 
@@ -380,6 +497,23 @@ function insertGenericGroups(
   for (const row of rows) insert.run(row);
 }
 
+function insertDispensingConditions(
+  database: Database.Database,
+  rows: ConditionRow[],
+): void {
+  const insert = database.prepare(`
+    INSERT INTO dispensing_conditions (cis, condition_text, controlled_dispensing_mention)
+    VALUES (@cis, @conditionText, @mention)
+  `);
+  for (const row of rows) {
+    insert.run({
+      cis: row.cis,
+      conditionText: row.conditionText,
+      mention: mentionsControlledDispensing(row.conditionText) ? 1 : 0,
+    });
+  }
+}
+
 export function parseImportArguments(arguments_: string[]): ImportOptions {
   const values = new Map<string, string>();
   for (let index = 0; index < arguments_.length; index += 2) {
@@ -388,7 +522,8 @@ export function parseImportArguments(arguments_: string[]): ImportOptions {
     if (key === undefined || value === undefined || !key.startsWith('--')) {
       throw new Error(
         'Arguments attendus: --specialties, --presentations, --generics, --output, ' +
-          '--specialties-source-date, --presentations-source-date, --generics-source-date.',
+          '--specialties-source-date, --presentations-source-date, --generics-source-date, ' +
+          '--conditions (optionnel), --conditions-source-date (optionnel).',
       );
     }
     values.set(key, value);
@@ -406,5 +541,7 @@ export function parseImportArguments(arguments_: string[]): ImportOptions {
     specialtiesSourceDate: read('--specialties-source-date'),
     presentationsSourceDate: read('--presentations-source-date'),
     genericsSourceDate: read('--generics-source-date'),
+    conditionsPath: values.get('--conditions'),
+    conditionsSourceDate: values.get('--conditions-source-date'),
   };
 }

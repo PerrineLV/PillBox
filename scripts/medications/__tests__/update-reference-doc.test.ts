@@ -12,6 +12,7 @@ const NEW_DATES: SourceDates = {
   specialtiesSourceDate: '2026-09-07',
   presentationsSourceDate: '2026-09-14',
   genericsSourceDate: '2026-09-07',
+  conditionsSourceDate: '2026-09-07',
 };
 
 describe('updateReferenceDocDates', () => {
@@ -21,6 +22,7 @@ describe('updateReferenceDocDates', () => {
     expect(updated).toContain('daté du **14/09/2026**');
     expect(updated).not.toContain('03/08/2026');
     expect(updated).not.toContain('10/08/2026');
+    expect(updated).toContain('conditions de prescription/délivrance');
     expect(updated).toContain('Avant.');
     expect(updated).toContain('Après.');
   });

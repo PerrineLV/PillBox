@@ -20,11 +20,13 @@ function buildHtml(dates: {
   specialties: string;
   presentations: string;
   generics: string;
+  conditions: string;
 }): string {
   return [
     anchor('CIS_bdpm.txt', dates.specialties),
     anchor('CIS_CIP_bdpm.txt', dates.presentations),
     anchor('CIS_GENER_bdpm.txt', dates.generics),
+    anchor('CIS_CPD_bdpm.txt', dates.conditions),
   ].join('\n');
 }
 
@@ -42,16 +44,18 @@ describe('parseFrenchDate / formatFrenchDate', () => {
 });
 
 describe('extractSourceDatesFromHtml', () => {
-  it('extrait les trois dates depuis la page de téléchargement', () => {
+  it('extrait les quatre dates depuis la page de téléchargement', () => {
     const html = buildHtml({
       specialties: '03/08/2026',
       presentations: '10/08/2026',
       generics: '03/08/2026',
+      conditions: '03/08/2026',
     });
     expect(extractSourceDatesFromHtml(html)).toEqual({
       specialtiesSourceDate: '2026-08-03',
       presentationsSourceDate: '2026-08-10',
       genericsSourceDate: '2026-08-03',
+      conditionsSourceDate: '2026-08-03',
     });
   });
 
@@ -65,6 +69,7 @@ describe('extractSourceDatesFromHtml', () => {
       specialties: '03/08/2026',
       presentations: '10/08/2026',
       generics: '03/08/2026',
+      conditions: '03/08/2026',
     }).replace(
       'Date de mise à jour : 03/08/2026, 100 Ko)</a>',
       'sans date)</a>',
@@ -80,9 +85,10 @@ describe('compareSourceDates', () => {
     specialtiesSourceDate: '2026-08-03',
     presentationsSourceDate: '2026-08-10',
     genericsSourceDate: '2026-08-03',
+    conditionsSourceDate: '2026-08-03',
   };
 
-  it('ne signale aucun changement quand les trois dates sont identiques', () => {
+  it('ne signale aucun changement quand les quatre dates sont identiques', () => {
     expect(compareSourceDates(base, { ...base })).toEqual({
       changed: false,
       changedFields: [],
@@ -97,11 +103,12 @@ describe('compareSourceDates', () => {
     });
   });
 
-  it('signale les trois champs changés', () => {
+  it('signale les quatre champs changés', () => {
     const current: SourceDates = {
       specialtiesSourceDate: '2026-09-01',
       presentationsSourceDate: '2026-09-01',
       genericsSourceDate: '2026-09-01',
+      conditionsSourceDate: '2026-09-01',
     };
     expect(compareSourceDates(base, current)).toEqual({
       changed: true,
@@ -109,6 +116,7 @@ describe('compareSourceDates', () => {
         'specialtiesSourceDate',
         'presentationsSourceDate',
         'genericsSourceDate',
+        'conditionsSourceDate',
       ],
     });
   });
@@ -131,6 +139,7 @@ describe('readSourceDatesState / writeSourceDatesState', () => {
       specialtiesSourceDate: '2026-08-03',
       presentationsSourceDate: '2026-08-10',
       genericsSourceDate: '2026-08-03',
+      conditionsSourceDate: '2026-08-03',
     };
     await writeSourceDatesState(path, dates);
     await expect(readSourceDatesState(path)).resolves.toEqual(dates);
@@ -148,6 +157,7 @@ describe('readSourceDatesState / writeSourceDatesState', () => {
       specialtiesSourceDate: '2026-08-03',
       presentationsSourceDate: '2026-08-10',
       genericsSourceDate: '2026-08-03',
+      conditionsSourceDate: '2026-08-03',
     });
     await writeFile(
       path,

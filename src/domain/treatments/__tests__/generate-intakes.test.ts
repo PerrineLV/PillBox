@@ -16,6 +16,7 @@ function treatment(phases: TreatmentPhase[]): Treatment {
     archivedAt: null,
     phases,
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
+    controlledDispensing: null,
   };
 }
 

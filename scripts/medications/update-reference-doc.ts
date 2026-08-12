@@ -22,10 +22,12 @@ function formatSnapshotSentence(dates: SourceDates): string {
   const specialties = formatFrenchDate(dates.specialtiesSourceDate);
   const presentations = formatFrenchDate(dates.presentationsSourceDate);
   const generics = formatFrenchDate(dates.genericsSourceDate);
+  const conditions = formatFrenchDate(dates.conditionsSourceDate);
   return (
     'Le snapshot actuellement livré (`assets/medications/medications.db`) a été construit avec ' +
     `le fichier des spécialités daté du **${specialties}**, ` +
-    `le fichier des présentations daté du **${presentations}** ` +
-    `et le fichier des groupes génériques daté du **${generics}**, dates affichées par la BDPM au téléchargement.`
+    `le fichier des présentations daté du **${presentations}**, ` +
+    `le fichier des groupes génériques daté du **${generics}** ` +
+    `et le fichier des conditions de prescription/délivrance daté du **${conditions}**, dates affichées par la BDPM au téléchargement.`
   );
 }

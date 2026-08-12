@@ -96,6 +96,7 @@ describe('HomeScreen', () => {
           missingHalfUnits: 10,
           ruptureDate: null,
           ruptureCause: null,
+          theoreticalRenewalDate: null,
         },
       },
       {
