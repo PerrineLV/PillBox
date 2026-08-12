@@ -6,6 +6,7 @@ import {
   intakeActionCategory,
   notificationCommand,
   OPEN_APP_ACTION,
+  VALIDATE_INTAKES_ACTION,
   type NotificationCommand,
 } from '@/domain/reminders/notification-actions';
 import {
@@ -27,10 +28,26 @@ import type { IntakeSlot } from '@/domain/treatments/treatment';
 const ANDROID_CHANNEL_ID = 'pillbox-preparation-reminders';
 const ANDROID_INTAKE_CHANNEL_ID = 'pillbox-intake-reminders';
 
-export const NEUTRAL_REMINDER_CONTENT = {
-  title: 'Rappel PillBox',
-  body: 'Une action planifiée vous attend dans l’application.',
+const APP_TITLE = 'PillBox';
+
+export const PREPARATION_REMINDER_CONTENT = {
+  title: APP_TITLE,
+  body: 'Vous avez un pilulier à remplir.',
 } as const;
+
+/**
+ * Contenu d’un rappel de prise : informe du nombre de médicaments en attente
+ * sans jamais nommer un médicament, une posologie ou un lot.
+ */
+export function intakeReminderContent(pendingCount: number): {
+  title: string;
+  body: string;
+} {
+  return {
+    title: APP_TITLE,
+    body: `Vous avez ${pendingCount} médicament${pendingCount > 1 ? 's' : ''} à prendre.`,
+  };
+}
 
 export type LocalNotificationPermission = 'granted' | 'denied' | 'blocked';
 
@@ -64,7 +81,7 @@ export async function scheduleIntakeReminder(
   await ensureIntakeActionCategories();
   return Notifications.scheduleNotificationAsync({
     content: {
-      ...NEUTRAL_REMINDER_CONTENT,
+      ...intakeReminderContent(pendingCount),
       ...intakeActionCategoryContent(pendingCount),
       data: {
         kind: INTAKE_REMINDER_KIND,
@@ -90,8 +107,7 @@ export function notificationTargetOf(
 
 /**
  * Manière dont une réponse demande l’ouverture de PillBox, ou `null` lorsqu’elle
- * ne la demande pas — le bouton de validation, notamment, agit sans ouvrir quoi
- * que ce soit.
+ * ne la demande pas.
  *
  * La distinction compte pour la suite : Android retire lui-même la notification
  * touchée en son corps (`autoDismiss`), mais laisse affichée celle dont on
@@ -104,7 +120,10 @@ export function notificationOpening(
 ): NotificationOpening | null {
   if (response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER)
     return 'tap';
-  return response.actionIdentifier === OPEN_APP_ACTION ? 'action-button' : null;
+  return response.actionIdentifier === OPEN_APP_ACTION ||
+    response.actionIdentifier === VALIDATE_INTAKES_ACTION
+    ? 'action-button'
+    : null;
 }
 
 /** Commande demandée par un bouton d’action, ou `null` pour toute autre réponse. */
@@ -143,7 +162,7 @@ export async function schedulePostponedIntakeReminder(
   await ensureIntakeActionCategories();
   return Notifications.scheduleNotificationAsync({
     content: {
-      ...NEUTRAL_REMINDER_CONTENT,
+      ...intakeReminderContent(pendingCount),
       ...intakeActionCategoryContent(pendingCount),
       data: { kind: POSTPONED_INTAKE_KIND, date, slot },
       sound: 'default',
@@ -227,7 +246,7 @@ export async function replacePreparationReminder(
   await ensureAndroidChannel();
   return Notifications.scheduleNotificationAsync({
     content: {
-      ...NEUTRAL_REMINDER_CONTENT,
+      ...PREPARATION_REMINDER_CONTENT,
       data: { kind: PREPARATION_REMINDER_KIND, url: PREPARATION_ROUTE },
       sound: 'default',
     },

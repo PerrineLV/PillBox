@@ -111,9 +111,10 @@ function ReminderCoordinator() {
  * Exécute les actions rapides des notifications de prise.
  *
  * Le composant est monté à l’intérieur de `DatabaseProvider` mais en dehors de
- * `AppLockGate` : l’action doit aboutir sans passer l’application au premier
- * plan, donc sans authentification possible. Elle n’expose aucune donnée, elle
- * écrit seulement la confirmation demandée depuis la notification.
+ * `AppLockGate` : l’écriture doit aboutir sans attendre l’authentification du
+ * verrou, qui ne concerne que l’affichage. Le bouton de validation ramène par
+ * ailleurs PillBox au premier plan (voir `notification-actions.ts`), mais
+ * cette écriture reste indépendante de la navigation qui s’ensuit.
  *
  * L’écriture est idempotente : seules les prises encore en attente changent
  * d’état. Une réponse reçue deux fois, ou rejouée au démarrage suivant, ne crée
