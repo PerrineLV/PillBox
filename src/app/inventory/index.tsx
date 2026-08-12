@@ -11,6 +11,7 @@ import {
 } from '@/domain/inventory/inventory';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { listPreparationWeeks } from '@/infrastructure/preparations/preparation-repository';
+import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import { buildInventoryAlerts } from '@/domain/alerts/inventory-alerts';
 import {
@@ -61,17 +62,28 @@ export default function InventoryScreen() {
         listMedicationBoxes(database),
         listTreatments(database),
         listPreparationWeeks(database),
+        listAllGenericEquivalenceConfirmations(database),
       ])
-        .then(([items, treatments, preparations]) => {
+        .then(([items, treatments, preparations, equivalenceConfirmations]) => {
           if (active) {
             setBoxes(items);
             const today = todayIso();
-            const alerts = buildInventoryAlerts(treatments, items, today);
+            const equivalences = equivalenceConfirmations.map(
+              (confirmation) => ({
+                treatmentId: confirmation.treatmentId,
+                cis: confirmation.cis,
+              }),
+            );
+            const alerts = buildInventoryAlerts(treatments, items, today, {
+              equivalences,
+            });
             setExpiringBoxIds(
               new Set(alerts.expirations.map((item) => item.boxId)),
             );
             setForecast(
-              buildStockForecast(treatments, items, today, preparations),
+              buildStockForecast(treatments, items, today, preparations, {
+                equivalences,
+              }),
             );
             setError(null);
           }

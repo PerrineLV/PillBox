@@ -18,6 +18,8 @@ import {
 } from 'react-native';
 
 import { ExpirationField } from '@/components/inventory/expiration-field';
+import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
+import { useGenericEquivalenceGate } from '@/components/medications/use-generic-equivalence-gate';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import { parseGs1Expiration } from '@/domain/inventory/inventory';
 import { normalizeScannedGtinToCip13 } from '@/domain/medications/normalize-scanned-identifier';
@@ -128,6 +130,10 @@ function ManualBox({
   const [quantity, setQuantity] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const genericGate = useGenericEquivalenceGate(
+    personalDatabase,
+    referenceDatabase,
+  );
 
   useEffect(() => {
     if (medication !== null) return;
@@ -159,6 +165,7 @@ function ManualBox({
     setSaving(true);
     setError(null);
     try {
+      await genericGate.checkBeforeSave(medication.cis, medication.name);
       await addMedicationBox(personalDatabase, {
         specialtyCis: medication.cis,
         specialtyName: medication.name,
@@ -296,6 +303,17 @@ function ManualBox({
         onPress={onLeave}
         disabled={saving}
       />
+      {genericGate.pendingMatch ? (
+        <GenericMatchConfirmation
+          visible
+          expectedSpecialtyName={genericGate.pendingMatch.expectedSpecialtyName}
+          scannedSpecialtyName={genericGate.pendingMatch.scannedSpecialtyName}
+          groupLabel={genericGate.pendingMatch.groupLabel}
+          busy={genericGate.busy}
+          onCancel={genericGate.skipCurrent}
+          onConfirm={() => void genericGate.confirmCurrent()}
+        />
+      ) : null}
     </Screen>
   );
 }
@@ -319,6 +337,10 @@ function ScanBox({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const locked = useRef(false);
+  const genericGate = useGenericEquivalenceGate(
+    personalDatabase,
+    referenceDatabase,
+  );
 
   useEffect(() => {
     let active = true;
@@ -379,6 +401,7 @@ function ScanBox({
     const initialQuantity = Number(quantity);
     setSaving(true);
     try {
+      await genericGate.checkBeforeSave(medication.cis, medication.name);
       await addMedicationBox(personalDatabase, {
         specialtyCis: medication.cis,
         specialtyName: medication.name,
@@ -497,6 +520,17 @@ function ScanBox({
           </Text>
         </ScrollView>
       )}
+      {genericGate.pendingMatch ? (
+        <GenericMatchConfirmation
+          visible
+          expectedSpecialtyName={genericGate.pendingMatch.expectedSpecialtyName}
+          scannedSpecialtyName={genericGate.pendingMatch.scannedSpecialtyName}
+          groupLabel={genericGate.pendingMatch.groupLabel}
+          busy={genericGate.busy}
+          onCancel={genericGate.skipCurrent}
+          onConfirm={() => void genericGate.confirmCurrent()}
+        />
+      ) : null}
     </View>
   );
 }

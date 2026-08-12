@@ -32,6 +32,7 @@ import {
   getGlobalIntakeReminderSettings,
   isIntakeRemindersEnabled,
 } from '@/infrastructure/reminders/intake-reminder-repository';
+import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
   Badge,
@@ -75,6 +76,7 @@ export default function HomeScreen() {
           localCivilDate(now),
           localCivilDate(lookaheadEnd),
         ),
+        listAllGenericEquivalenceConfirmations(database),
       ])
         .then(
           async ([
@@ -86,6 +88,7 @@ export default function HomeScreen() {
             remindersEnabled,
             slotTimes,
             pendingIntakeCounts,
+            equivalenceConfirmations,
           ]) => {
             const asNeededTreatments = treatments.filter(
               (treatment) =>
@@ -99,11 +102,20 @@ export default function HomeScreen() {
             );
             if (!active) return;
 
+            const equivalences = equivalenceConfirmations.map(
+              (confirmation) => ({
+                treatmentId: confirmation.treatmentId,
+                cis: confirmation.cis,
+              }),
+            );
             const forecast = buildStockForecast(
               treatments,
               boxes,
               today,
               weeks,
+              {
+                equivalences,
+              },
             );
             const asNeededInputs: AsNeededTreatmentInput[] =
               asNeededTreatments.map((treatment, index) => ({
@@ -133,8 +145,9 @@ export default function HomeScreen() {
                   : null,
                 knownPreparationWeeks: weeks,
                 renewalItems: buildRenewalList(forecast),
-                expirations: buildInventoryAlerts(treatments, boxes, today)
-                  .expirations,
+                expirations: buildInventoryAlerts(treatments, boxes, today, {
+                  equivalences,
+                }).expirations,
                 asNeededTreatments: asNeededInputs,
               }),
             );

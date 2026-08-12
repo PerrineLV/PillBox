@@ -7,6 +7,8 @@ import { AppModal, typography } from '@/ui';
  * une boîte d'un autre membre du même groupe générique officiel (BDPM) que
  * la spécialité attendue. Purement informatif jusqu'à la confirmation :
  * aucune acceptation automatique n'a lieu tant que cette modale est visible.
+ * Partagée entre la désignation d'une boîte pendant une préparation et son
+ * ajout au stock (ticket 24).
  */
 export function GenericMatchConfirmation({
   visible,

@@ -7,7 +7,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { GenericMatchConfirmation } from '@/components/preparations/generic-match-confirmation';
+import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import {
   formatFrenchCivilPeriod,
@@ -59,6 +59,7 @@ import {
 import {
   confirmGenericEquivalence,
   isGenericEquivalenceConfirmed,
+  listAllGenericEquivalenceConfirmations,
 } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
@@ -292,11 +293,17 @@ function NewPreparationScreenContent({
     try {
       const referenceDate = todayIso();
       const treatments = await listTreatments(personalDatabase);
+      const equivalenceConfirmations =
+        await listAllGenericEquivalenceConfirmations(personalDatabase);
       const generated = generatePreparationSnapshot(
         treatments,
         boxes,
         selectedWeek.startDate,
         referenceDate,
+        equivalenceConfirmations.map((confirmation) => ({
+          treatmentId: confirmation.treatmentId,
+          cis: confirmation.cis,
+        })),
       );
       const id = await createPreparation(personalDatabase, generated);
       setSnapshot(generated);

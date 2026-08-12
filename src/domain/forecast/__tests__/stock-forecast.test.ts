@@ -5,7 +5,11 @@ import {
   type MedicationForecast,
 } from '../stock-forecast';
 import type { MedicationBox } from '@/domain/inventory/inventory';
-import type { KnownPreparation } from '@/domain/preparations/preparation';
+import {
+  generatePreparationSnapshot,
+  type KnownPreparation,
+  type TreatmentGenericEquivalence,
+} from '@/domain/preparations/preparation';
 import type {
   PhaseFrequency,
   Treatment,
@@ -57,7 +61,10 @@ const only = (
   treatments: readonly Treatment[],
   boxes: readonly MedicationBox[],
   preparations: readonly KnownPreparation[] = [],
-  options?: Readonly<{ horizonDays?: number }>,
+  options?: Readonly<{
+    horizonDays?: number;
+    equivalences?: readonly TreatmentGenericEquivalence[];
+  }>,
 ): MedicationForecast => {
   const forecast = buildStockForecast(
     treatments,
@@ -403,6 +410,102 @@ describe('prévision de consommation', () => {
   it('refuse une date de référence invalide', () => {
     expect(() => buildStockForecast([], [], '09/08/2026', [])).toThrow(
       'Date invalide.',
+    );
+  });
+});
+
+describe('comptage du stock équivalent générique confirmé (ticket 24b)', () => {
+  it('ne change rien pour un traitement sans équivalence mémorisée', () => {
+    expect(only([treatment()], [box({ remainingQuantity: 10 })])).toMatchObject(
+      {
+        availableHalfUnits: 20,
+        nextPreparationHalfUnits: 14,
+        missingHalfUnits: 0,
+      },
+    );
+  });
+
+  it("compte, dans la prévision, une boîte d'un CIS confirmé comme équivalence pour ce traitement exactement comme le ferait la même quantité dans son propre CIS", () => {
+    const forecast = buildStockForecast(
+      [treatment()],
+      [box({ specialtyCis: '60000002', remainingQuantity: 10 })],
+      TODAY,
+      [],
+      { equivalences: [{ treatmentId: 1, cis: '60000002' }] },
+    );
+    const alpha = forecast.medications.find(
+      (item) => item.specialtyCis === '60000001',
+    );
+    // Même résultat que « calcule la rupture d'une posologie quotidienne »,
+    // qui utilise une boîte du CIS exact avec la même quantité restante.
+    expect(alpha).toMatchObject({
+      availableHalfUnits: 20,
+      nextPreparationHalfUnits: 14,
+      missingHalfUnits: 0,
+      insufficientForNextPreparation: false,
+      coverage: {
+        status: 'RUNS_OUT',
+        date: '2026-08-20',
+        cause: 'CONSUMED',
+        coveredDays: 10,
+      },
+    });
+  });
+
+  it('additionne les boîtes de CIS exact et de CIS équivalent confirmé', () => {
+    const forecast = buildStockForecast(
+      [treatment()],
+      [
+        box({ remainingQuantity: 3 }),
+        box({ id: 2, specialtyCis: '60000002', remainingQuantity: 4 }),
+      ],
+      TODAY,
+      [],
+      { equivalences: [{ treatmentId: 1, cis: '60000002' }] },
+    );
+    const alpha = forecast.medications.find(
+      (item) => item.specialtyCis === '60000001',
+    );
+    expect(alpha).toMatchObject({ availableHalfUnits: 14 });
+  });
+
+  it('exclut toujours un CIS du même groupe générique mais jamais confirmé pour ce traitement précis', () => {
+    const forecast = buildStockForecast(
+      [treatment()],
+      [box({ specialtyCis: '60000002', remainingQuantity: 10 })],
+      TODAY,
+      [],
+      { equivalences: [{ treatmentId: 42, cis: '60000002' }] },
+    );
+    const alpha = forecast.medications.find(
+      (item) => item.specialtyCis === '60000001',
+    );
+    expect(alpha?.missingHalfUnits).toBeGreaterThan(0);
+  });
+
+  it('reste cohérent avec generatePreparationSnapshot sur un même jeu de données', () => {
+    const equivalences: TreatmentGenericEquivalence[] = [
+      { treatmentId: 1, cis: '60000002' },
+    ];
+    const boxes = [
+      box({ remainingQuantity: 3 }),
+      box({ id: 2, specialtyCis: '60000002', remainingQuantity: 4 }),
+    ];
+    const forecast = buildStockForecast([treatment()], boxes, TODAY, [], {
+      equivalences,
+    });
+    const alpha = forecast.medications.find(
+      (item) => item.specialtyCis === '60000001',
+    );
+    const snapshot = generatePreparationSnapshot(
+      [treatment()],
+      boxes,
+      forecastStartDate(TODAY, []),
+      forecastStartDate(TODAY, []),
+      equivalences,
+    );
+    expect(alpha?.availableHalfUnits).toBe(
+      snapshot.requirements[0].usableStockHalfUnits,
     );
   });
 });

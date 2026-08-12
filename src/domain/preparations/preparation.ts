@@ -96,6 +96,61 @@ export type MedicationRequirement = Readonly<{
   missingHalfUnits: number;
 }>;
 
+/**
+ * Équivalence générique confirmée et mémorisée pour un traitement précis
+ * (ticket 24) : le CIS d'un autre membre du même groupe générique officiel,
+ * explicitement accepté pour ce traitement. Le domaine ne lit jamais la
+ * mémorisation elle-même (infrastructure) ; l'appelant fournit cette liste
+ * déjà chargée, afin de ne créer aucune dépendance vers l'infrastructure ou
+ * vers le module de vérification de boîte.
+ */
+export type TreatmentGenericEquivalence = Readonly<{
+  treatmentId: number;
+  cis: string;
+}>;
+
+/**
+ * Pour chaque CIS porté par au moins un traitement, l'ensemble des CIS dont
+ * le stock compte pour ce traitement : lui-même, plus les CIS confirmés
+ * comme équivalence générique pour n'importe lequel des traitements qui
+ * partagent ce CIS. Un CIS jamais confirmé pour ce traitement précis n'est
+ * jamais ajouté, même s'il appartient au même groupe générique officiel :
+ * seules les équivalences explicitement mémorisées comptent, jamais une
+ * déduction par groupe. Factorisé ici afin que `generatePreparationSnapshot`
+ * et `buildStockForecast` restent cohérents entre eux.
+ */
+export function buildAcceptedCisIndex(
+  treatments: readonly Treatment[],
+  equivalences: readonly TreatmentGenericEquivalence[],
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const treatmentIdsByCis = new Map<string, Set<number>>();
+  for (const treatment of treatments) {
+    const ids =
+      treatmentIdsByCis.get(treatment.specialtyCis) ?? new Set<number>();
+    ids.add(treatment.id);
+    treatmentIdsByCis.set(treatment.specialtyCis, ids);
+  }
+
+  const extraCisByTreatmentId = new Map<number, Set<string>>();
+  for (const equivalence of equivalences) {
+    const extra =
+      extraCisByTreatmentId.get(equivalence.treatmentId) ?? new Set<string>();
+    extra.add(equivalence.cis);
+    extraCisByTreatmentId.set(equivalence.treatmentId, extra);
+  }
+
+  const index = new Map<string, ReadonlySet<string>>();
+  for (const [cis, treatmentIds] of treatmentIdsByCis) {
+    const accepted = new Set<string>([cis]);
+    for (const treatmentId of treatmentIds) {
+      const extra = extraCisByTreatmentId.get(treatmentId);
+      if (extra) for (const extraCis of extra) accepted.add(extraCis);
+    }
+    index.set(cis, accepted);
+  }
+  return index;
+}
+
 export type PreparationSnapshot = Readonly<{
   startDate: string;
   endDate: string;
@@ -405,6 +460,7 @@ export function generatePreparationSnapshot(
   boxes: readonly MedicationBox[],
   startDate: string,
   stockReferenceDate: string,
+  equivalences: readonly TreatmentGenericEquivalence[] = [],
 ): PreparationSnapshot {
   const endDate = preparationEndDate(startDate);
   // Valide aussi la date de référence, même lorsque le stock est vide.
@@ -443,9 +499,15 @@ export function generatePreparationSnapshot(
       (stockByCis.get(box.specialtyCis) ?? 0) + quantityHalfUnits,
     );
   }
+  const acceptedCisIndex = buildAcceptedCisIndex(treatments, equivalences);
   const requirements = [...requirementsByCis.entries()]
     .map(([specialtyCis, requirement]) => {
-      const usableStockHalfUnits = stockByCis.get(specialtyCis) ?? 0;
+      const acceptedCis =
+        acceptedCisIndex.get(specialtyCis) ?? new Set([specialtyCis]);
+      const usableStockHalfUnits = [...acceptedCis].reduce(
+        (sum, cis) => sum + (stockByCis.get(cis) ?? 0),
+        0,
+      );
       return Object.freeze({
         specialtyCis,
         specialtyName: requirement.specialtyName,

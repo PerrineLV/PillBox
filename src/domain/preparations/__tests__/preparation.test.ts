@@ -3,6 +3,7 @@ import type { Treatment } from '@/domain/treatments/treatment';
 
 import {
   assertVerificationEvidence,
+  buildAcceptedCisIndex,
   effectiveUsableBoxes,
   evaluateBoxAvailability,
   generatePreparationSnapshot,
@@ -164,6 +165,107 @@ describe('génération d’une préparation de sept jours', () => {
     expect(snapshot.items).toEqual([]);
     expect(snapshot.requirements).toEqual([]);
     expect(snapshot.hasShortages).toBe(false);
+  });
+});
+
+describe('comptage du stock équivalent générique confirmé (ticket 24b)', () => {
+  it('ne change rien pour un traitement sans équivalence mémorisée', () => {
+    const snapshot = generatePreparationSnapshot(
+      [treatment()],
+      [box({ remainingQuantity: 6 })],
+      '2026-08-03',
+      '2026-08-03',
+      [],
+    );
+    expect(snapshot.requirements[0]).toMatchObject({
+      requiredHalfUnits: 14,
+      usableStockHalfUnits: 12,
+      missingHalfUnits: 2,
+    });
+  });
+
+  it("compte une boîte d'un CIS confirmé comme équivalence pour ce traitement, même si le stock est entièrement dans ce CIS équivalent", () => {
+    const snapshot = generatePreparationSnapshot(
+      [treatment()],
+      [box({ specialtyCis: '60000002', remainingQuantity: 10 })],
+      '2026-08-03',
+      '2026-08-03',
+      [{ treatmentId: 1, cis: '60000002' }],
+    );
+    expect(snapshot.requirements[0]).toMatchObject({
+      specialtyCis: '60000001',
+      requiredHalfUnits: 14,
+      usableStockHalfUnits: 20,
+      missingHalfUnits: 0,
+    });
+    expect(snapshot.hasShortages).toBe(false);
+  });
+
+  it('additionne les boîtes de CIS exact et de CIS équivalent confirmé', () => {
+    const snapshot = generatePreparationSnapshot(
+      [treatment()],
+      [
+        box({ remainingQuantity: 3 }),
+        box({ id: 2, specialtyCis: '60000002', remainingQuantity: 4 }),
+      ],
+      '2026-08-03',
+      '2026-08-03',
+      [{ treatmentId: 1, cis: '60000002' }],
+    );
+    expect(snapshot.requirements[0]).toMatchObject({
+      requiredHalfUnits: 14,
+      usableStockHalfUnits: 14,
+      missingHalfUnits: 0,
+    });
+  });
+
+  it('exclut toujours un CIS du même groupe générique mais jamais confirmé pour ce traitement précis', () => {
+    const snapshot = generatePreparationSnapshot(
+      [treatment()],
+      [box({ specialtyCis: '60000002', remainingQuantity: 10 })],
+      '2026-08-03',
+      '2026-08-03',
+      [{ treatmentId: 42, cis: '60000002' }],
+    );
+    expect(snapshot.requirements[0]).toMatchObject({
+      usableStockHalfUnits: 0,
+      missingHalfUnits: 14,
+    });
+  });
+
+  it('ne modifie jamais le CIS du traitement ni celui enregistré sur la boîte', () => {
+    const source = treatment();
+    const equivalentBox = box({
+      specialtyCis: '60000002',
+      remainingQuantity: 10,
+    });
+    generatePreparationSnapshot(
+      [source],
+      [equivalentBox],
+      '2026-08-03',
+      '2026-08-03',
+      [{ treatmentId: 1, cis: '60000002' }],
+    );
+    expect(source.specialtyCis).toBe('60000001');
+    expect(equivalentBox.specialtyCis).toBe('60000002');
+  });
+});
+
+describe('index des CIS acceptés par équivalence mémorisée', () => {
+  it('regroupe les équivalences de tous les traitements partageant un même CIS', () => {
+    const index = buildAcceptedCisIndex(
+      [treatment(), treatment({ id: 2 })],
+      [{ treatmentId: 2, cis: '60000002' }],
+    );
+    expect(index.get('60000001')).toEqual(new Set(['60000001', '60000002']));
+  });
+
+  it('ne propage jamais une équivalence à un traitement pour lequel elle n’a pas été confirmée', () => {
+    const index = buildAcceptedCisIndex(
+      [treatment({ id: 1, specialtyCis: '60000001' })],
+      [{ treatmentId: 99, cis: '60000002' }],
+    );
+    expect(index.get('60000001')).toEqual(new Set(['60000001']));
   });
 });
 

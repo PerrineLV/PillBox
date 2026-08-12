@@ -2,6 +2,7 @@ import { isExpired, type MedicationBox } from '@/domain/inventory/inventory';
 import {
   generatePreparationSnapshot,
   preparationStartDate,
+  type TreatmentGenericEquivalence,
 } from '@/domain/preparations/preparation';
 import type { Treatment } from '@/domain/treatments/treatment';
 
@@ -42,6 +43,7 @@ export function buildInventoryAlerts(
   options: Readonly<{
     lowStockMarginPercent?: number;
     expirationWarningDays?: number;
+    equivalences?: readonly TreatmentGenericEquivalence[];
   }> = {},
 ): InventoryAlerts {
   const lowStockMarginPercent =
@@ -56,6 +58,7 @@ export function buildInventoryAlerts(
     boxes,
     preparationStartDate(referenceDate),
     referenceDate,
+    options.equivalences ?? [],
   );
   const stock = snapshot.requirements.flatMap((requirement): StockAlert[] => {
     const closeLimit =
