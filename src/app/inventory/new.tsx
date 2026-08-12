@@ -17,7 +17,9 @@ import {
   View,
 } from 'react-native';
 
+import { DuplicateLotConfirmation } from '@/components/inventory/duplicate-lot-confirmation';
 import { ExpirationField } from '@/components/inventory/expiration-field';
+import { useDuplicateLotGate } from '@/components/inventory/use-duplicate-lot-gate';
 import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
 import { useDraftGenericEquivalencePrompt } from '@/components/medications/use-draft-generic-equivalence-prompt';
 import { useGenericEquivalenceGate } from '@/components/medications/use-generic-equivalence-gate';
@@ -200,6 +202,7 @@ function ManualBox({
     draftTreatmentCis,
     draftTreatmentName,
   );
+  const duplicateLotGate = useDuplicateLotGate(personalDatabase);
 
   useEffect(() => {
     if (medication !== null) return;
@@ -236,6 +239,11 @@ function ManualBox({
         medication.cis,
         medication.name,
       );
+      const proceed = await duplicateLotGate.checkBeforeSave(
+        medication.cip13,
+        lot,
+      );
+      if (!proceed) return;
       await addMedicationBox(personalDatabase, {
         specialtyCis: medication.cis,
         specialtyName: medication.name,
@@ -402,6 +410,14 @@ function ManualBox({
           onConfirm={draftPrompt.confirm}
         />
       ) : null}
+      {duplicateLotGate.pendingDuplicate ? (
+        <DuplicateLotConfirmation
+          visible
+          existingBox={duplicateLotGate.pendingDuplicate}
+          onCancel={duplicateLotGate.cancel}
+          onConfirm={duplicateLotGate.confirm}
+        />
+      ) : null}
     </Screen>
   );
 }
@@ -439,6 +455,7 @@ function ScanBox({
     draftTreatmentCis,
     draftTreatmentName,
   );
+  const duplicateLotGate = useDuplicateLotGate(personalDatabase);
 
   useEffect(() => {
     let active = true;
@@ -504,6 +521,11 @@ function ScanBox({
         medication.cis,
         medication.name,
       );
+      const proceed = await duplicateLotGate.checkBeforeSave(
+        medication.cip13,
+        lot,
+      );
+      if (!proceed) return;
       await addMedicationBox(personalDatabase, {
         specialtyCis: medication.cis,
         specialtyName: medication.name,
@@ -649,6 +671,14 @@ function ScanBox({
           busy={false}
           onCancel={draftPrompt.skip}
           onConfirm={draftPrompt.confirm}
+        />
+      ) : null}
+      {duplicateLotGate.pendingDuplicate ? (
+        <DuplicateLotConfirmation
+          visible
+          existingBox={duplicateLotGate.pendingDuplicate}
+          onCancel={duplicateLotGate.cancel}
+          onConfirm={duplicateLotGate.confirm}
         />
       ) : null}
     </View>

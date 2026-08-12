@@ -105,6 +105,30 @@ export function assertValidBoxDraft(draft: MedicationBoxDraft): void {
   }
 }
 
+/**
+ * Boîte déjà en stock partageant exactement le même lot pour la même
+ * présentation, avec un stock restant positif — susceptible de trahir une
+ * erreur de saisie du lot plutôt qu'un achat volontaire de plusieurs boîtes
+ * identiques (ticket 33). Un lot vide n'a aucune valeur de comparaison ; une
+ * boîte déjà épuisée n'est plus une source d'ambiguïté pour le remplissage.
+ */
+export function findDuplicateLotBox(
+  existingBoxes: readonly MedicationBox[],
+  presentationCip13: string,
+  lot: string | null,
+): MedicationBox | null {
+  const trimmedLot = (lot ?? '').trim();
+  if (trimmedLot === '') return null;
+  return (
+    existingBoxes.find(
+      (box) =>
+        box.presentationCip13 === presentationCip13 &&
+        (box.lot ?? '').trim() === trimmedLot &&
+        box.remainingQuantity > 0,
+    ) ?? null
+  );
+}
+
 export function assertIsoDate(value: string): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error('La péremption doit être au format AAAA-MM-JJ.');

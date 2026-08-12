@@ -1,5 +1,6 @@
 import {
   assertValidBoxDraft,
+  findDuplicateLotBox,
   isExpired,
   parseGs1Expiration,
   usableQuantity,
@@ -114,5 +115,50 @@ describe('inventaire', () => {
         expirationDate: '',
       }),
     ).toThrow('AAAA-MM-JJ');
+  });
+});
+
+describe('détection d’un lot déjà en stock', () => {
+  it('signale une boîte existante du même lot, pour la même présentation, avec du stock restant', () => {
+    const existing = { ...box, id: 2, remainingQuantity: 5 };
+    expect(
+      findDuplicateLotBox([existing], box.presentationCip13, box.lot),
+    ).toBe(existing);
+  });
+
+  it('ignore une boîte du même lot dont le stock restant est épuisé', () => {
+    const exhausted = { ...box, id: 2, remainingQuantity: 0 };
+    expect(
+      findDuplicateLotBox([exhausted], box.presentationCip13, box.lot),
+    ).toBeNull();
+  });
+
+  it('ne compare jamais un lot vide, ni côté nouvelle boîte ni côté stock', () => {
+    const existing = { ...box, id: 2, remainingQuantity: 5 };
+    expect(
+      findDuplicateLotBox([existing], box.presentationCip13, null),
+    ).toBeNull();
+    expect(
+      findDuplicateLotBox([existing], box.presentationCip13, '   '),
+    ).toBeNull();
+    expect(
+      findDuplicateLotBox(
+        [{ ...existing, lot: null }],
+        box.presentationCip13,
+        box.lot,
+      ),
+    ).toBeNull();
+  });
+
+  it('ne compare jamais deux présentations différentes, même avec un lot identique', () => {
+    const existing = {
+      ...box,
+      id: 2,
+      remainingQuantity: 5,
+      presentationCip13: '3400000000001',
+    };
+    expect(
+      findDuplicateLotBox([existing], box.presentationCip13, box.lot),
+    ).toBeNull();
   });
 });
