@@ -28,6 +28,7 @@ import {
   colors,
   spacing,
   typography,
+  useToast,
 } from '@/ui';
 import {
   formatFrenchDateTime,
@@ -36,6 +37,7 @@ import {
 
 export default function BoxDetailScreen() {
   const database = useSQLiteContext();
+  const { showToast } = useToast();
   const { id: idParam } = useLocalSearchParams<{ id: string }>();
   const id = Number(idParam);
   const [box, setBox] = useState<MedicationBox | null>(null);
@@ -86,6 +88,7 @@ export default function BoxDetailScreen() {
       setExplanation('');
       setError(null);
       await load();
+      showToast('Ajustement du stock enregistré.', 'success');
     } catch (reason: unknown) {
       setError(
         reason instanceof Error ? reason.message : 'Ajustement impossible.',

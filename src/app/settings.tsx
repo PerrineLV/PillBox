@@ -78,11 +78,11 @@ import {
   Card,
   Divider,
   INTAKE_SLOT_LABELS,
-  Message,
   SectionTitle,
   SelectField,
   SlotCard,
   SlotGrid,
+  useToast,
   WEEKDAY_LABELS,
   WEEKDAY_OPTIONS,
   colors,
@@ -106,6 +106,7 @@ const DEFAULT_SLOT_TIMES: GlobalIntakeReminderSettings = {
 
 export default function SettingsScreen() {
   const database = useSQLiteContext();
+  const { showToast } = useToast();
   const [schedule, setSchedule] = useState(DEFAULT_SCHEDULE);
   const [enabled, setEnabled] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -113,7 +114,6 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [backupBusy, setBackupBusy] = useState(false);
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
   const [pendingRestore, setPendingRestore] = useState<{
@@ -171,8 +171,9 @@ export default function SettingsScreen() {
             await synchronizeIntakeReminders(database);
             setIntakeRemindersEnabledState(false);
             if (active)
-              setMessage(
+              showToast(
                 'Les rappels ont été désactivés car les notifications ne sont plus autorisées.',
+                'warning',
               );
           } else {
             setIntakeRemindersEnabledState(intakeEnabled);
@@ -181,8 +182,9 @@ export default function SettingsScreen() {
             await cancelPreparationReminders();
             await savePreparationReminderSettings(database, loaded, null);
             if (active)
-              setMessage(
+              showToast(
                 'Le rappel a été désactivé car les notifications ne sont plus autorisées.',
+                'warning',
               );
           } else {
             setEnabled(settings.enabled);
@@ -190,7 +192,7 @@ export default function SettingsScreen() {
         },
       )
       .catch((reason: unknown) => {
-        if (active) setMessage(errorMessage(reason));
+        if (active) showToast(errorMessage(reason), 'error');
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -198,19 +200,18 @@ export default function SettingsScreen() {
     return () => {
       active = false;
     };
-  }, [database]);
+  }, [database, showToast]);
 
   async function setReminderEnabled(nextEnabled: boolean): Promise<void> {
     if (saving) return;
     setSaving(true);
-    setMessage(null);
     try {
       if (!nextEnabled) {
         await cancelPreparationReminders();
         await savePreparationReminderSettings(database, schedule, null);
         setEnabled(false);
         setDirty(false);
-        setMessage('Rappel désactivé.');
+        showToast('Rappel désactivé.', 'success');
         return;
       }
       const permission = await requestLocalNotificationPermission();
@@ -219,10 +220,11 @@ export default function SettingsScreen() {
         await cancelPreparationReminders();
         await savePreparationReminderSettings(database, schedule, null);
         setEnabled(false);
-        setMessage(
+        showToast(
           permission === 'blocked'
             ? 'Les notifications sont définitivement refusées. Autorisez-les dans les réglages Android.'
             : 'Permission refusée : aucun rappel n’a été programmé. Vous pouvez l’autoriser dans les réglages Android.',
+          'warning',
         );
         return;
       }
@@ -231,7 +233,7 @@ export default function SettingsScreen() {
       await cancelPreparationReminders();
       await savePreparationReminderSettings(database, schedule, null);
       setEnabled(false);
-      setMessage(errorMessage(reason));
+      showToast(errorMessage(reason), 'error');
     } finally {
       setSaving(false);
     }
@@ -240,7 +242,6 @@ export default function SettingsScreen() {
   async function saveSchedule(): Promise<void> {
     if (saving || !enabled) return;
     setSaving(true);
-    setMessage(null);
     try {
       await savePreparationReminderSettings(database, schedule, null);
       setEnabled(false);
@@ -249,7 +250,7 @@ export default function SettingsScreen() {
       await cancelPreparationReminders();
       await savePreparationReminderSettings(database, schedule, null);
       setEnabled(false);
-      setMessage(errorMessage(reason));
+      showToast(errorMessage(reason), 'error');
     } finally {
       setSaving(false);
     }
@@ -261,8 +262,9 @@ export default function SettingsScreen() {
     setEnabled(true);
     setDirty(false);
     setPermissionDenied(false);
-    setMessage(
+    showToast(
       `Rappel programmé le ${WEEKDAY_LABELS[schedule.weekday].toLowerCase()} à ${formatReminderTime(schedule.hour, schedule.minute)}.`,
+      'success',
     );
   }
 
@@ -299,14 +301,13 @@ export default function SettingsScreen() {
   async function saveIntakeSlotTimes(): Promise<void> {
     if (saving) return;
     setSaving(true);
-    setMessage(null);
     try {
       await saveGlobalIntakeReminderSettings(database, slotTimes);
       await synchronizeIntakeReminders(database);
       setSlotTimesDirty(false);
-      setMessage('Heures des rappels de prise enregistrées.');
+      showToast('Heures des rappels de prise enregistrées.', 'success');
     } catch (reason: unknown) {
-      setMessage(errorMessage(reason));
+      showToast(errorMessage(reason), 'error');
     } finally {
       setSaving(false);
     }
@@ -317,16 +318,16 @@ export default function SettingsScreen() {
   ): Promise<void> {
     if (saving) return;
     setSaving(true);
-    setMessage(null);
     try {
       if (nextEnabled) {
         const permission = await requestLocalNotificationPermission();
         setPermissionDenied(permission !== 'granted');
         if (permission !== 'granted') {
-          setMessage(
+          showToast(
             permission === 'blocked'
               ? 'Les notifications sont définitivement refusées. Autorisez-les dans les réglages Android.'
               : 'Permission refusée : aucun rappel de prise n’a été programmé.',
+            'warning',
           );
           return;
         }
@@ -334,13 +335,14 @@ export default function SettingsScreen() {
       await setIntakeRemindersEnabled(database, nextEnabled);
       await synchronizeIntakeReminders(database);
       setIntakeRemindersEnabledState(nextEnabled);
-      setMessage(
+      showToast(
         nextEnabled
           ? 'Rappels de prise activés pour tous les traitements non archivés.'
           : 'Rappels de prise désactivés.',
+        'success',
       );
     } catch (reason: unknown) {
-      setMessage(errorMessage(reason));
+      showToast(errorMessage(reason), 'error');
     } finally {
       setSaving(false);
     }
@@ -350,19 +352,20 @@ export default function SettingsScreen() {
     if (backupBusy) return;
     setBackupBusy(true);
     setExportConfirmationVisible(false);
-    setMessage(null);
     try {
       const createdAt = new Date().toISOString();
       const backup = await createBackup(database, createdAt, sha256);
       await shareBackup(backup);
       await recordSuccessfulBackup(database, createdAt);
       setLastBackupAt(createdAt);
-      setMessage(
+      showToast(
         'Sauvegarde exportée avec succès. Conservez ce fichier dans un emplacement sûr.',
+        'success',
       );
     } catch (reason: unknown) {
-      setMessage(
+      showToast(
         backupErrorMessage('La sauvegarde n’a pas pu être exportée', reason),
+        'error',
       );
     } finally {
       setBackupBusy(false);
@@ -372,35 +375,40 @@ export default function SettingsScreen() {
   async function updateAppLock(nextEnabled: boolean): Promise<void> {
     if (privacyBusy) return;
     setPrivacyBusy(true);
-    setMessage(null);
     try {
       if (nextEnabled) {
         const availability = await getLocalAuthAvailability();
         if (availability !== 'available') {
-          setMessage(
+          showToast(
             availability === 'not-enrolled'
               ? 'Configurez d’abord une biométrie sécurisée dans Android.'
               : 'L’authentification locale sécurisée n’est pas disponible sur cet appareil.',
+            'warning',
           );
           return;
         }
         const result = await authenticateLocally();
         if (!result.success) {
-          setMessage(
+          showToast(
             'Activation annulée : votre identité n’a pas été vérifiée.',
+            'warning',
           );
           return;
         }
       }
       await setAppLockEnabled(database, nextEnabled);
       setAppLockEnabledState(nextEnabled);
-      setMessage(
+      showToast(
         nextEnabled
           ? 'Verrouillage local activé.'
           : 'Verrouillage local désactivé.',
+        'success',
       );
     } catch {
-      setMessage('Le réglage de verrouillage n’a pas pu être enregistré.');
+      showToast(
+        'Le réglage de verrouillage n’a pas pu être enregistré.',
+        'error',
+      );
     } finally {
       setPrivacyBusy(false);
     }
@@ -409,7 +417,6 @@ export default function SettingsScreen() {
   async function selectBackup(): Promise<void> {
     if (backupBusy) return;
     setBackupBusy(true);
-    setMessage(null);
     setPendingRestore(null);
     try {
       const serialized = await chooseBackupFile();
@@ -418,7 +425,10 @@ export default function SettingsScreen() {
       await validateBackupCanRestore(candidate.backup);
       setPendingRestore(candidate);
     } catch (reason: unknown) {
-      setMessage(backupErrorMessage('La sauvegarde a été refusée', reason));
+      showToast(
+        backupErrorMessage('La sauvegarde a été refusée', reason),
+        'error',
+      );
     } finally {
       setBackupBusy(false);
     }
@@ -432,7 +442,6 @@ export default function SettingsScreen() {
   async function performRestore(): Promise<void> {
     if (pendingRestore === null || backupBusy) return;
     setBackupBusy(true);
-    setMessage(null);
     try {
       const safety = await createBackup(
         database,
@@ -474,8 +483,9 @@ export default function SettingsScreen() {
         setSlotTimesDirty(false);
         await synchronizeIntakeReminders(database);
         await reconcileIntakePostponements(database);
-        setMessage(
+        showToast(
           'Sauvegarde restaurée intégralement. Une copie de sécurité de l’ancien état est conservée sur ce téléphone.',
+          'success',
         );
       } catch (reason: unknown) {
         try {
@@ -492,19 +502,21 @@ export default function SettingsScreen() {
           // réconciliera à nouveau le rappel natif avec le réglage local.
         }
         setEnabled(false);
-        setMessage(
+        showToast(
           backupErrorMessage(
             'Les données ont bien été restaurées, mais le rappel local doit être reconfiguré',
             reason,
           ),
+          'warning',
         );
       }
     } catch (reason: unknown) {
-      setMessage(
+      showToast(
         backupErrorMessage(
           'La restauration a échoué ; les données précédentes ont été conservées',
           reason,
         ),
+        'error',
       );
     } finally {
       setBackupBusy(false);
@@ -688,7 +700,6 @@ export default function SettingsScreen() {
         />
       ) : null}
       {saving ? <ActivityIndicator /> : null}
-      {message ? <Message>{message}</Message> : null}
       {permissionDenied ? (
         <Pressable onPress={() => void Linking.openSettings()}>
           <Text style={styles.linkText}>Ouvrir les réglages Android</Text>

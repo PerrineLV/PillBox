@@ -15,7 +15,7 @@ import {
   useDatabaseTaskQueue,
 } from '@/infrastructure/database/database-provider';
 import { AppLockGate } from '@/components/privacy/app-lock-gate';
-import { BottomNavigation, colors, typography } from '@/ui';
+import { BottomNavigation, colors, ToastProvider, typography } from '@/ui';
 import {
   createDeferredNotificationNavigation,
   PLANNED_INTAKE_ROUTE,
@@ -51,29 +51,31 @@ export default function RootLayout() {
   );
   return (
     <DatabaseProvider>
-      <ReminderCoordinator />
-      <IntakeActionCoordinator />
-      <AppLockGate>
-        <View style={{ flex: 1 }}>
-          <SafeAreaView
-            edges={rootScreen ? ['top'] : []}
-            style={styles.navigationContent}
-          >
-            <Stack
-              screenOptions={{
-                contentStyle: { backgroundColor: colors.background },
-                headerBackButtonDisplayMode: 'minimal',
-                headerShadowVisible: false,
-                headerStyle: { backgroundColor: colors.background },
-                headerTintColor: colors.brand,
-                headerTitleStyle: typography.heading,
-                headerShown: false,
-              }}
-            />
-          </SafeAreaView>
-          <BottomNavigation />
-        </View>
-      </AppLockGate>
+      <ToastProvider>
+        <ReminderCoordinator />
+        <IntakeActionCoordinator />
+        <AppLockGate>
+          <View style={{ flex: 1 }}>
+            <SafeAreaView
+              edges={rootScreen ? ['top'] : []}
+              style={styles.navigationContent}
+            >
+              <Stack
+                screenOptions={{
+                  contentStyle: { backgroundColor: colors.background },
+                  headerBackButtonDisplayMode: 'minimal',
+                  headerShadowVisible: false,
+                  headerStyle: { backgroundColor: colors.background },
+                  headerTintColor: colors.brand,
+                  headerTitleStyle: typography.heading,
+                  headerShown: false,
+                }}
+              />
+            </SafeAreaView>
+            <BottomNavigation />
+          </View>
+        </AppLockGate>
+      </ToastProvider>
     </DatabaseProvider>
   );
 }
