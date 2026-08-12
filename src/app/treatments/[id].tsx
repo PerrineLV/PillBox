@@ -1,9 +1,10 @@
+import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
+import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 
-import { GenericGroupSectionWithDatabase } from '@/components/medications/generic-group-section';
+import { GenericGroupSection } from '@/components/medications/generic-group-section';
 import { AsNeededIntakeLog } from '@/components/treatments/as-needed-intake-log';
 import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
 import { GenericEquivalenceList } from '@/components/treatments/generic-equivalence-list';
@@ -109,43 +110,62 @@ export default function EditTreatmentScreen() {
       {!error && treatment === null ? (
         <LoadingState label="Chargement du traitement…" />
       ) : null}
-      {treatment && treatment.archivedAt === null ? (
-        treatment.dosageKind === 'AS_NEEDED' ? (
-          <AsNeededTreatmentForm
-            initialValue={treatment}
-            submitLabel="Enregistrer les modifications"
-            onSubmit={async (draft) => {
-              await updateTreatment(database, {
-                ...draft,
-                id: treatment.id,
-                archivedAt: treatment.archivedAt,
-              });
-              router.replace('/treatments');
-            }}
-          />
-        ) : (
-          <TreatmentForm
-            initialValue={treatment}
-            submitLabel="Enregistrer les modifications"
-            onSubmit={async (draft) => {
-              await updateTreatment(database, {
-                ...draft,
-                id: treatment.id,
-                archivedAt: treatment.archivedAt,
-              });
-              await synchronizeTreatmentIntakeReminders(database, treatment.id);
-              router.replace('/treatments');
-            }}
-          />
-        )
-      ) : null}
-      {treatment?.archivedAt ? (
-        <Message tone="warning" title="Traitement archivé">
-          Ses posologies et son historique sont conservés.
-        </Message>
-      ) : null}
       {treatment ? (
-        <GenericGroupSectionWithDatabase cis={treatment.specialtyCis} />
+        // Une seule connexion partagée vers medication-reference.db pour
+        // cette section : TreatmentForm (délivrance encadrée, ticket 30) et
+        // GenericGroupSection ont chacun besoin du référentiel, et deux
+        // `SQLiteProvider` distincts avec `forceOverwrite` sur le même
+        // fichier entrent en course et font planter l'import.
+        <SQLiteProvider
+          databaseName="medication-reference.db"
+          assetSource={{
+            assetId: medicationReferenceAsset,
+            forceOverwrite: true,
+          }}
+          options={{ useNewConnection: true }}
+        >
+          {treatment.archivedAt === null ? (
+            treatment.dosageKind === 'AS_NEEDED' ? (
+              <AsNeededTreatmentForm
+                initialValue={treatment}
+                submitLabel="Enregistrer les modifications"
+                onSubmit={async (draft) => {
+                  await updateTreatment(database, {
+                    ...draft,
+                    id: treatment.id,
+                    archivedAt: treatment.archivedAt,
+                  });
+                  router.replace('/treatments');
+                }}
+              />
+            ) : (
+              <TreatmentForm
+                personalDatabase={database}
+                treatmentId={treatment.id}
+                initialValue={treatment}
+                submitLabel="Enregistrer les modifications"
+                onSubmit={async (draft) => {
+                  await updateTreatment(database, {
+                    ...draft,
+                    id: treatment.id,
+                    archivedAt: treatment.archivedAt,
+                  });
+                  await synchronizeTreatmentIntakeReminders(
+                    database,
+                    treatment.id,
+                  );
+                  router.replace('/treatments');
+                }}
+              />
+            )
+          ) : null}
+          {treatment.archivedAt ? (
+            <Message tone="warning" title="Traitement archivé">
+              Ses posologies et son historique sont conservés.
+            </Message>
+          ) : null}
+          <GenericGroupSection cis={treatment.specialtyCis} />
+        </SQLiteProvider>
       ) : null}
       <GenericEquivalenceList
         confirmations={genericEquivalences}

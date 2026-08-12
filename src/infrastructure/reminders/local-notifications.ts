@@ -6,11 +6,13 @@ import {
   intakeActionCategory,
   notificationCommand,
   OPEN_APP_ACTION,
+  VALIDATE_INTAKES_ACTION,
   type NotificationCommand,
 } from '@/domain/reminders/notification-actions';
 import {
   INTAKE_REMINDER_KIND,
   notificationTarget,
+  PENDING_COMPLETION_REMINDER_KIND,
   POSTPONED_INTAKE_KIND,
   PREPARATION_REMINDER_KIND,
   PREPARATION_ROUTE,
@@ -26,11 +28,39 @@ import type { IntakeSlot } from '@/domain/treatments/treatment';
 
 const ANDROID_CHANNEL_ID = 'pillbox-preparation-reminders';
 const ANDROID_INTAKE_CHANNEL_ID = 'pillbox-intake-reminders';
+const ANDROID_PENDING_COMPLETION_CHANNEL_ID =
+  'pillbox-pending-completion-reminders';
 
-export const NEUTRAL_REMINDER_CONTENT = {
-  title: 'Rappel PillBox',
-  body: 'Une action planifiée vous attend dans l’application.',
+const APP_TITLE = 'PillBox';
+
+export const PREPARATION_REMINDER_CONTENT = {
+  title: APP_TITLE,
+  body: 'Vous avez un pilulier à remplir.',
 } as const;
+
+/**
+ * Contenu du rappel dédié au complément d'une case « en attente de
+ * complément » (ticket 30b) : ne nomme jamais un médicament, une posologie,
+ * un lot ni une quantité de stock, comme les autres notifications de PillBox.
+ */
+export const PENDING_COMPLETION_REMINDER_CONTENT = {
+  title: APP_TITLE,
+  body: 'Un complément de pilulier est peut-être possible.',
+} as const;
+
+/**
+ * Contenu d’un rappel de prise : informe du nombre de médicaments en attente
+ * sans jamais nommer un médicament, une posologie ou un lot.
+ */
+export function intakeReminderContent(pendingCount: number): {
+  title: string;
+  body: string;
+} {
+  return {
+    title: APP_TITLE,
+    body: `Vous avez ${pendingCount} médicament${pendingCount > 1 ? 's' : ''} à prendre.`,
+  };
+}
 
 export type LocalNotificationPermission = 'granted' | 'denied' | 'blocked';
 
@@ -64,7 +94,7 @@ export async function scheduleIntakeReminder(
   await ensureIntakeActionCategories();
   return Notifications.scheduleNotificationAsync({
     content: {
-      ...NEUTRAL_REMINDER_CONTENT,
+      ...intakeReminderContent(pendingCount),
       ...intakeActionCategoryContent(pendingCount),
       data: {
         kind: INTAKE_REMINDER_KIND,
@@ -90,8 +120,7 @@ export function notificationTargetOf(
 
 /**
  * Manière dont une réponse demande l’ouverture de PillBox, ou `null` lorsqu’elle
- * ne la demande pas — le bouton de validation, notamment, agit sans ouvrir quoi
- * que ce soit.
+ * ne la demande pas.
  *
  * La distinction compte pour la suite : Android retire lui-même la notification
  * touchée en son corps (`autoDismiss`), mais laisse affichée celle dont on
@@ -104,7 +133,10 @@ export function notificationOpening(
 ): NotificationOpening | null {
   if (response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER)
     return 'tap';
-  return response.actionIdentifier === OPEN_APP_ACTION ? 'action-button' : null;
+  return response.actionIdentifier === OPEN_APP_ACTION ||
+    response.actionIdentifier === VALIDATE_INTAKES_ACTION
+    ? 'action-button'
+    : null;
 }
 
 /** Commande demandée par un bouton d’action, ou `null` pour toute autre réponse. */
@@ -143,7 +175,7 @@ export async function schedulePostponedIntakeReminder(
   await ensureIntakeActionCategories();
   return Notifications.scheduleNotificationAsync({
     content: {
-      ...NEUTRAL_REMINDER_CONTENT,
+      ...intakeReminderContent(pendingCount),
       ...intakeActionCategoryContent(pendingCount),
       data: { kind: POSTPONED_INTAKE_KIND, date, slot },
       sound: 'default',
@@ -227,7 +259,7 @@ export async function replacePreparationReminder(
   await ensureAndroidChannel();
   return Notifications.scheduleNotificationAsync({
     content: {
-      ...NEUTRAL_REMINDER_CONTENT,
+      ...PREPARATION_REMINDER_CONTENT,
       data: { kind: PREPARATION_REMINDER_KIND, url: PREPARATION_ROUTE },
       sound: 'default',
     },
@@ -250,6 +282,50 @@ export async function cancelPreparationReminders(): Promise<void> {
     ours.map((request) =>
       Notifications.cancelScheduledNotificationAsync(request.identifier),
     ),
+  );
+}
+
+/**
+ * Rappel ponctuel (déclenchement unique), distinct du rappel hebdomadaire de
+ * préparation et des rappels quotidiens de prise : planifié uniquement quand
+ * une case reste « en attente de complément » après validation (ticket 30b).
+ */
+export async function schedulePendingCompletionReminder(
+  scheduledAt: Date,
+): Promise<string> {
+  await ensureAndroidPendingCompletionChannel();
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      ...PENDING_COMPLETION_REMINDER_CONTENT,
+      data: { kind: PENDING_COMPLETION_REMINDER_KIND },
+      sound: 'default',
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: scheduledAt,
+      channelId: ANDROID_PENDING_COMPLETION_CHANNEL_ID,
+    },
+  });
+}
+
+export async function cancelPendingCompletionReminderNotification(
+  notificationId: string,
+): Promise<void> {
+  await Notifications.cancelScheduledNotificationAsync(notificationId);
+}
+
+async function ensureAndroidPendingCompletionChannel(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync(
+    ANDROID_PENDING_COMPLETION_CHANNEL_ID,
+    {
+      name: 'Complément de pilulier',
+      description:
+        'Rappel local ponctuel qu’un complément de pilulier est possible',
+      importance: Notifications.AndroidImportance.DEFAULT,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+      sound: 'default',
+    },
   );
 }
 

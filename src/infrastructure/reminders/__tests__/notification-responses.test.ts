@@ -85,8 +85,10 @@ describe('réponses qui ouvrent l’application', () => {
     );
   });
 
-  it('n’ouvre rien depuis le bouton de validation', () => {
-    expect(notificationOpening(response(VALIDATE_INTAKES_ACTION))).toBeNull();
+  it('reconnaît le bouton de validation, qui ramène PillBox au premier plan', () => {
+    expect(notificationOpening(response(VALIDATE_INTAKES_ACTION))).toBe(
+      'action-button',
+    );
   });
 
   it('n’ouvre rien depuis une action inconnue', () => {
@@ -119,31 +121,28 @@ describe('boutons attachés à un rappel de prise', () => {
     }[];
   }
 
-  it('déclare la validation puis l’ouverture pour une prise en attente', async () => {
+  it('déclare un seul bouton de validation pour une prise en attente', async () => {
     expect(await schedule(1)).toBe(SINGLE_INTAKE_CATEGORY);
 
     expect(declaredActions(SINGLE_INTAKE_CATEGORY)).toEqual([
       {
         identifier: VALIDATE_INTAKES_ACTION,
         buttonTitle: 'Valider',
-        options: { opensAppToForeground: false },
-      },
-      {
-        identifier: OPEN_APP_ACTION,
-        buttonTitle: 'Ouvrir PillBox',
         options: { opensAppToForeground: true },
       },
     ]);
   });
 
-  it('déclare « Tout valider » puis l’ouverture pour plusieurs prises', async () => {
+  it('déclare un seul bouton « Tout valider » pour plusieurs prises', async () => {
     expect(await schedule(3)).toBe(GROUP_INTAKE_CATEGORY);
 
-    expect(
-      declaredActions(GROUP_INTAKE_CATEGORY).map(
-        (action) => action.buttonTitle,
-      ),
-    ).toEqual(['Tout valider', 'Ouvrir PillBox']);
+    expect(declaredActions(GROUP_INTAKE_CATEGORY)).toEqual([
+      {
+        identifier: VALIDATE_INTAKES_ACTION,
+        buttonTitle: 'Tout valider',
+        options: { opensAppToForeground: true },
+      },
+    ]);
   });
 
   it('garde le bouton d’ouverture quand il n’y a rien à valider', async () => {

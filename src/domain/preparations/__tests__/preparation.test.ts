@@ -3,6 +3,7 @@ import type { Treatment } from '@/domain/treatments/treatment';
 
 import {
   assertVerificationEvidence,
+  buildAcceptedCisIndex,
   effectiveUsableBoxes,
   evaluateBoxAvailability,
   generatePreparationSnapshot,
@@ -35,6 +36,7 @@ function treatment(overrides: Partial<Treatment> = {}): Treatment {
       },
     ],
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
+    controlledDispensing: null,
     ...overrides,
   };
 }
@@ -164,6 +166,107 @@ describe('génération d’une préparation de sept jours', () => {
     expect(snapshot.items).toEqual([]);
     expect(snapshot.requirements).toEqual([]);
     expect(snapshot.hasShortages).toBe(false);
+  });
+});
+
+describe('comptage du stock équivalent générique confirmé (ticket 24b)', () => {
+  it('ne change rien pour un traitement sans équivalence mémorisée', () => {
+    const snapshot = generatePreparationSnapshot(
+      [treatment()],
+      [box({ remainingQuantity: 6 })],
+      '2026-08-03',
+      '2026-08-03',
+      [],
+    );
+    expect(snapshot.requirements[0]).toMatchObject({
+      requiredHalfUnits: 14,
+      usableStockHalfUnits: 12,
+      missingHalfUnits: 2,
+    });
+  });
+
+  it("compte une boîte d'un CIS confirmé comme équivalence pour ce traitement, même si le stock est entièrement dans ce CIS équivalent", () => {
+    const snapshot = generatePreparationSnapshot(
+      [treatment()],
+      [box({ specialtyCis: '60000002', remainingQuantity: 10 })],
+      '2026-08-03',
+      '2026-08-03',
+      [{ treatmentId: 1, cis: '60000002' }],
+    );
+    expect(snapshot.requirements[0]).toMatchObject({
+      specialtyCis: '60000001',
+      requiredHalfUnits: 14,
+      usableStockHalfUnits: 20,
+      missingHalfUnits: 0,
+    });
+    expect(snapshot.hasShortages).toBe(false);
+  });
+
+  it('additionne les boîtes de CIS exact et de CIS équivalent confirmé', () => {
+    const snapshot = generatePreparationSnapshot(
+      [treatment()],
+      [
+        box({ remainingQuantity: 3 }),
+        box({ id: 2, specialtyCis: '60000002', remainingQuantity: 4 }),
+      ],
+      '2026-08-03',
+      '2026-08-03',
+      [{ treatmentId: 1, cis: '60000002' }],
+    );
+    expect(snapshot.requirements[0]).toMatchObject({
+      requiredHalfUnits: 14,
+      usableStockHalfUnits: 14,
+      missingHalfUnits: 0,
+    });
+  });
+
+  it('exclut toujours un CIS du même groupe générique mais jamais confirmé pour ce traitement précis', () => {
+    const snapshot = generatePreparationSnapshot(
+      [treatment()],
+      [box({ specialtyCis: '60000002', remainingQuantity: 10 })],
+      '2026-08-03',
+      '2026-08-03',
+      [{ treatmentId: 42, cis: '60000002' }],
+    );
+    expect(snapshot.requirements[0]).toMatchObject({
+      usableStockHalfUnits: 0,
+      missingHalfUnits: 14,
+    });
+  });
+
+  it('ne modifie jamais le CIS du traitement ni celui enregistré sur la boîte', () => {
+    const source = treatment();
+    const equivalentBox = box({
+      specialtyCis: '60000002',
+      remainingQuantity: 10,
+    });
+    generatePreparationSnapshot(
+      [source],
+      [equivalentBox],
+      '2026-08-03',
+      '2026-08-03',
+      [{ treatmentId: 1, cis: '60000002' }],
+    );
+    expect(source.specialtyCis).toBe('60000001');
+    expect(equivalentBox.specialtyCis).toBe('60000002');
+  });
+});
+
+describe('index des CIS acceptés par équivalence mémorisée', () => {
+  it('regroupe les équivalences de tous les traitements partageant un même CIS', () => {
+    const index = buildAcceptedCisIndex(
+      [treatment(), treatment({ id: 2 })],
+      [{ treatmentId: 2, cis: '60000002' }],
+    );
+    expect(index.get('60000001')).toEqual(new Set(['60000001', '60000002']));
+  });
+
+  it('ne propage jamais une équivalence à un traitement pour lequel elle n’a pas été confirmée', () => {
+    const index = buildAcceptedCisIndex(
+      [treatment({ id: 1, specialtyCis: '60000001' })],
+      [{ treatmentId: 99, cis: '60000002' }],
+    );
+    expect(index.get('60000001')).toEqual(new Set(['60000001']));
   });
 });
 
@@ -317,16 +420,82 @@ describe('vérification des boîtes pendant la préparation', () => {
         [stored],
       ),
     ).toEqual({ status: 'UNKNOWN' });
-    expect(
-      matchScannedBox(
-        {
-          presentationCip13: stored.presentationCip13,
-          lot: 'LOT',
-          expirationDate: '2027-01-01',
-        },
-        [stored, { ...stored, id: 2 }],
-      ),
-    ).toEqual({ status: 'AMBIGUOUS' });
+  });
+
+  it('résout automatiquement plusieurs boîtes identiques en retenant celle avec le moins de stock restant', () => {
+    const identity = {
+      presentationCip13: '3400000000000',
+      lot: 'LOT',
+      expirationDate: '2027-01-01',
+    };
+    const fuller = box({ id: 1, remainingQuantity: 10 });
+    const emptier = box({ id: 2, remainingQuantity: 4 });
+    expect(matchScannedBox(identity, [fuller, emptier])).toEqual({
+      status: 'MATCHED',
+      box: emptier,
+    });
+    expect(matchScannedBox(identity, [emptier, fuller])).toEqual({
+      status: 'MATCHED',
+      box: emptier,
+    });
+  });
+
+  it('départage deux boîtes identiques à quantité restante égale par l’id le plus petit', () => {
+    const identity = {
+      presentationCip13: '3400000000000',
+      lot: 'LOT',
+      expirationDate: '2027-01-01',
+    };
+    const lower = box({ id: 1, remainingQuantity: 10 });
+    const higher = box({ id: 2, remainingQuantity: 10 });
+    expect(matchScannedBox(identity, [higher, lower])).toEqual({
+      status: 'MATCHED',
+      box: lower,
+    });
+    expect(matchScannedBox(identity, [lower, higher])).toEqual({
+      status: 'MATCHED',
+      box: lower,
+    });
+  });
+
+  it('écarte une boîte déjà vidée au profit d’une boîte identique encore disponible', () => {
+    const identity = {
+      presentationCip13: '3400000000000',
+      lot: 'LOT',
+      expirationDate: '2027-01-01',
+    };
+    const exhausted = box({ id: 1, remainingQuantity: 0 });
+    const remaining = box({ id: 2, remainingQuantity: 4 });
+    expect(matchScannedBox(identity, [exhausted, remaining])).toEqual({
+      status: 'MATCHED',
+      box: remaining,
+    });
+    expect(matchScannedBox(identity, [remaining, exhausted])).toEqual({
+      status: 'MATCHED',
+      box: remaining,
+    });
+  });
+
+  it('rescanner la même étiquette bascule sur la seconde boîte une fois la première épuisée par cette préparation', () => {
+    const identity = {
+      presentationCip13: '3400000000000',
+      lot: 'LOT',
+      expirationDate: '2027-01-01',
+    };
+    const smaller = box({ id: 1, remainingQuantity: 4 });
+    const larger = box({ id: 2, remainingQuantity: 10 });
+    const firstScan = matchScannedBox(identity, [smaller, larger]);
+    expect(firstScan).toEqual({ status: 'MATCHED', box: smaller });
+    // La première contribution consomme entièrement la boîte la plus petite.
+    const afterFirstContribution = effectiveUsableBoxes(
+      [smaller, larger],
+      [{ boxId: smaller.id, quantityHalfUnits: smaller.remainingQuantity * 2 }],
+    );
+    const secondScan = matchScannedBox(identity, afterFirstContribution);
+    expect(secondScan).toMatchObject({ status: 'MATCHED' });
+    if (secondScan.status === 'MATCHED') {
+      expect(secondScan.box.id).toBe(larger.id);
+    }
   });
 
   it('vérifie une boîte ajoutée manuellement comme une boîte scannée', () => {

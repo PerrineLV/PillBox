@@ -57,6 +57,35 @@ export async function confirmGenericEquivalence(
   );
 }
 
+/**
+ * Toutes les équivalences mémorisées, tous traitements confondus : source
+ * partagée pour le comptage du stock équivalent dans les besoins de
+ * préparation et les alertes (ticket 24b), à charger une seule fois puis à
+ * transmettre au domaine plutôt que d'y donner un accès direct à la base.
+ */
+export async function listAllGenericEquivalenceConfirmations(
+  database: SQLiteDatabase,
+): Promise<GenericEquivalenceConfirmation[]> {
+  const rows = await database.getAllAsync<{
+    treatment_id: number;
+    cis: string;
+    specialty_name: string;
+    group_label: string;
+    confirmed_at: string;
+  }>(
+    `SELECT treatment_id, cis, specialty_name, group_label, confirmed_at
+     FROM generic_equivalence_confirmations
+     ORDER BY confirmed_at`,
+  );
+  return rows.map((row) => ({
+    treatmentId: row.treatment_id,
+    cis: row.cis,
+    specialtyName: row.specialty_name,
+    groupLabel: row.group_label,
+    confirmedAt: row.confirmed_at,
+  }));
+}
+
 export async function listGenericEquivalenceConfirmations(
   database: SQLiteDatabase,
   treatmentId: number,

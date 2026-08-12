@@ -15,9 +15,10 @@ import {
   useDatabaseTaskQueue,
 } from '@/infrastructure/database/database-provider';
 import { AppLockGate } from '@/components/privacy/app-lock-gate';
-import { BottomNavigation, colors, typography } from '@/ui';
+import { BottomNavigation, colors, ToastProvider, typography } from '@/ui';
 import {
   createDeferredNotificationNavigation,
+  PENDING_COMPLETION_ROUTE,
   PLANNED_INTAKE_ROUTE,
   PREPARATION_ROUTE,
   serializeIntakeGroups,
@@ -51,29 +52,31 @@ export default function RootLayout() {
   );
   return (
     <DatabaseProvider>
-      <ReminderCoordinator />
-      <IntakeActionCoordinator />
-      <AppLockGate>
-        <View style={{ flex: 1 }}>
-          <SafeAreaView
-            edges={rootScreen ? ['top'] : []}
-            style={styles.navigationContent}
-          >
-            <Stack
-              screenOptions={{
-                contentStyle: { backgroundColor: colors.background },
-                headerBackButtonDisplayMode: 'minimal',
-                headerShadowVisible: false,
-                headerStyle: { backgroundColor: colors.background },
-                headerTintColor: colors.brand,
-                headerTitleStyle: typography.heading,
-                headerShown: false,
-              }}
-            />
-          </SafeAreaView>
-          <BottomNavigation />
-        </View>
-      </AppLockGate>
+      <ToastProvider>
+        <ReminderCoordinator />
+        <IntakeActionCoordinator />
+        <AppLockGate>
+          <View style={{ flex: 1 }}>
+            <SafeAreaView
+              edges={rootScreen ? ['top'] : []}
+              style={styles.navigationContent}
+            >
+              <Stack
+                screenOptions={{
+                  contentStyle: { backgroundColor: colors.background },
+                  headerBackButtonDisplayMode: 'minimal',
+                  headerShadowVisible: false,
+                  headerStyle: { backgroundColor: colors.background },
+                  headerTintColor: colors.brand,
+                  headerTitleStyle: typography.heading,
+                  headerShown: false,
+                }}
+              />
+            </SafeAreaView>
+            <BottomNavigation />
+          </View>
+        </AppLockGate>
+      </ToastProvider>
     </DatabaseProvider>
   );
 }
@@ -111,9 +114,10 @@ function ReminderCoordinator() {
  * Exécute les actions rapides des notifications de prise.
  *
  * Le composant est monté à l’intérieur de `DatabaseProvider` mais en dehors de
- * `AppLockGate` : l’action doit aboutir sans passer l’application au premier
- * plan, donc sans authentification possible. Elle n’expose aucune donnée, elle
- * écrit seulement la confirmation demandée depuis la notification.
+ * `AppLockGate` : l’écriture doit aboutir sans attendre l’authentification du
+ * verrou, qui ne concerne que l’affichage. Le bouton de validation ramène par
+ * ailleurs PillBox au premier plan (voir `notification-actions.ts`), mais
+ * cette écriture reste indépendante de la navigation qui s’ensuit.
  *
  * L’écriture est idempotente : seules les prises encore en attente changent
  * d’état. Une réponse reçue deux fois, ou rejouée au démarrage suivant, ne crée
@@ -186,6 +190,9 @@ function openNotificationTarget(target: NotificationTarget): void {
         pathname: PLANNED_INTAKE_ROUTE,
         params: { date: target.date, slot: target.slot },
       });
+      return;
+    case 'pending-completion':
+      router.push(PENDING_COMPLETION_ROUTE);
   }
 }
 

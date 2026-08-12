@@ -4,13 +4,19 @@ import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
+  buildAttachedSpecialtyCisSet,
+  isOrphanBox,
+} from '@/domain/inventory/box-attachment';
+import {
   isExpired,
   todayIso,
   usableQuantity,
   type MedicationBox,
 } from '@/domain/inventory/inventory';
+import type { Treatment } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { listPreparationWeeks } from '@/infrastructure/preparations/preparation-repository';
+import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import { buildInventoryAlerts } from '@/domain/alerts/inventory-alerts';
 import {
@@ -43,6 +49,10 @@ export default function InventoryScreen() {
   const [expiringBoxIds, setExpiringBoxIds] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<'all' | 'renew' | 'expiring'>('all');
   const [forecast, setForecast] = useState<StockForecast | null>(null);
+  const [attachedCis, setAttachedCis] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [treatments, setTreatments] = useState<Treatment[]>([]);
 
   // Une carte d'attention de l'accueil peut ouvrir directement l'onglet
   // « À renouveler » : le paramètre n'est appliqué qu'aux valeurs connues.
@@ -61,17 +71,32 @@ export default function InventoryScreen() {
         listMedicationBoxes(database),
         listTreatments(database),
         listPreparationWeeks(database),
+        listAllGenericEquivalenceConfirmations(database),
       ])
-        .then(([items, treatments, preparations]) => {
+        .then(([items, treatments, preparations, equivalenceConfirmations]) => {
           if (active) {
             setBoxes(items);
+            setTreatments(treatments);
             const today = todayIso();
-            const alerts = buildInventoryAlerts(treatments, items, today);
+            const equivalences = equivalenceConfirmations.map(
+              (confirmation) => ({
+                treatmentId: confirmation.treatmentId,
+                cis: confirmation.cis,
+              }),
+            );
+            const alerts = buildInventoryAlerts(treatments, items, today, {
+              equivalences,
+            });
             setExpiringBoxIds(
               new Set(alerts.expirations.map((item) => item.boxId)),
             );
             setForecast(
-              buildStockForecast(treatments, items, today, preparations),
+              buildStockForecast(treatments, items, today, preparations, {
+                equivalences,
+              }),
+            );
+            setAttachedCis(
+              buildAttachedSpecialtyCisSet(treatments, equivalences),
             );
             setError(null);
           }
@@ -111,8 +136,8 @@ export default function InventoryScreen() {
   );
   const groups = useMemo(() => groupBoxes(filteredBoxes), [filteredBoxes]);
   const renewalList = useMemo(
-    () => (forecast ? buildRenewalList(forecast) : []),
-    [forecast],
+    () => (forecast ? buildRenewalList(forecast, treatments) : []),
+    [forecast, treatments],
   );
   const today = todayIso();
 
@@ -197,6 +222,7 @@ export default function InventoryScreen() {
                     </Text>
                     {lot.boxes.map((box) => {
                       const expired = isExpired(box.expirationDate, today);
+                      const orphan = isOrphanBox(box, attachedCis);
                       return (
                         <Link
                           key={box.id}
@@ -224,6 +250,12 @@ export default function InventoryScreen() {
                               <Badge
                                 label="Périmée — stock inutilisable"
                                 tone="danger"
+                              />
+                            ) : null}
+                            {!expired && orphan ? (
+                              <Badge
+                                label="Aucun traitement actif associé"
+                                tone="warning"
                               />
                             ) : null}
                           </View>

@@ -103,6 +103,7 @@ const DRAFT: TreatmentDraft = {
     },
   ],
   asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
+  controlledDispensing: null,
 };
 
 /** Constitue un historique complet pour un traitement : préparation validée

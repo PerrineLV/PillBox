@@ -9,9 +9,11 @@ import {
 
 import {
   cancelPreparation,
+  completePendingItem,
   completePreparation,
   createPreparation,
   getLatestDraftPreparation,
+  getPendingCompletionCases,
   listPreparationHistory,
   listPreparationWeeks,
   savePreparationProgress,
@@ -852,6 +854,466 @@ describe('fin d’une boîte et relais par une seconde pour un même médicament
     expect(
       raw.prepare('SELECT COUNT(*) AS count FROM stock_movements').get(),
     ).toEqual({ count: 0 });
+    raw.close();
+  });
+});
+
+describe('délivrance encadrée : validation partielle (ticket 30b)', () => {
+  function insertControlledDispensingTreatment(
+    raw: Database.Database,
+    id: number,
+    cis: string,
+    theoreticalRenewalDate: string | null,
+  ): void {
+    raw
+      .prepare(
+        `INSERT INTO treatments
+         (id, specialty_cis, specialty_name, controlled_dispensing_enabled,
+          controlled_dispensing_periodicity_days,
+          controlled_dispensing_theoretical_renewal_date)
+         VALUES (?, ?, ?, 1, 28, ?)`,
+      )
+      .run(id, cis, `Médicament ${cis}`, theoreticalRenewalDate);
+  }
+
+  function threeDaySnapshot(
+    startDate: string,
+    treatmentId: number,
+    cis: string,
+  ): PreparationSnapshot {
+    const dates = ['2026-08-17', '2026-08-18', '2026-08-19'];
+    return {
+      startDate,
+      endDate: preparationEndDate(startDate),
+      items: dates.map((date) => ({
+        treatmentId,
+        specialtyCis: cis,
+        specialtyName: `Médicament ${cis}`,
+        pharmaceuticalForm: 'comprimé',
+        date,
+        slot: 'morning' as const,
+        quantityHalfUnits: 2,
+      })),
+      requirements: [
+        {
+          specialtyCis: cis,
+          specialtyName: `Médicament ${cis}`,
+          requiredHalfUnits: 6,
+          usableStockHalfUnits: 2,
+          missingHalfUnits: 4,
+        },
+      ],
+      hasShortages: true,
+    };
+  }
+
+  it('valide malgré une rupture pour un traitement à délivrance encadrée, sans bloquer les autres médicaments', async () => {
+    const { raw, database } = await createDatabase();
+    insertControlledDispensingTreatment(raw, 1, '60000001', '2026-08-25');
+    const id = await createPreparation(
+      database,
+      threeDaySnapshot('2026-08-17', 1, '60000001'),
+    );
+    // Autre médicament, sans délivrance encadrée : doit rester couvert
+    // exactement, comme aujourd'hui (ticket 11).
+    raw
+      .prepare(
+        `INSERT INTO preparation_requirements
+         (preparation_id, specialty_cis, specialty_name, required_half_units,
+          usable_stock_half_units, missing_half_units)
+         VALUES (?, '60000002', 'Médicament 60000002', 7, 20, 0)`,
+      )
+      .run(id);
+    raw
+      .prepare(
+        `INSERT INTO preparation_items
+         (preparation_id, source_treatment_id, specialty_cis, specialty_name,
+          pharmaceutical_form, intake_date, slot, quantity_half_units)
+         VALUES (?, 2, '60000002', 'Médicament 60000002', 'comprimé', '2026-08-17', 'morning', 7)`,
+      )
+      .run(id);
+    const shortBoxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'COURT',
+      remainingQuantity: 1,
+    });
+    const otherBoxId = insertBox(raw, {
+      specialtyCis: '60000002',
+      lot: 'COMPLET',
+    });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId: shortBoxId,
+      quantityHalfUnits: 2,
+      verification: 'SCAN',
+      scanRaw: 'raw-court',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000002',
+      boxId: otherBoxId,
+      quantityHalfUnits: 7,
+      verification: 'SCAN',
+      scanRaw: 'raw-complet',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+
+    const pending = await completePreparation(database, id, '2026-08-16');
+
+    expect(pending).toEqual(['60000001']);
+    expect(
+      raw.prepare('SELECT status FROM preparations WHERE id = ?').get(id),
+    ).toEqual({ status: 'COMPLETED' });
+    const items = raw
+      .prepare(
+        `SELECT intake_date, completion_status FROM preparation_items
+         WHERE preparation_id = ? AND specialty_cis = '60000001' ORDER BY intake_date`,
+      )
+      .all(id);
+    expect(items).toEqual([
+      { intake_date: '2026-08-17', completion_status: 'FILLED' },
+      { intake_date: '2026-08-18', completion_status: 'PENDING_COMPLEMENT' },
+      { intake_date: '2026-08-19', completion_status: 'PENDING_COMPLEMENT' },
+    ]);
+    // Le médicament non concerné par la délivrance encadrée n'a aucun statut :
+    // son état ne relève pas de ce dispositif.
+    expect(
+      raw
+        .prepare(
+          `SELECT completion_status FROM preparation_items WHERE specialty_cis = '60000002'`,
+        )
+        .get(),
+    ).toEqual({ completion_status: null });
+    raw.close();
+  });
+
+  it('accepte une couverture nulle (aucune boîte disponible) pour un traitement à délivrance encadrée', async () => {
+    const { raw, database } = await createDatabase();
+    insertControlledDispensingTreatment(raw, 1, '60000001', null);
+    const id = await createPreparation(
+      database,
+      threeDaySnapshot('2026-08-17', 1, '60000001'),
+    );
+
+    const pending = await completePreparation(database, id, '2026-08-16');
+
+    expect(pending).toEqual(['60000001']);
+    expect(
+      raw
+        .prepare(
+          `SELECT completion_status FROM preparation_items WHERE preparation_id = ?`,
+        )
+        .all(id),
+    ).toEqual([
+      { completion_status: 'PENDING_COMPLEMENT' },
+      { completion_status: 'PENDING_COMPLEMENT' },
+      { completion_status: 'PENDING_COMPLEMENT' },
+    ]);
+    raw.close();
+  });
+
+  it('rejette une couverture supérieure au besoin même pour un traitement à délivrance encadrée', async () => {
+    const { raw, database } = await createDatabase();
+    insertControlledDispensingTreatment(raw, 1, '60000001', null);
+    const id = await createPreparation(
+      database,
+      threeDaySnapshot('2026-08-17', 1, '60000001'),
+    );
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'TROP',
+      remainingQuantity: 10,
+    });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId,
+      quantityHalfUnits: 8,
+      verification: 'SCAN',
+      scanRaw: 'raw-trop',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+
+    await expect(
+      completePreparation(database, id, '2026-08-16'),
+    ).rejects.toThrow('dépasse le besoin');
+    raw.close();
+  });
+
+  it('couvre entièrement le médicament et ne signale aucune case en attente', async () => {
+    const { raw, database } = await createDatabase();
+    insertControlledDispensingTreatment(raw, 1, '60000001', null);
+    const id = await createPreparation(
+      database,
+      threeDaySnapshot('2026-08-17', 1, '60000001'),
+    );
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'COMPLET',
+      remainingQuantity: 10,
+    });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId,
+      quantityHalfUnits: 6,
+      verification: 'SCAN',
+      scanRaw: 'raw-complet',
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+
+    const pending = await completePreparation(database, id, '2026-08-16');
+
+    expect(pending).toEqual([]);
+    expect(
+      raw
+        .prepare(
+          `SELECT completion_status FROM preparation_items WHERE preparation_id = ?`,
+        )
+        .all(id),
+    ).toEqual([
+      { completion_status: 'FILLED' },
+      { completion_status: 'FILLED' },
+      { completion_status: 'FILLED' },
+    ]);
+    raw.close();
+  });
+});
+
+describe('complément ultérieur d’une case en attente (ticket 30b)', () => {
+  function insertControlledDispensingTreatment(
+    raw: Database.Database,
+    id: number,
+    cis: string,
+    theoreticalRenewalDate: string | null,
+  ): void {
+    raw
+      .prepare(
+        `INSERT INTO treatments
+         (id, specialty_cis, specialty_name, controlled_dispensing_enabled,
+          controlled_dispensing_periodicity_days,
+          controlled_dispensing_theoretical_renewal_date)
+         VALUES (?, ?, ?, 1, 28, ?)`,
+      )
+      .run(id, cis, `Médicament ${cis}`, theoreticalRenewalDate);
+  }
+
+  function threeDaySnapshot(
+    startDate: string,
+    treatmentId: number,
+    cis: string,
+  ): PreparationSnapshot {
+    const dates = ['2026-08-17', '2026-08-18', '2026-08-19'];
+    return {
+      startDate,
+      endDate: preparationEndDate(startDate),
+      items: dates.map((date) => ({
+        treatmentId,
+        specialtyCis: cis,
+        specialtyName: `Médicament ${cis}`,
+        pharmaceuticalForm: 'comprimé',
+        date,
+        slot: 'morning' as const,
+        quantityHalfUnits: 2,
+      })),
+      requirements: [
+        {
+          specialtyCis: cis,
+          specialtyName: `Médicament ${cis}`,
+          requiredHalfUnits: 6,
+          usableStockHalfUnits: 0,
+          missingHalfUnits: 6,
+        },
+      ],
+      hasShortages: true,
+    };
+  }
+
+  async function seedFullyPendingPreparation(): Promise<{
+    raw: Database.Database;
+    database: SQLiteDatabase;
+    id: number;
+  }> {
+    const { raw, database } = await createDatabase();
+    insertControlledDispensingTreatment(raw, 1, '60000001', '2026-08-25');
+    const id = await createPreparation(
+      database,
+      threeDaySnapshot('2026-08-17', 1, '60000001'),
+    );
+    await completePreparation(database, id, '2026-08-16');
+    return { raw, database, id };
+  }
+
+  it('liste les cases en attente avec la date théorique du traitement', async () => {
+    const { raw, database, id } = await seedFullyPendingPreparation();
+
+    const cases = await getPendingCompletionCases(database);
+
+    expect(cases).toEqual([
+      {
+        preparationId: id,
+        preparationStartDate: '2026-08-17',
+        preparationEndDate: '2026-08-23',
+        specialtyCis: '60000001',
+        specialtyName: 'Médicament 60000001',
+        treatmentId: 1,
+        pendingItems: [
+          { date: '2026-08-17', slot: 'morning' },
+          { date: '2026-08-18', slot: 'morning' },
+          { date: '2026-08-19', slot: 'morning' },
+        ],
+        pendingHalfUnits: 6,
+        theoreticalRenewalDate: '2026-08-25',
+      },
+    ]);
+    raw.close();
+  });
+
+  it('n’affiche aucune date théorique quand elle n’est pas renseignée', async () => {
+    const { raw, database } = await createDatabase();
+    insertControlledDispensingTreatment(raw, 1, '60000001', null);
+    await createPreparation(
+      database,
+      threeDaySnapshot('2026-08-17', 1, '60000001'),
+    ).then((id) => completePreparation(database, id, '2026-08-16'));
+
+    const [pending] = await getPendingCompletionCases(database);
+
+    expect(pending.theoreticalRenewalDate).toBeNull();
+    raw.close();
+  });
+
+  it('complète partiellement une case en attente sans reprendre tout le flux', async () => {
+    const { raw, database, id } = await seedFullyPendingPreparation();
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'COMPLEMENT-1',
+      remainingQuantity: 2,
+    });
+
+    const resolved = await completePendingItem(
+      database,
+      id,
+      '60000001',
+      {
+        boxId,
+        quantityHalfUnits: 2,
+        verification: 'SCAN',
+        scanRaw: 'raw-complement',
+        matchedCis: null,
+        matchedSpecialtyName: null,
+      },
+      '2026-08-18',
+    );
+
+    expect(resolved).toBe(false);
+    expect(
+      raw.prepare('SELECT remaining_quantity FROM medication_boxes').get(),
+    ).toEqual({ remaining_quantity: 1 });
+    const items = raw
+      .prepare(
+        `SELECT intake_date, completion_status FROM preparation_items
+         WHERE preparation_id = ? ORDER BY intake_date`,
+      )
+      .all(id);
+    expect(items).toEqual([
+      { intake_date: '2026-08-17', completion_status: 'FILLED' },
+      { intake_date: '2026-08-18', completion_status: 'PENDING_COMPLEMENT' },
+      { intake_date: '2026-08-19', completion_status: 'PENDING_COMPLEMENT' },
+    ]);
+    const remainingPending = await getPendingCompletionCases(database);
+    expect(remainingPending[0].pendingHalfUnits).toBe(4);
+    raw.close();
+  });
+
+  it('résout entièrement la case quand la couverture atteint le reste en attente', async () => {
+    const { raw, database, id } = await seedFullyPendingPreparation();
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'COMPLEMENT-TOTAL',
+      remainingQuantity: 3,
+    });
+
+    const resolved = await completePendingItem(
+      database,
+      id,
+      '60000001',
+      {
+        boxId,
+        quantityHalfUnits: 6,
+        verification: 'MANUAL',
+        scanRaw: null,
+        matchedCis: null,
+        matchedSpecialtyName: null,
+      },
+      '2026-08-18',
+    );
+
+    expect(resolved).toBe(true);
+    expect(await getPendingCompletionCases(database)).toEqual([]);
+    const history = await listPreparationHistory(database);
+    expect(
+      history[0].medications.find((item) => item.boxId === boxId),
+    ).toMatchObject({ quantityHalfUnits: 6, verification: 'MANUAL' });
+    raw.close();
+  });
+
+  it('refuse une boîte d’un autre médicament', async () => {
+    const { raw, database, id } = await seedFullyPendingPreparation();
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000009',
+      lot: 'AUTRE',
+      remainingQuantity: 5,
+    });
+
+    await expect(
+      completePendingItem(
+        database,
+        id,
+        '60000001',
+        {
+          boxId,
+          quantityHalfUnits: 2,
+          verification: 'SCAN',
+          scanRaw: 'raw',
+          matchedCis: null,
+          matchedSpecialtyName: null,
+        },
+        '2026-08-18',
+      ),
+    ).rejects.toThrow('ne correspond pas au médicament attendu');
+    raw.close();
+  });
+
+  it('refuse de compléter un médicament sans case en attente', async () => {
+    const { raw, database, id } = await seedFullyPendingPreparation();
+    const boxId = insertBox(raw, {
+      specialtyCis: '60000002',
+      lot: 'SANS-ATTENTE',
+    });
+
+    await expect(
+      completePendingItem(
+        database,
+        id,
+        '60000002',
+        {
+          boxId,
+          quantityHalfUnits: 2,
+          verification: 'SCAN',
+          scanRaw: 'raw',
+          matchedCis: null,
+          matchedSpecialtyName: null,
+        },
+        '2026-08-18',
+      ),
+    ).rejects.toThrow('Aucune case en attente');
     raw.close();
   });
 });

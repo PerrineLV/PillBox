@@ -39,36 +39,37 @@ describe('catégorie d’action d’un rappel de prise', () => {
     ).toEqual([OPEN_APP_BUTTON_TITLE]);
   });
 
-  it('propose « Valider » pour une seule prise en attente', () => {
+  it('propose un seul bouton « Valider » pour une seule prise en attente', () => {
     expect(intakeActionCategory(1)).toBe(SINGLE_INTAKE_CATEGORY);
     expect(buttonsOf(SINGLE_INTAKE_CATEGORY).map((b) => b.buttonTitle)).toEqual(
-      ['Valider', OPEN_APP_BUTTON_TITLE],
+      ['Valider'],
     );
   });
 
-  it('propose « Tout valider » à partir de deux prises en attente', () => {
+  it('propose un seul bouton « Tout valider » à partir de deux prises en attente', () => {
     expect(intakeActionCategory(2)).toBe(GROUP_INTAKE_CATEGORY);
     expect(intakeActionCategory(7)).toBe(GROUP_INTAKE_CATEGORY);
     expect(buttonsOf(GROUP_INTAKE_CATEGORY).map((b) => b.buttonTitle)).toEqual([
       'Tout valider',
-      OPEN_APP_BUTTON_TITLE,
     ]);
   });
 
-  it('propose « Ouvrir PillBox » sur chaque notification de prise', () => {
-    for (const category of INTAKE_ACTION_CATEGORIES) {
-      expect(category.buttons).toContainEqual({
+  it('garde « Ouvrir PillBox » quand il n’y a rien à valider', () => {
+    expect(buttonsOf(OPEN_ONLY_INTAKE_CATEGORY)).toEqual([
+      {
         identifier: OPEN_APP_ACTION,
         buttonTitle: OPEN_APP_BUTTON_TITLE,
         opensApp: true,
-      });
-    }
+      },
+    ]);
   });
 
-  it('n’ouvre l’application que par le bouton dédié', () => {
+  it('ramène PillBox au premier plan depuis chaque bouton, fiabilité oblige', () => {
+    // Un bouton qui n’ouvre pas l’application ne réveille aucun JavaScript une
+    // fois le processus tué par Android : seule l’ouverture garantit l’action.
     for (const category of INTAKE_ACTION_CATEGORIES) {
       for (const button of category.buttons) {
-        expect(button.opensApp).toBe(button.identifier === OPEN_APP_ACTION);
+        expect(button.opensApp).toBe(true);
       }
     }
   });

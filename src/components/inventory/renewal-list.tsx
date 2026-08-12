@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import {
   renewalAvailabilityLabel,
   renewalRuptureLabel,
+  renewalTheoreticalRenewalLabel,
   renewalUrgencyTone,
 } from './renewal-labels';
 import type { RenewalItem } from '@/domain/renewal/renewal-list';
@@ -41,6 +42,11 @@ export function RenewalList({
           <Text style={typography.body}>{renewalAvailabilityLabel(item)}</Text>
           {renewalRuptureLabel(item) !== null ? (
             <Text style={typography.caption}>{renewalRuptureLabel(item)}</Text>
+          ) : null}
+          {renewalTheoreticalRenewalLabel(item) !== null ? (
+            <Text style={typography.caption}>
+              {renewalTheoreticalRenewalLabel(item)}
+            </Text>
           ) : null}
         </Card>
       ))}

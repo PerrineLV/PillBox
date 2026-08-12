@@ -28,3 +28,15 @@ export function renewalRuptureLabel(item: RenewalItem): string | null {
     ? `Rupture estimée le ${date} : un lot périme avant d’être consommé.`
     : `Rupture estimée le ${date}.`;
 }
+
+/**
+ * Information complémentaire, purement indicative (ticket 30) : n'influence
+ * jamais l'urgence affichée ni l'ordre de la liste. `null` en l'absence de
+ * délivrance encadrée activée pour ce médicament.
+ */
+export function renewalTheoreticalRenewalLabel(
+  item: RenewalItem,
+): string | null {
+  if (item.theoreticalRenewalDate === null) return null;
+  return `Renouvellement théorique (délivrance encadrée) : ${formatLongFrenchCivilDate(item.theoreticalRenewalDate)}.`;
+}

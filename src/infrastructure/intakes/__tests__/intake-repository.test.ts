@@ -280,6 +280,7 @@ describe('suivi local des prises', () => {
         maxQuantityPerDayHalfUnits: null,
         minIntervalHours: null,
       },
+      controlledDispensing: null,
     });
     // Une prise UNSET (jamais prise ni ignorée) n'empêche plus la suppression
     // définitive : ce n'est qu'un aide-mémoire de planification. On marque

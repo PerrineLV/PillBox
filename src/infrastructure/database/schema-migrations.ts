@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 23;
+export const LATEST_SCHEMA_VERSION = 25;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -711,6 +711,54 @@ export const SCHEMA_MIGRATIONS = [
         ALTER TABLE preparation_progress ADD COLUMN matched_specialty_name TEXT;
         ALTER TABLE preparation_box_usages ADD COLUMN matched_cis TEXT;
         ALTER TABLE preparation_box_usages ADD COLUMN matched_specialty_name TEXT;
+      `);
+    },
+  },
+  {
+    version: 24,
+    name: 'suivi informatif des délivrances encadrées (stupéfiants)',
+    async up(transaction) {
+      // Purement informatif (ticket 30) : ne conditionne aucun calcul de
+      // couverture ou d'urgence. Toutes les colonnes restent NULL pour les
+      // traitements existants, qu'ils soient ou non concernés par une
+      // délivrance encadrée — cette information n'existait pas avant ce
+      // ticket et n'est jamais déduite rétroactivement.
+      await transaction.execute(`
+        ALTER TABLE treatments
+          ADD COLUMN controlled_dispensing_enabled INTEGER
+            CHECK (controlled_dispensing_enabled IS NULL OR controlled_dispensing_enabled IN (0, 1));
+        ALTER TABLE treatments
+          ADD COLUMN controlled_dispensing_periodicity_days INTEGER
+            CHECK (controlled_dispensing_periodicity_days IS NULL OR controlled_dispensing_periodicity_days > 0);
+        ALTER TABLE treatments
+          ADD COLUMN controlled_dispensing_last_dispensed_at TEXT;
+        ALTER TABLE treatments
+          ADD COLUMN controlled_dispensing_theoretical_renewal_date TEXT;
+      `);
+    },
+  },
+  {
+    version: 25,
+    name: 'état « en attente de complément » pour la délivrance encadrée',
+    async up(transaction) {
+      // Purement un suivi post-validation (ticket 30b) : NULL pour toute
+      // case existante (préparations déjà validées avant ce ticket, sous
+      // l'ancienne règle qui exigeait une couverture exacte — donc jamais
+      // réellement en attente) et pour toute case d'un traitement sans
+      // délivrance encadrée, qui continue de suivre le comportement existant
+      // (couverture exacte obligatoire, alerte de stock bas du ticket 11).
+      await transaction.execute(`
+        ALTER TABLE preparation_items
+          ADD COLUMN completion_status TEXT
+            CHECK (completion_status IS NULL OR completion_status IN ('FILLED', 'PENDING_COMPLEMENT'));
+
+        CREATE TABLE pending_completion_reminders (
+          preparation_id INTEGER NOT NULL REFERENCES preparations(id) ON DELETE CASCADE,
+          specialty_cis TEXT NOT NULL,
+          notification_id TEXT NOT NULL,
+          scheduled_at TEXT NOT NULL,
+          PRIMARY KEY (preparation_id, specialty_cis)
+        );
       `);
     },
   },

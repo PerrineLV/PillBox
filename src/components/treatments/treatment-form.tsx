@@ -1,9 +1,7 @@
-import { useState } from 'react';
-import DateTimePicker, {
-  type DateTimePickerEvent,
-} from '@react-native-community/datetimepicker';
+import { useCallback, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import {
-  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -12,16 +10,21 @@ import {
   View,
 } from 'react-native';
 
+import { ControlledDispensingField } from '@/components/medications/controlled-dispensing-field';
+import { isTreatmentWithoutStock } from '@/domain/inventory/box-attachment';
 import {
   INTAKE_SLOTS,
   assertValidTreatmentPhases,
   formatHalfUnits,
   isLegacyTreatmentPhase,
+  type ControlledDispensingInfo,
   type IntakeSlot,
   type ScheduledTreatmentPhase,
   type TreatmentDraft,
   type TreatmentPhase,
 } from '@/domain/treatments/treatment';
+import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
+import { listGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import {
   AppButton,
   AppField,
@@ -39,26 +42,101 @@ import {
   typography,
 } from '@/ui';
 
-import {
-  civilDateToPickerDate,
-  formatFrenchCivilDate,
-  nextCivilDay,
-  pickerDateToCivilDate,
-} from './civil-date';
+import { nextCivilDay, pickerDateToCivilDate } from './civil-date';
+import { DateField } from './date-field';
 
 type Props = {
+  /**
+   * Reçue en prop plutôt que lue via `useSQLiteContext()` : cet écran ouvre
+   * aussi une connexion dédiée à `medication-reference.db` (pour la section
+   * délivrance encadrée, ticket 30) et deux `SQLiteProvider` imbriqués
+   * rendraient ambigu le contexte SQLite actif pour ce composant.
+   */
+  personalDatabase: SQLiteDatabase;
   initialValue: TreatmentDraft;
+  /**
+   * `null` pour un traitement en cours de création, pas encore enregistré :
+   * transmis au calcul du signal de stock manquant (ticket 29), qui ne peut
+   * alors s'appuyer sur aucune équivalence générique mémorisée pour lui.
+   */
+  treatmentId: number | null;
+  /**
+   * CIS d'équivalences génériques déjà confirmées explicitement pendant
+   * cette création (ticket 29), en attente d'écriture en base faute
+   * d'identifiant : comptent comme couvrant le traitement au même titre
+   * qu'une équivalence mémorisée, pour ne jamais afficher un signal que
+   * cette confirmation contredirait. Sans effet une fois `treatmentId` connu.
+   */
+  pendingEquivalenceCis?: readonly string[];
   submitLabel: string;
   onSubmit: (value: TreatmentDraft) => Promise<void>;
 };
 
-export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
+export function TreatmentForm({
+  personalDatabase,
+  initialValue,
+  treatmentId,
+  pendingEquivalenceCis = [],
+  submitLabel,
+  onSubmit,
+}: Props) {
+  const database = personalDatabase;
+  const router = useRouter();
   const [phases, setPhases] = useState<TreatmentPhase[]>(() =>
     initialPhases(initialValue.phases),
   );
   const [included, setIncluded] = useState(initialValue.includedInPillbox);
+  const [controlledDispensing, setControlledDispensing] =
+    useState<ControlledDispensingInfo | null>(
+      initialValue.controlledDispensing,
+    );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [withoutStock, setWithoutStock] = useState<boolean | null>(null);
+  // Recréé à chaque rendu par l'écran de création : comparer son contenu
+  // plutôt que sa référence évite de recharger le stock à chaque frappe dans
+  // le formulaire.
+  const pendingEquivalenceCisKey = pendingEquivalenceCis.join(',');
+
+  // Recalculé à chaque focus, pas seulement au montage : l'écran reste monté
+  // dans la pile de navigation pendant un aller-retour vers l'ajout de boîte
+  // (ticket 29), un simple useEffect ne se redéclencherait donc jamais au
+  // retour.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      Promise.all([
+        listMedicationBoxes(database),
+        treatmentId === null
+          ? Promise.resolve([])
+          : listGenericEquivalenceConfirmations(database, treatmentId),
+      ])
+        .then(([boxes, equivalences]) => {
+          if (!cancelled)
+            setWithoutStock(
+              isTreatmentWithoutStock(
+                initialValue.specialtyCis,
+                treatmentId,
+                boxes,
+                equivalences,
+                pendingEquivalenceCis,
+              ),
+            );
+        })
+        .catch(() => {
+          if (!cancelled) setWithoutStock(null);
+        });
+      return () => {
+        cancelled = true;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+      database,
+      initialValue.specialtyCis,
+      treatmentId,
+      pendingEquivalenceCisKey,
+    ]),
+  );
 
   async function submit() {
     try {
@@ -70,6 +148,7 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
         ...initialValue,
         includedInPillbox: included,
         phases: orderedPhases,
+        controlledDispensing,
       });
     } catch (reason: unknown) {
       setError(
@@ -97,6 +176,42 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
         La posologie est saisie par vous. Elle n’est jamais déduite du
         médicament.
       </Message>
+      {/*
+        Suppose que la connexion medication-reference.db est déjà fournie par
+        un SQLiteProvider ancêtre, partagé avec le reste de l'écran (voir
+        treatments/new.tsx et treatments/[id].tsx) : ce composant n'ouvre pas
+        sa propre connexion pour éviter deux `forceOverwrite` en parallèle
+        sur le même fichier.
+      */}
+      <ControlledDispensingField
+        specialtyCis={initialValue.specialtyCis}
+        value={controlledDispensing}
+        onChange={setControlledDispensing}
+      />
+      {withoutStock && included ? (
+        <>
+          <Message tone="warning" title="Aucune boîte en stock">
+            Aucune boîte en stock ne correspond actuellement à cette spécialité.
+          </Message>
+          <AppButton
+            label="Ajouter une boîte au stock"
+            variant="secondary"
+            onPress={() =>
+              router.push(
+                treatmentId === null
+                  ? {
+                      pathname: '/inventory/new',
+                      params: {
+                        draftTreatmentCis: initialValue.specialtyCis,
+                        draftTreatmentName: initialValue.specialtyName,
+                      },
+                    }
+                  : '/inventory/new',
+              )
+            }
+          />
+        </>
+      ) : null}
       <Text style={styles.heading}>Phases de traitement</Text>
       {[...phases]
         .map((phase, originalIndex) => ({ phase, originalIndex }))
@@ -169,12 +284,17 @@ export function TreatmentForm({ initialValue, submitLabel, onSubmit }: Props) {
 
 /**
  * Une phase 1 vide est proposée d’emblée : la posologie se saisit sans étape
- * préalable. Les phases suivantes restent ajoutées explicitement.
+ * préalable. Les phases suivantes restent ajoutées explicitement. Sa date de
+ * début est préremplie au lendemain de la date du jour (device local), pour
+ * éviter une saisie manuelle systématique dans le cas courant ; elle reste
+ * librement modifiable ou effaçable.
  */
 export function initialPhases(
   phases: readonly TreatmentPhase[],
 ): TreatmentPhase[] {
-  return phases.length > 0 ? [...phases] : [emptyPhase()];
+  if (phases.length > 0) return [...phases];
+  const tomorrow = nextCivilDay(pickerDateToCivilDate(new Date()));
+  return [{ ...emptyPhase(), startDate: tomorrow ?? '' }];
 }
 
 /**
@@ -350,93 +470,6 @@ function orderPhases(phases: readonly TreatmentPhase[]): TreatmentPhase[] {
   );
 }
 
-function DateField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  const [pickerVisible, setPickerVisible] = useState(false);
-  const selectedDate = civilDateToPickerDate(value);
-
-  function selectDate(event: DateTimePickerEvent, date?: Date) {
-    if (Platform.OS !== 'ios') setPickerVisible(false);
-    if (event.type === 'set' && date !== undefined)
-      onChange(pickerDateToCivilDate(date));
-  }
-
-  if (Platform.OS === 'web')
-    return (
-      <View style={styles.dateField}>
-        <Text style={styles.label}>{label}</Text>
-        <TextInput
-          accessibilityLabel={`${label} au format JJ/MM/AAAA`}
-          placeholder="JJ/MM/AAAA"
-          style={styles.dateInput}
-          value={value === '' ? '' : formatFrenchCivilDate(value)}
-          onChangeText={(text) => onChange(frenchInputToCivilDate(text))}
-        />
-      </View>
-    );
-
-  return (
-    <View style={styles.dateField}>
-      <Text style={styles.label}>{label}</Text>
-      <View style={styles.dateActions}>
-        <Pressable
-          accessibilityLabel={`${label}, ${value === '' ? 'aucune date' : formatFrenchCivilDate(value)}`}
-          accessibilityRole="button"
-          onPress={() => setPickerVisible(true)}
-          style={styles.dateButton}
-        >
-          <Text style={value === '' ? styles.datePlaceholder : undefined}>
-            {value === '' ? 'Choisir une date' : formatFrenchCivilDate(value)}
-          </Text>
-        </Pressable>
-        {value !== '' ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => onChange('')}
-            style={styles.clearDate}
-          >
-            <Text style={styles.clearDateText}>Effacer</Text>
-          </Pressable>
-        ) : null}
-      </View>
-      {pickerVisible ? (
-        <>
-          <DateTimePicker
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            locale="fr-FR"
-            mode="date"
-            onChange={selectDate}
-            value={selectedDate ?? new Date()}
-          />
-          {Platform.OS === 'ios' ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setPickerVisible(false)}
-              style={styles.closePicker}
-            >
-              <Text style={styles.secondaryButtonText}>
-                Fermer le calendrier
-              </Text>
-            </Pressable>
-          ) : null}
-        </>
-      ) : null}
-    </View>
-  );
-}
-
-function frenchInputToCivilDate(value: string): string {
-  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
-  if (match === null) return value;
-  return `${match[3]}-${match[2]}-${match[1]}`;
-}
 function Choice({
   label,
   selected,
@@ -497,25 +530,6 @@ const styles = StyleSheet.create({
     borderColor: colors.brand,
     borderWidth: 2,
   },
-  clearDate: { paddingHorizontal: 8, paddingVertical: 12 },
-  clearDateText: { color: '#b91c1c' },
-  closePicker: { alignItems: 'center', padding: 10 },
-  dateActions: { alignItems: 'center', flexDirection: 'row', gap: 6 },
-  dateButton: {
-    borderColor: '#9ca3af',
-    borderRadius: 8,
-    borderWidth: 1,
-    flex: 1,
-    padding: 12,
-  },
-  dateField: { gap: 4 },
-  dateInput: {
-    borderColor: '#9ca3af',
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 10,
-  },
-  datePlaceholder: { color: '#6b7280' },
   compactInput: { width: 100 },
   slotInput: {
     backgroundColor: colors.surface,
@@ -545,11 +559,6 @@ const styles = StyleSheet.create({
   },
   phaseTitle: { fontSize: 16, fontWeight: '700' },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  secondaryButtonText: {
-    color: '#1d4ed8',
-    fontWeight: '700',
-    textAlign: 'center',
-  },
   toggle: {
     alignItems: 'center',
     flexDirection: 'row',

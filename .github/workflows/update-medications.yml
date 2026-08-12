@@ -1,0 +1,170 @@
+name: Update medications reference data
+
+on:
+  schedule:
+    # Le 1er de chaque mois à 3h UTC. La BDPM est actualisée mensuellement,
+    # sans jour fixe garanti ; ce déclenchement est une fréquence raisonnable
+    # et non une hypothèse sur la date réelle de publication.
+    - cron: '0 3 1 * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: update-medications
+  cancel-in-progress: false
+
+jobs:
+  update-medications:
+    name: Check BDPM dates and refresh medications.db
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: true
+      EXPO_NO_TELEMETRY: 1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies from lockfile
+        run: npm ci --no-audit --no-fund
+
+      - name: Check BDPM source dates
+        # Échoue explicitement (statut CI rouge) si la page BDPM est
+        # injoignable ou si son format a changé, plutôt que de deviner une
+        # date ou de régénérer avec une date incertaine.
+        id: check-dates
+        run: npm run --silent medications:check-dates
+
+      - name: Download BDPM source files
+        if: steps.check-dates.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bdpm"
+          curl -fsSL -o "$RUNNER_TEMP/bdpm/CIS_bdpm.txt" \
+            https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_bdpm.txt
+          curl -fsSL -o "$RUNNER_TEMP/bdpm/CIS_CIP_bdpm.txt" \
+            https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_CIP_bdpm.txt
+          curl -fsSL -o "$RUNNER_TEMP/bdpm/CIS_GENER_bdpm.txt" \
+            https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_GENER_bdpm.txt
+          curl -fsSL -o "$RUNNER_TEMP/bdpm/CIS_CPD_bdpm.txt" \
+            https://base-donnees-publique.medicaments.gouv.fr/download/file/CIS_CPD_bdpm.txt
+
+      - name: Regenerate medications.db
+        if: steps.check-dates.outputs.changed == 'true'
+        shell: bash
+        env:
+          SPECIALTIES_SOURCE_DATE: ${{ steps.check-dates.outputs.specialties_source_date }}
+          PRESENTATIONS_SOURCE_DATE: ${{ steps.check-dates.outputs.presentations_source_date }}
+          GENERICS_SOURCE_DATE: ${{ steps.check-dates.outputs.generics_source_date }}
+          CONDITIONS_SOURCE_DATE: ${{ steps.check-dates.outputs.conditions_source_date }}
+        run: |
+          set -euo pipefail
+          npm run medications:import -- \
+            --specialties "$RUNNER_TEMP/bdpm/CIS_bdpm.txt" \
+            --presentations "$RUNNER_TEMP/bdpm/CIS_CIP_bdpm.txt" \
+            --generics "$RUNNER_TEMP/bdpm/CIS_GENER_bdpm.txt" \
+            --conditions "$RUNNER_TEMP/bdpm/CIS_CPD_bdpm.txt" \
+            --output assets/medications/medications.db \
+            --specialties-source-date "$SPECIALTIES_SOURCE_DATE" \
+            --presentations-source-date "$PRESENTATIONS_SOURCE_DATE" \
+            --generics-source-date "$GENERICS_SOURCE_DATE" \
+            --conditions-source-date "$CONDITIONS_SOURCE_DATE"
+
+      - name: Record new source dates and update reference doc
+        if: steps.check-dates.outputs.changed == 'true'
+        shell: bash
+        env:
+          SPECIALTIES_SOURCE_DATE: ${{ steps.check-dates.outputs.specialties_source_date }}
+          PRESENTATIONS_SOURCE_DATE: ${{ steps.check-dates.outputs.presentations_source_date }}
+          GENERICS_SOURCE_DATE: ${{ steps.check-dates.outputs.generics_source_date }}
+          CONDITIONS_SOURCE_DATE: ${{ steps.check-dates.outputs.conditions_source_date }}
+        run: |
+          set -euo pipefail
+          npm run medications:record-dates -- \
+            --specialties-source-date "$SPECIALTIES_SOURCE_DATE" \
+            --presentations-source-date "$PRESENTATIONS_SOURCE_DATE" \
+            --generics-source-date "$GENERICS_SOURCE_DATE" \
+            --conditions-source-date "$CONDITIONS_SOURCE_DATE"
+
+      - name: Check formatting
+        if: steps.check-dates.outputs.changed == 'true'
+        run: npm run format:check
+
+      - name: Lint
+        if: steps.check-dates.outputs.changed == 'true'
+        run: npm run lint
+
+      - name: Typecheck
+        if: steps.check-dates.outputs.changed == 'true'
+        run: npm run typecheck
+
+      - name: Run unit tests
+        if: steps.check-dates.outputs.changed == 'true'
+        run: npm test
+
+      - name: Commit and push to bot/update-medications
+        # Faute de permission GitHub Actions pour ouvrir une PR sur ce dépôt
+        # (même contrainte que MedLink, cf. ML-96), on pousse directement sur
+        # une branche dédiée, jamais sur `main` ni sur `dev`, à relire et
+        # fusionner manuellement.
+        if: steps.check-dates.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B bot/update-medications
+          git add assets/medications/medications.db assets/medications/source-dates.json docs/medications-reference.md
+          if git diff --cached --quiet; then
+            echo "Changement de date détecté mais aucun fichier modifié : arrêt." >&2
+            exit 1
+          fi
+          git commit -m "chore(data): update medications.db from BDPM"
+          git push --force origin bot/update-medications
+
+      - name: Open or update tracking issue
+        if: steps.check-dates.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh label create "automated" --color "ededed" \
+            --description "Créé automatiquement par un workflow" >/dev/null 2>&1 || true
+
+          existing=$(gh issue list --state open \
+            --search "\"MAJ medications.db en attente de revue\" in:title" \
+            --json number --jq '.[0].number // empty')
+
+          reminder="Rappel : cette mise à jour n'est pas publiée. Une relecture manuelle, un merge vers \`dev\` puis \`main\` et une nouvelle release Android restent nécessaires avant qu'elle n'atteigne le téléphone."
+
+          if [ -n "$existing" ]; then
+            comment_body=$(printf 'Nouvelle mise à jour poussée sur `bot/update-medications`. Run : %s\n\n%s' \
+              "$RUN_URL" "$reminder")
+            gh issue comment "$existing" --body "$comment_body"
+          else
+            issue_body=$(printf '%s\n\n%s\n\n%s' \
+              "Le référentiel BDPM a changé. Relire le diff sur la branche \`bot/update-medications\` (en particulier la section « Incertitude constatée » de \`docs/medications-reference.md\`, non régénérée automatiquement) et ouvrir une PR vers \`dev\` si tout est bon, puis fermer cette issue." \
+              "$reminder" \
+              "Run : $RUN_URL")
+            gh issue create \
+              --title "chore(data): MAJ medications.db en attente de revue" \
+              --label "automated" \
+              --body "$issue_body"
+          fi

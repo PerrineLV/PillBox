@@ -14,9 +14,17 @@ import { isIntakeSlot, type IntakeSlot } from '@/domain/treatments/treatment';
 export const PREPARATION_REMINDER_KIND = 'pillbox-preparation-reminder';
 export const INTAKE_REMINDER_KIND = 'pillbox-intake-reminder';
 export const POSTPONED_INTAKE_KIND = 'pillbox-postponed-intake-reminder';
+/**
+ * Rappel dédié au complément d'une case « en attente de complément » d'un
+ * traitement à délivrance encadrée (ticket 30b) : mécanisme séparé du rappel
+ * hebdomadaire de préparation et des rappels quotidiens de prise ci-dessus.
+ */
+export const PENDING_COMPLETION_REMINDER_KIND =
+  'pillbox-pending-completion-reminder';
 
 export const PREPARATION_ROUTE = '/preparations/new' as const;
 export const PLANNED_INTAKE_ROUTE = '/intakes/planned' as const;
+export const PENDING_COMPLETION_ROUTE = '/preparations/history' as const;
 
 export interface IntakeGroupReference {
   readonly date: string;
@@ -30,7 +38,8 @@ export type NotificationTarget =
       readonly at: string;
       readonly groups: readonly IntakeGroupReference[];
     }
-  | ({ readonly kind: 'postponed-intake' } & IntakeGroupReference);
+  | ({ readonly kind: 'postponed-intake' } & IntakeGroupReference)
+  | { readonly kind: 'pending-completion' };
 
 const GROUP_PATTERN = /^(\d{4}-\d{2}-\d{2}):([a-z]+)$/;
 
@@ -59,6 +68,8 @@ export function notificationTarget(data: unknown): NotificationTarget | null {
         isIntakeSlot(record.slot)
         ? { kind: 'postponed-intake', date: record.date, slot: record.slot }
         : null;
+    case PENDING_COMPLETION_REMINDER_KIND:
+      return { kind: 'pending-completion' };
     default:
       return null;
   }

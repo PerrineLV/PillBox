@@ -8,11 +8,19 @@ import {
 /**
  * Actions rapides portées par les rappels de prise Android.
  *
- * Une notification expose au plus deux boutons : la validation des prises encore
- * en attente, dont le libellé dépend de leur nombre au moment où le rappel est
- * programmé, et l’ouverture de PillBox. Un libellé de validation devenu inexact
- * entre la programmation et le déclenchement n’a aucune conséquence métier,
- * puisque l’action ne touche jamais une prise déjà renseignée.
+ * Une notification expose un seul bouton : la validation des prises encore en
+ * attente, dont le libellé dépend de leur nombre au moment où le rappel est
+ * programmé, ou à défaut l’ouverture de PillBox lorsqu’il n’y a rien à valider.
+ * Un libellé de validation devenu inexact entre la programmation et le
+ * déclenchement n’a aucune conséquence métier, puisque l’action ne touche
+ * jamais une prise déjà renseignée.
+ *
+ * Le bouton de validation ramène PillBox au premier plan : Android n’exécute
+ * aucun JavaScript pour un bouton qui n’ouvre pas l’application dès lors que
+ * le processus a été tué, ce qui rendait la validation silencieuse muette
+ * après un certain temps. Ouvrir l’application est donc la seule manière
+ * fiable d’honorer l’action ; l’écriture en base, elle, n’attend pas
+ * l’authentification du verrou.
  *
  * La décision est volontairement séparée d’`expo-notifications` : elle doit
  * rester testable sans module natif.
@@ -54,20 +62,20 @@ const OPEN_APP_BUTTON: IntakeActionButton = {
 };
 
 function validationButton(buttonTitle: string): IntakeActionButton {
-  // La validation n’ouvre jamais l’application : elle doit aboutir depuis le
-  // tiroir, sans passer par le verrou local ni afficher la moindre donnée.
-  return { identifier: VALIDATE_INTAKES_ACTION, buttonTitle, opensApp: false };
+  // Ramène PillBox au premier plan : voir la note en tête de fichier sur la
+  // fiabilité des boutons de notification Android.
+  return { identifier: VALIDATE_INTAKES_ACTION, buttonTitle, opensApp: true };
 }
 
 export const INTAKE_ACTION_CATEGORIES: readonly IntakeActionCategory[] = [
   { identifier: OPEN_ONLY_INTAKE_CATEGORY, buttons: [OPEN_APP_BUTTON] },
   {
     identifier: SINGLE_INTAKE_CATEGORY,
-    buttons: [validationButton('Valider'), OPEN_APP_BUTTON],
+    buttons: [validationButton('Valider')],
   },
   {
     identifier: GROUP_INTAKE_CATEGORY,
-    buttons: [validationButton('Tout valider'), OPEN_APP_BUTTON],
+    buttons: [validationButton('Tout valider')],
   },
 ];
 

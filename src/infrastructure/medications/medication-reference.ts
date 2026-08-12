@@ -126,6 +126,36 @@ export async function searchMedicationReference(
 }
 
 /**
+ * Détection BDPM (`CIS_CPD_bdpm`, ticket 30) d'une mention connue de
+ * délivrance encadrée (stupéfiants et assimilés, délivrance fractionnée)
+ * pour une spécialité. Purement indicative et faillible : conditionne
+ * uniquement l'affichage d'une case à cocher que l'utilisatrice confirme ou
+ * écarte elle-même, jamais une activation automatique. `false` lorsque le
+ * référentiel n'a jamais importé `CIS_CPD_bdpm` ou n'a repéré aucune mention
+ * pour ce CIS.
+ */
+export async function detectControlledDispensingMention(
+  database: SQLiteDatabase,
+  cis: string,
+): Promise<boolean> {
+  if (!/^\d{8}$/.test(cis)) return false;
+
+  const tableExists = await database.getFirstAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'dispensing_conditions'`,
+  );
+  if (tableExists === null) return false;
+
+  const row = await database.getFirstAsync<{ detected: number }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM dispensing_conditions
+       WHERE cis = ? AND controlled_dispensing_mention = 1
+     ) AS detected`,
+    cis,
+  );
+  return row?.detected === 1;
+}
+
+/**
  * Membres d'un groupe générique officiel (BDPM), à l'exclusion du CIS demandé.
  * Une spécialité peut appartenir à plusieurs groupes (ex. complémentarité
  * posologique entre dosages) : tous sont retournés, sans en privilégier un.

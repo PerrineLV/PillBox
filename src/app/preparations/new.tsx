@@ -1,13 +1,13 @@
 import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import type { BarcodeScanningResult } from 'expo-camera';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { GenericMatchConfirmation } from '@/components/preparations/generic-match-confirmation';
+import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import {
   formatFrenchCivilPeriod,
@@ -41,6 +41,7 @@ import {
 import {
   formatHalfUnits,
   type IntakeSlot,
+  type Treatment,
 } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
@@ -56,9 +57,11 @@ import {
   savePreparationProgress,
   type SavedPreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
+import { schedulePendingCompletionReminderFor } from '@/infrastructure/reminders/pending-completion-reminder-scheduler';
 import {
   confirmGenericEquivalence,
   isGenericEquivalenceConfirmed,
+  listAllGenericEquivalenceConfirmations,
 } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
@@ -146,6 +149,7 @@ function NewPreparationScreenContent({
   const [snapshot, setSnapshot] = useState<PreparationSnapshot | null>(null);
   const [preparationId, setPreparationId] = useState<number | null>(null);
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
+  const [treatments, setTreatments] = useState<Treatment[]>([]);
   const [weeks, setWeeks] = useState<KnownPreparation[]>([]);
   const [choice, setChoice] = useState<PreparationWeekChoice>('CURRENT');
   const [progress, setProgress] = useState<SavedPreparationProgress[]>([]);
@@ -155,6 +159,16 @@ function NewPreparationScreenContent({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [finalized, setFinalized] = useState(false);
+  /**
+   * CIS explicitement laissés sans couverture complète pour un traitement à
+   * délivrance encadrée (ticket 30b) : transitoire, comme `pending`/`choosing`
+   * ci-dessus. Non persisté — une reprise après fermeture de l'application
+   * redemande la décision, sans perte de progression réelle.
+   */
+  const [skippedCis, setSkippedCis] = useState<ReadonlySet<string>>(new Set());
+  const [pendingAfterValidation, setPendingAfterValidation] = useState<
+    readonly string[]
+  >([]);
   const [finalConfirmationVisible, setFinalConfirmationVisible] =
     useState(false);
   const [cancelConfirmationVisible, setCancelConfirmationVisible] =
@@ -175,11 +189,13 @@ function NewPreparationScreenContent({
       getLatestDraftPreparation(personalDatabase),
       listMedicationBoxes(personalDatabase),
       listPreparationWeeks(personalDatabase),
+      listTreatments(personalDatabase),
     ])
-      .then(([saved, inventory, knownWeeks]) => {
+      .then(([saved, inventory, knownWeeks, allTreatments]) => {
         if (!active) return;
         setBoxes(inventory);
         setWeeks(knownWeeks);
+        setTreatments(allTreatments);
         if (saved) {
           setSnapshot(saved.snapshot);
           setPreparationId(saved.id);
@@ -204,9 +220,25 @@ function NewPreparationScreenContent({
     };
   }, [personalDatabase, options]);
 
+  /**
+   * CIS des traitements dont l'indicateur de délivrance encadrée est actif
+   * (ticket 30) : seuls eux peuvent être laissés en attente de complément
+   * (ticket 30b), jamais un traitement sans ce dispositif.
+   */
+  const controlledDispensingActiveCis = useMemo(
+    () =>
+      new Set(
+        treatments
+          .filter((treatment) => treatment.controlledDispensing?.enabled)
+          .map((treatment) => treatment.specialtyCis),
+      ),
+    [treatments],
+  );
+
   const current = useMemo<CurrentRequirement | null>(() => {
     if (!snapshot) return null;
     for (const requirement of snapshot.requirements) {
+      if (skippedCis.has(requirement.specialtyCis)) continue;
       const contributions = progress.filter(
         (item) => item.specialtyCis === requirement.specialtyCis,
       );
@@ -219,7 +251,19 @@ function NewPreparationScreenContent({
       }
     }
     return null;
-  }, [progress, snapshot]);
+  }, [progress, snapshot, skippedCis]);
+
+  /**
+   * Laisse le médicament courant sans couverture complète, réservé aux
+   * traitements à délivrance encadrée active : la case concernée passera à
+   * l'état « en attente de complément » à la validation finale (ticket 30b).
+   * Transitoire (voir `skippedCis`) : jamais persisté avant la validation.
+   */
+  function skipCurrentMedication(): void {
+    if (!current || !controlledDispensingActiveCis.has(current.specialtyCis))
+      return;
+    setSkippedCis((previous) => new Set([...previous, current.specialtyCis]));
+  }
 
   const currentSpecialtyCis = current?.specialtyCis ?? null;
   useEffect(() => {
@@ -271,6 +315,7 @@ function NewPreparationScreenContent({
     if (!snapshot) return 0;
     return snapshot.requirements.filter(
       (requirement) =>
+        skippedCis.has(requirement.specialtyCis) ||
         remainingHalfUnitsFor(
           requirement.requiredHalfUnits,
           progress.filter(
@@ -278,7 +323,7 @@ function NewPreparationScreenContent({
           ),
         ) === 0,
     ).length;
-  }, [progress, snapshot]);
+  }, [progress, snapshot, skippedCis]);
 
   const selectedWeek =
     options.find((week) => week.choice === choice) ?? options[0];
@@ -291,14 +336,21 @@ function NewPreparationScreenContent({
     setError(null);
     try {
       const referenceDate = todayIso();
-      const treatments = await listTreatments(personalDatabase);
+      const currentTreatments = await listTreatments(personalDatabase);
+      const equivalenceConfirmations =
+        await listAllGenericEquivalenceConfirmations(personalDatabase);
       const generated = generatePreparationSnapshot(
-        treatments,
+        currentTreatments,
         boxes,
         selectedWeek.startDate,
         referenceDate,
+        equivalenceConfirmations.map((confirmation) => ({
+          treatmentId: confirmation.treatmentId,
+          cis: confirmation.cis,
+        })),
       );
       const id = await createPreparation(personalDatabase, generated);
+      setTreatments(currentTreatments);
       setSnapshot(generated);
       setPreparationId(id);
     } catch (reason: unknown) {
@@ -324,6 +376,8 @@ function NewPreparationScreenContent({
     setChoosing(false);
     setScanning(false);
     setFinalized(false);
+    setSkippedCis(new Set());
+    setPendingAfterValidation([]);
     setError(null);
   }
 
@@ -549,20 +603,16 @@ function NewPreparationScreenContent({
         lot: parsed.fields.lot,
         expirationDate,
       },
-      boxes,
+      effectiveBoxes,
     );
     if (match.status !== 'MATCHED') {
       rejectBox(
-        match.status === 'AMBIGUOUS'
-          ? 'Plusieurs boîtes correspondent : impossible de savoir laquelle est utilisée.'
-          : 'Cette boîte ne correspond exactement à aucune boîte du stock local.',
+        'Cette boîte ne correspond exactement à aucune boîte du stock local.',
         'SCAN',
       );
       return;
     }
-    const effectiveBox =
-      effectiveBoxes.find((box) => box.id === match.box.id) ?? match.box;
-    void verifyBox(effectiveBox, 'SCAN', result.data);
+    void verifyBox(match.box, 'SCAN', result.data);
   }
 
   /**
@@ -604,11 +654,9 @@ function NewPreparationScreenContent({
       await savePreparationProgress(personalDatabase, preparationId, entry);
       setProgress((previous) => [...previous, entry]);
       setPending(null);
-      // Une contribution partielle laisse le médicament ouvert : proposer
-      // aussitôt une seconde boîte pour couvrir le reste, sans double tap.
-      if (verification.status === 'PARTIAL') {
-        setChoosing(true);
-      }
+      // Une contribution partielle laisse le médicament ouvert : les boutons
+      // scanner/choisir réapparaissent pour couvrir le reste, sans imposer la
+      // liste manuelle alors qu'un second scan suffit le plus souvent.
     } catch (reason: unknown) {
       setError(message(reason, 'Sauvegarde de la progression impossible.'));
     } finally {
@@ -621,7 +669,30 @@ function NewPreparationScreenContent({
     setSaving(true);
     setError(null);
     try {
-      await completePreparation(personalDatabase, preparationId, todayIso());
+      const referenceDate = todayIso();
+      const pendingSpecialtyCis = await completePreparation(
+        personalDatabase,
+        preparationId,
+        referenceDate,
+      );
+      // Un rappel dédié par médicament laissé en attente (ticket 30b),
+      // distinct du rappel hebdomadaire de préparation et des rappels
+      // quotidiens de prise : jamais fondu avec eux.
+      for (const specialtyCis of pendingSpecialtyCis) {
+        const treatment = treatments.find(
+          (item) =>
+            item.specialtyCis === specialtyCis &&
+            item.controlledDispensing?.enabled,
+        );
+        await schedulePendingCompletionReminderFor(
+          personalDatabase,
+          preparationId,
+          specialtyCis,
+          treatment?.controlledDispensing?.theoreticalRenewalDate ?? null,
+          referenceDate,
+        );
+      }
+      setPendingAfterValidation(pendingSpecialtyCis);
       setFinalized(true);
       setFinalConfirmationVisible(false);
       setBoxes(await listMedicationBoxes(personalDatabase));
@@ -711,6 +782,14 @@ function NewPreparationScreenContent({
               variant="secondary"
               onPress={beginChoice}
             />
+            {controlledDispensingActiveCis.has(current.specialtyCis) ? (
+              <AppButton
+                label="Aucun stock disponible : laisser en attente de complément"
+                variant="quiet"
+                onPress={skipCurrentMedication}
+                accessibilityHint="Passe au médicament suivant sans couverture complète ; réservé aux traitements à délivrance encadrée"
+              />
+            ) : null}
           </View>
         ) : undefined
       }
@@ -763,7 +842,8 @@ function NewPreparationScreenContent({
           title="Stock total insuffisant signalé lors de la génération"
         >
           La validation reste bloquée si la boîte scannée ne couvre pas le
-          besoin.
+          besoin, sauf pour un traitement à délivrance encadrée (stupéfiants et
+          assimilés) explicitement laissé en attente de complément.
         </Message>
       ) : null}
       {snapshot && snapshot.requirements.length === 0 ? (
@@ -832,6 +912,21 @@ function NewPreparationScreenContent({
           <Message tone="success" title="Préparation validée">
             Le stock et les lots utilisés ont été enregistrés dans l’historique.
           </Message>
+          {pendingAfterValidation.length > 0 ? (
+            <Message tone="warning" title="Cases en attente de complément">
+              {pendingAfterValidation.length} médicament
+              {pendingAfterValidation.length > 1 ? 's' : ''} à délivrance
+              encadrée n’ont pas pu être entièrement couvert
+              {pendingAfterValidation.length > 1 ? 's' : ''}. Complétez-les dès
+              que du stock est disponible, depuis l’historique. Un rappel dédié
+              vous préviendra.
+            </Message>
+          ) : null}
+          <AppButton
+            label="Voir l’historique"
+            variant="secondary"
+            onPress={() => router.push('/preparations/history')}
+          />
           <AppButton
             label="Préparer une autre semaine"
             variant="secondary"

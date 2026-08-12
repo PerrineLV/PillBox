@@ -24,6 +24,7 @@ const treatment = (): Treatment => ({
     },
   ],
   asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
+  controlledDispensing: null,
 });
 
 const box = (overrides: Partial<MedicationBox> = {}): MedicationBox => ({
@@ -121,5 +122,27 @@ describe('alertes utiles au prochain pilulier', () => {
     );
     expect(alerts.stock[0]?.status).toBe('CLOSE');
     expect(alerts.expirations).toHaveLength(1);
+  });
+});
+
+describe('comptage du stock équivalent générique confirmé (ticket 24b)', () => {
+  it('ne signale plus une rupture lorsque le stock est dans un CIS confirmé comme équivalence pour ce traitement', () => {
+    const alerts = buildInventoryAlerts(
+      [treatment()],
+      [box({ specialtyCis: '60000002', remainingQuantity: 10 })],
+      '2026-08-09',
+      { equivalences: [{ treatmentId: 1, cis: '60000002' }] },
+    );
+    expect(alerts.stock).toEqual([]);
+  });
+
+  it('continue de signaler une rupture pour un CIS du même groupe générique mais jamais confirmé pour ce traitement précis', () => {
+    const alerts = buildInventoryAlerts(
+      [treatment()],
+      [box({ specialtyCis: '60000002', remainingQuantity: 10 })],
+      '2026-08-09',
+      { equivalences: [{ treatmentId: 99, cis: '60000002' }] },
+    );
+    expect(alerts.stock[0]).toMatchObject({ status: 'INSUFFICIENT' });
   });
 });

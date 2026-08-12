@@ -7,6 +7,7 @@ import {
   confirmGenericEquivalence,
   forgetGenericEquivalence,
   isGenericEquivalenceConfirmed,
+  listAllGenericEquivalenceConfirmations,
   listGenericEquivalenceConfirmations,
 } from '../generic-equivalence-repository';
 
@@ -150,5 +151,37 @@ describe('generic-equivalence-repository', () => {
 
     expect(second[0].confirmedAt).toBe(first[0].confirmedAt);
     expect(second[0].specialtyName).toBe('Sertraline (libellé mis à jour)');
+  });
+
+  it('liste les équivalences mémorisées de tous les traitements, sans filtre', async () => {
+    const { raw, database, treatmentId } = await createDatabase();
+    const otherTreatment = raw
+      .prepare(
+        `INSERT INTO treatments (specialty_cis, specialty_name) VALUES ('60000010', 'Doliprane')`,
+      )
+      .run();
+    const otherTreatmentId = Number(otherTreatment.lastInsertRowid);
+
+    await confirmGenericEquivalence(database, {
+      treatmentId,
+      cis: '60000002',
+      specialtyName: 'Sertraline',
+      groupLabel: 'Groupe sertraline',
+    });
+    await confirmGenericEquivalence(database, {
+      treatmentId: otherTreatmentId,
+      cis: '60000011',
+      specialtyName: 'Paracétamol',
+      groupLabel: 'Groupe paracétamol',
+    });
+
+    const all = await listAllGenericEquivalenceConfirmations(database);
+    expect(all).toEqual([
+      expect.objectContaining({ treatmentId, cis: '60000002' }),
+      expect.objectContaining({
+        treatmentId: otherTreatmentId,
+        cis: '60000011',
+      }),
+    ]);
   });
 });

@@ -2,6 +2,7 @@ import type {
   MedicationForecast,
   StockForecast,
 } from '@/domain/forecast/stock-forecast';
+import type { Treatment } from '@/domain/treatments/treatment';
 
 /**
  * Ordonnées de la plus urgente à la moins urgente. `RUNS_OUT_SOON` désigne une
@@ -26,6 +27,12 @@ export type RenewalItem = Readonly<{
   /** `null` lorsque la prévision n'a pas trouvé de date de rupture exploitable. */
   ruptureDate: string | null;
   ruptureCause: 'CONSUMED' | 'EXPIRED' | null;
+  /**
+   * Renouvellement théorique d'une délivrance encadrée (ticket 30), purement
+   * informatif. `null` en l'absence de traitement concerné : n'influence
+   * jamais l'urgence ni le tri, calculés uniquement depuis le stock réel.
+   */
+  theoreticalRenewalDate: string | null;
 }>;
 
 const URGENCY_ORDER: Record<RenewalUrgency, number> = {
@@ -37,31 +44,66 @@ const URGENCY_ORDER: Record<RenewalUrgency, number> = {
 /**
  * Construit la liste des médicaments à renouveler à partir de la seule
  * prévision de stock, classés par urgence puis, à urgence égale, par
- * proximité de rupture ou par quantité manquante.
+ * proximité de rupture ou par quantité manquante. `treatments` ne sert qu'à
+ * joindre, à titre indicatif, la date de renouvellement théorique d'une
+ * délivrance encadrée (ticket 30) : elle n'intervient jamais dans le calcul
+ * de l'urgence ni dans le tri.
  */
 export function buildRenewalList(
   forecast: StockForecast,
+  treatments: readonly Treatment[] = [],
 ): readonly RenewalItem[] {
+  const theoreticalRenewalDates = buildTheoreticalRenewalDateIndex(treatments);
   return forecast.medications
-    .map((medication) => classify(medication, forecast.endDate))
+    .map((medication) =>
+      classify(medication, forecast.endDate, theoreticalRenewalDates),
+    )
     .filter((item): item is RenewalItem => item !== null)
     .slice()
     .sort(compareItems);
 }
 
+/**
+ * Une spécialité n'a normalement qu'un traitement actif : en cas d'homonymie
+ * inattendue, la première date de renouvellement théorique activée trouvée
+ * est retenue, sans en privilégier une autre — purement informatif.
+ */
+function buildTheoreticalRenewalDateIndex(
+  treatments: readonly Treatment[],
+): ReadonlyMap<string, string> {
+  const index = new Map<string, string>();
+  for (const treatment of treatments) {
+    const info = treatment.controlledDispensing;
+    if (
+      info === null ||
+      !info.enabled ||
+      info.theoreticalRenewalDate === null ||
+      index.has(treatment.specialtyCis)
+    )
+      continue;
+    index.set(treatment.specialtyCis, info.theoreticalRenewalDate);
+  }
+  return index;
+}
+
 function classify(
   medication: MedicationForecast,
   nextPreparationEndDate: string,
+  theoreticalRenewalDates: ReadonlyMap<string, string>,
 ): RenewalItem | null {
   if (medication.insufficientForNextPreparation) {
-    return toRenewalItem(medication, 'INSUFFICIENT_FOR_NEXT_PREPARATION');
+    return toRenewalItem(
+      medication,
+      'INSUFFICIENT_FOR_NEXT_PREPARATION',
+      theoreticalRenewalDates,
+    );
   }
   if (medication.coverage.status === 'RUNS_OUT') {
     const urgency =
       medication.coverage.date <= nextPreparationEndDate
         ? 'RUNS_OUT_SOON'
         : 'LOW_STOCK';
-    return toRenewalItem(medication, urgency);
+    return toRenewalItem(medication, urgency, theoreticalRenewalDates);
   }
   return null;
 }
@@ -69,6 +111,7 @@ function classify(
 function toRenewalItem(
   medication: MedicationForecast,
   urgency: RenewalUrgency,
+  theoreticalRenewalDates: ReadonlyMap<string, string>,
 ): RenewalItem {
   const coverage = medication.coverage;
   return Object.freeze({
@@ -80,6 +123,8 @@ function toRenewalItem(
     missingHalfUnits: medication.missingHalfUnits,
     ruptureDate: coverage.status === 'RUNS_OUT' ? coverage.date : null,
     ruptureCause: coverage.status === 'RUNS_OUT' ? coverage.cause : null,
+    theoreticalRenewalDate:
+      theoreticalRenewalDates.get(medication.specialtyCis) ?? null,
   });
 }
 

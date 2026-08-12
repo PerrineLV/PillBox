@@ -1,10 +1,12 @@
 import { isExpired, type MedicationBox } from '@/domain/inventory/inventory';
 import {
+  buildAcceptedCisIndex,
   generatePreparationSnapshot,
   preparationEndDate,
   preparationStartDate,
   PREPARATION_DURATION_DAYS,
   type KnownPreparation,
+  type TreatmentGenericEquivalence,
 } from '@/domain/preparations/preparation';
 import { generateIntakes } from '@/domain/treatments/generate-intakes';
 import type { Treatment } from '@/domain/treatments/treatment';
@@ -82,12 +84,16 @@ export function buildStockForecast(
   boxes: readonly MedicationBox[],
   referenceDate: string,
   preparations: readonly KnownPreparation[],
-  options: Readonly<{ horizonDays?: number }> = {},
+  options: Readonly<{
+    horizonDays?: number;
+    equivalences?: readonly TreatmentGenericEquivalence[];
+  }> = {},
 ): StockForecast {
   const horizonDays = options.horizonDays ?? FORECAST_HORIZON_DAYS;
   if (!Number.isSafeInteger(horizonDays) || horizonDays < 1) {
     throw new Error('L’horizon de prévision doit couvrir au moins un jour.');
   }
+  const equivalences = options.equivalences ?? [];
 
   const startDate = forecastStartDate(referenceDate, preparations);
   const horizonEndDate = addCivilDays(startDate, horizonDays - 1);
@@ -96,6 +102,7 @@ export function buildStockForecast(
     boxes,
     startDate,
     startDate,
+    equivalences,
   );
   const requirements = new Map(
     snapshot.requirements.map((requirement) => [
@@ -105,6 +112,7 @@ export function buildStockForecast(
   );
   const dailyNeeds = aggregateDailyNeeds(treatments, startDate, horizonEndDate);
   const stock = groupUsableBoxes(boxes, startDate);
+  const acceptedCisIndex = buildAcceptedCisIndex(treatments, equivalences);
 
   const names = new Map<string, string>();
   for (const box of boxes) names.set(box.specialtyCis, box.specialtyName);
@@ -115,7 +123,13 @@ export function buildStockForecast(
 
   const medications = [...names.entries()]
     .map(([specialtyCis, specialtyName]): MedicationForecast => {
-      const lots = stock.get(specialtyCis) ?? [];
+      const acceptedCis =
+        acceptedCisIndex.get(specialtyCis) ?? new Set([specialtyCis]);
+      const lots = [...acceptedCis]
+        .flatMap((cis) => stock.get(cis) ?? [])
+        .sort((left, right) =>
+          left.expirationDate.localeCompare(right.expirationDate),
+        );
       const availableHalfUnits = lots.reduce(
         (total, lot) => total + lot.remainingHalfUnits,
         0,
