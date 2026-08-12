@@ -76,13 +76,13 @@ export default function BoxDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [database, id]);
 
-  const adjust = async (type: 'MANUAL_ADJUSTMENT' | 'CORRECTION') => {
+  const adjust = async () => {
     try {
       await adjustMedicationBox(
         database,
         id,
         Number(quantity),
-        type,
+        'MANUAL_ADJUSTMENT',
         explanation,
       );
       setExplanation('');
@@ -166,15 +166,8 @@ export default function BoxDetailScreen() {
       {error ? <Message tone="error">{error}</Message> : null}
       <AppButton
         label="Enregistrer l’ajustement"
-        onPress={() => void adjust('MANUAL_ADJUSTMENT')}
+        onPress={() => void adjust()}
       />
-      <View style={styles.correction}>
-        <AppButton
-          label="Enregistrer comme correction"
-          variant="secondary"
-          onPress={() => void adjust('CORRECTION')}
-        />
-      </View>
 
       <Text style={styles.section}>Retirer cette boîte du stock</Text>
       {deleteError ? <Message tone="error">{deleteError}</Message> : null}
@@ -237,7 +230,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.lg,
   },
-  correction: { marginTop: 10 },
   date: { color: '#4b5563', fontSize: 12 },
   movement: {
     borderBottomColor: '#d1d5db',
