@@ -549,20 +549,16 @@ function NewPreparationScreenContent({
         lot: parsed.fields.lot,
         expirationDate,
       },
-      boxes,
+      effectiveBoxes,
     );
     if (match.status !== 'MATCHED') {
       rejectBox(
-        match.status === 'AMBIGUOUS'
-          ? 'Plusieurs boîtes correspondent : impossible de savoir laquelle est utilisée.'
-          : 'Cette boîte ne correspond exactement à aucune boîte du stock local.',
+        'Cette boîte ne correspond exactement à aucune boîte du stock local.',
         'SCAN',
       );
       return;
     }
-    const effectiveBox =
-      effectiveBoxes.find((box) => box.id === match.box.id) ?? match.box;
-    void verifyBox(effectiveBox, 'SCAN', result.data);
+    void verifyBox(match.box, 'SCAN', result.data);
   }
 
   /**
@@ -604,11 +600,9 @@ function NewPreparationScreenContent({
       await savePreparationProgress(personalDatabase, preparationId, entry);
       setProgress((previous) => [...previous, entry]);
       setPending(null);
-      // Une contribution partielle laisse le médicament ouvert : proposer
-      // aussitôt une seconde boîte pour couvrir le reste, sans double tap.
-      if (verification.status === 'PARTIAL') {
-        setChoosing(true);
-      }
+      // Une contribution partielle laisse le médicament ouvert : les boutons
+      // scanner/choisir réapparaissent pour couvrir le reste, sans imposer la
+      // liste manuelle alors qu'un second scan suffit le plus souvent.
     } catch (reason: unknown) {
       setError(message(reason, 'Sauvegarde de la progression impossible.'));
     } finally {

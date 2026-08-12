@@ -138,7 +138,7 @@ export type ScannedBoxIdentity = Readonly<{
 
 export type ScannedBoxMatch =
   | Readonly<{ status: 'MATCHED'; box: MedicationBox }>
-  | Readonly<{ status: 'UNKNOWN' | 'AMBIGUOUS' }>;
+  | Readonly<{ status: 'UNKNOWN' }>;
 
 /**
  * Manière dont la boîte utilisée a été confirmée : lecture du DataMatrix ou
@@ -171,7 +171,24 @@ export function assertVerificationEvidence(
   }
 }
 
-/** Exige les données permettant de relier le scan à une boîte précise du stock. */
+/**
+ * Exige les données permettant de relier le scan à une boîte précise du
+ * stock. Le DataMatrix ne porte que la présentation, le lot et la
+ * péremption : quand plusieurs boîtes du stock partagent exactement ce
+ * triplet (deux boîtes identiques achetées le même jour, par exemple), elles
+ * sont interchangeables du point de vue métier — le numéro de série GS1 (AI
+ * 21) qui pourrait les distinguer est hors périmètre (ticket 13d).
+ *
+ * L'appelant doit passer la vue *effective* du stock (voir
+ * `effectiveUsableBoxes`), qui reflète les quantités déjà réservées par la
+ * préparation en cours : une boîte épuisée par une contribution déjà
+ * enregistrée dans cette préparation est écartée au profit d'une autre boîte
+ * identique encore disponible, sinon rescanner la même étiquette resterait
+ * bloqué sur la boîte déjà vidée. Parmi les boîtes encore utilisables, la
+ * résolution retient celle avec le moins de stock restant, pour épuiser en
+ * priorité la boîte la plus proche de sa fin, avec un départage déterministe
+ * par id croissant en cas d'égalité stricte.
+ */
 export function matchScannedBox(
   identity: ScannedBoxIdentity,
   boxes: readonly MedicationBox[],
@@ -183,8 +200,18 @@ export function matchScannedBox(
       box.expirationDate === identity.expirationDate,
   );
   if (matches.length === 0) return { status: 'UNKNOWN' };
-  if (matches.length > 1) return { status: 'AMBIGUOUS' };
-  return { status: 'MATCHED', box: matches[0] };
+  const [chosen] = [...matches].sort(
+    (left, right) =>
+      exhaustedRank(left) - exhaustedRank(right) ||
+      left.remainingQuantity - right.remainingQuantity ||
+      left.id - right.id,
+  );
+  return { status: 'MATCHED', box: chosen };
+}
+
+/** Place en dernier une boîte déjà vidée (dans le stock réel ou par cette préparation). */
+function exhaustedRank(box: MedicationBox): number {
+  return box.remainingQuantity > 0 ? 0 : 1;
 }
 
 /**

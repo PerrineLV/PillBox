@@ -317,16 +317,82 @@ describe('vérification des boîtes pendant la préparation', () => {
         [stored],
       ),
     ).toEqual({ status: 'UNKNOWN' });
-    expect(
-      matchScannedBox(
-        {
-          presentationCip13: stored.presentationCip13,
-          lot: 'LOT',
-          expirationDate: '2027-01-01',
-        },
-        [stored, { ...stored, id: 2 }],
-      ),
-    ).toEqual({ status: 'AMBIGUOUS' });
+  });
+
+  it('résout automatiquement plusieurs boîtes identiques en retenant celle avec le moins de stock restant', () => {
+    const identity = {
+      presentationCip13: '3400000000000',
+      lot: 'LOT',
+      expirationDate: '2027-01-01',
+    };
+    const fuller = box({ id: 1, remainingQuantity: 10 });
+    const emptier = box({ id: 2, remainingQuantity: 4 });
+    expect(matchScannedBox(identity, [fuller, emptier])).toEqual({
+      status: 'MATCHED',
+      box: emptier,
+    });
+    expect(matchScannedBox(identity, [emptier, fuller])).toEqual({
+      status: 'MATCHED',
+      box: emptier,
+    });
+  });
+
+  it('départage deux boîtes identiques à quantité restante égale par l’id le plus petit', () => {
+    const identity = {
+      presentationCip13: '3400000000000',
+      lot: 'LOT',
+      expirationDate: '2027-01-01',
+    };
+    const lower = box({ id: 1, remainingQuantity: 10 });
+    const higher = box({ id: 2, remainingQuantity: 10 });
+    expect(matchScannedBox(identity, [higher, lower])).toEqual({
+      status: 'MATCHED',
+      box: lower,
+    });
+    expect(matchScannedBox(identity, [lower, higher])).toEqual({
+      status: 'MATCHED',
+      box: lower,
+    });
+  });
+
+  it('écarte une boîte déjà vidée au profit d’une boîte identique encore disponible', () => {
+    const identity = {
+      presentationCip13: '3400000000000',
+      lot: 'LOT',
+      expirationDate: '2027-01-01',
+    };
+    const exhausted = box({ id: 1, remainingQuantity: 0 });
+    const remaining = box({ id: 2, remainingQuantity: 4 });
+    expect(matchScannedBox(identity, [exhausted, remaining])).toEqual({
+      status: 'MATCHED',
+      box: remaining,
+    });
+    expect(matchScannedBox(identity, [remaining, exhausted])).toEqual({
+      status: 'MATCHED',
+      box: remaining,
+    });
+  });
+
+  it('rescanner la même étiquette bascule sur la seconde boîte une fois la première épuisée par cette préparation', () => {
+    const identity = {
+      presentationCip13: '3400000000000',
+      lot: 'LOT',
+      expirationDate: '2027-01-01',
+    };
+    const smaller = box({ id: 1, remainingQuantity: 4 });
+    const larger = box({ id: 2, remainingQuantity: 10 });
+    const firstScan = matchScannedBox(identity, [smaller, larger]);
+    expect(firstScan).toEqual({ status: 'MATCHED', box: smaller });
+    // La première contribution consomme entièrement la boîte la plus petite.
+    const afterFirstContribution = effectiveUsableBoxes(
+      [smaller, larger],
+      [{ boxId: smaller.id, quantityHalfUnits: smaller.remainingQuantity * 2 }],
+    );
+    const secondScan = matchScannedBox(identity, afterFirstContribution);
+    expect(secondScan).toMatchObject({ status: 'MATCHED' });
+    if (secondScan.status === 'MATCHED') {
+      expect(secondScan.box.id).toBe(larger.id);
+    }
   });
 
   it('vérifie une boîte ajoutée manuellement comme une boîte scannée', () => {
