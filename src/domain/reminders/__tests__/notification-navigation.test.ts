@@ -60,6 +60,12 @@ describe('cible de navigation d’une notification', () => {
     });
   });
 
+  it('reconnaît le rappel dédié au complément d’une case en attente', () => {
+    expect(
+      notificationTarget({ kind: 'pillbox-pending-completion-reminder' }),
+    ).toEqual({ kind: 'pending-completion' });
+  });
+
   it('n’invente aucune cible pour une donnée inconnue ou incomplète', () => {
     expect(notificationTarget(undefined)).toBeNull();
     expect(notificationTarget(null)).toBeNull();

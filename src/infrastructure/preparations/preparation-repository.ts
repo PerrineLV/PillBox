@@ -1,12 +1,17 @@
 import type { SQLiteDatabase, SQLiteRunResult } from 'expo-sqlite';
 
 import {
+  allocateItemCompletion,
+  type ItemCompletionStatus,
+} from '@/domain/preparations/pending-completion';
+import {
   assertVerificationEvidence,
   BOX_VERIFICATION_METHODS,
   type BoxVerificationMethod,
   type KnownPreparation,
   type PreparationSnapshot,
 } from '@/domain/preparations/preparation';
+import { INTAKE_SLOTS, type IntakeSlot } from '@/domain/treatments/treatment';
 
 export type SavedPreparationProgress = Readonly<{
   specialtyCis: string;
@@ -357,15 +362,24 @@ export async function cancelPreparation(
 /**
  * Valide et consomme une préparation en une transaction exclusive. Toutes les
  * données de lot utiles à l'historique sont copiées au moment de la validation.
+ *
+ * Pour un médicament dont au moins un traitement source a la délivrance
+ * encadrée active (ticket 30), une couverture inférieure au besoin — y
+ * compris nulle — est acceptée : les cases non couvertes passent à l'état
+ * « en attente de complément » (ticket 30b) plutôt que de bloquer la
+ * validation. Pour tout autre médicament, le comportement historique est
+ * inchangé : la couverture doit rester exacte. Retourne les CIS laissés en
+ * attente, pour que l'appelant puisse y planifier le rappel dédié.
  */
 export async function completePreparation(
   database: SQLiteDatabase,
   preparationId: number,
   completionDate: string,
-): Promise<void> {
+): Promise<readonly string[]> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)) {
     throw new Error('La date de validation est invalide.');
   }
+  const pendingSpecialtyCis: string[] = [];
   await database.withExclusiveTransactionAsync(async (transaction) => {
     const preparation = await transaction.getFirstAsync<{ status: string }>(
       'SELECT status FROM preparations WHERE id = ?',
@@ -388,6 +402,25 @@ export async function completePreparation(
     );
 
     for (const requirement of requirements) {
+      // Un traitement à délivrance encadrée active (ticket 30) tolère une
+      // couverture partielle ou nulle ; tout autre traitement conserve
+      // l'exigence historique de couverture exacte. Un même CIS partagé par
+      // plusieurs traitements est relâché dès qu'au moins l'un d'eux a
+      // l'indicateur actif.
+      const controlledDispensingRow = await transaction.getFirstAsync<{
+        active: number;
+      }>(
+        `SELECT EXISTS(
+           SELECT 1 FROM preparation_items pi
+           JOIN treatments t ON t.id = pi.source_treatment_id
+           WHERE pi.preparation_id = ? AND pi.specialty_cis = ?
+             AND t.controlled_dispensing_enabled = 1
+         ) AS active`,
+        preparationId,
+        requirement.specialty_cis,
+      );
+      const controlledDispensingActive = controlledDispensingRow?.active === 1;
+
       // Un même médicament peut être couvert par plusieurs boîtes lorsque la
       // première s'est terminée en cours de préparation : chaque ligne de
       // progression est une contribution distincte, décrémentée séparément.
@@ -418,7 +451,7 @@ export async function completePreparation(
         requirement.specialty_cis,
       );
 
-      if (usages.length === 0) {
+      if (usages.length === 0 && !controlledDispensingActive) {
         throw new Error(
           'Tous les médicaments doivent être vérifiés avant la validation finale.',
         );
@@ -505,10 +538,28 @@ export async function completePreparation(
         );
         coveredHalfUnits += usage.quantity_half_units;
       }
-      if (coveredHalfUnits !== requirement.required_half_units) {
+      if (coveredHalfUnits > requirement.required_half_units) {
+        throw new Error(
+          'La quantité vérifiée dépasse le besoin de la semaine.',
+        );
+      }
+      if (
+        coveredHalfUnits !== requirement.required_half_units &&
+        !controlledDispensingActive
+      ) {
         throw new Error(
           'La quantité vérifiée ne couvre pas exactement le besoin de la semaine.',
         );
+      }
+
+      if (controlledDispensingActive) {
+        const hasPending = await allocateAndPersistItemCompletion(
+          transaction,
+          preparationId,
+          requirement.specialty_cis,
+          coveredHalfUnits,
+        );
+        if (hasPending) pendingSpecialtyCis.push(requirement.specialty_cis);
       }
     }
 
@@ -522,6 +573,349 @@ export async function completePreparation(
       throw new Error('Cette préparation est déjà terminée.');
     }
   });
+  return pendingSpecialtyCis;
+}
+
+type CompletionTransaction = Pick<SQLiteDatabase, 'getAllAsync' | 'runAsync'>;
+
+type PendingItemRow = {
+  id: number;
+  source_treatment_id: number;
+  intake_date: string;
+  slot: IntakeSlot;
+  quantity_half_units: number;
+};
+
+/**
+ * Alloue une couverture aux cases d'un médicament à délivrance encadrée (voir
+ * `allocateItemCompletion`) et persiste le résultat sur `preparation_items`.
+ * Retourne `true` si au moins une case reste en attente de complément.
+ */
+async function persistItemCompletion(
+  transaction: CompletionTransaction,
+  specialtyCis: string,
+  rows: readonly PendingItemRow[],
+  coveredHalfUnits: number,
+): Promise<boolean> {
+  // Trié avec le même comparateur qu'`allocateItemCompletion` (interne à la
+  // fonction) : un tri stable d'une entrée déjà triée ne change pas l'ordre,
+  // ce qui permet de recorréler chaque résultat à l'id de sa ligne d'origine
+  // par simple position, sans faire porter d'identifiant technique au domaine.
+  const ordered = [...rows].sort(
+    (left, right) =>
+      left.intake_date.localeCompare(right.intake_date) ||
+      INTAKE_SLOTS.indexOf(left.slot) - INTAKE_SLOTS.indexOf(right.slot),
+  );
+  const allocation = allocateItemCompletion(
+    ordered.map((row) => ({
+      treatmentId: row.source_treatment_id,
+      specialtyCis,
+      specialtyName: '',
+      pharmaceuticalForm: null,
+      date: row.intake_date,
+      slot: row.slot,
+      quantityHalfUnits: row.quantity_half_units,
+    })),
+    coveredHalfUnits,
+  );
+  let hasPending = false;
+  for (const [index, row] of ordered.entries()) {
+    const status: ItemCompletionStatus = allocation[index].status;
+    if (status === 'PENDING_COMPLEMENT') hasPending = true;
+    await transaction.runAsync(
+      `UPDATE preparation_items SET completion_status = ? WHERE id = ?`,
+      status,
+      row.id,
+    );
+  }
+  return hasPending;
+}
+
+async function allocateAndPersistItemCompletion(
+  transaction: CompletionTransaction,
+  preparationId: number,
+  specialtyCis: string,
+  coveredHalfUnits: number,
+): Promise<boolean> {
+  const rows = await transaction.getAllAsync<PendingItemRow>(
+    `SELECT id, source_treatment_id, intake_date, slot, quantity_half_units
+     FROM preparation_items WHERE preparation_id = ? AND specialty_cis = ?`,
+    preparationId,
+    specialtyCis,
+  );
+  return persistItemCompletion(
+    transaction,
+    specialtyCis,
+    rows,
+    coveredHalfUnits,
+  );
+}
+
+export type PendingCompletionCase = Readonly<{
+  preparationId: number;
+  preparationStartDate: string;
+  preparationEndDate: string;
+  specialtyCis: string;
+  specialtyName: string;
+  /**
+   * Traitement à l'origine de la première case en attente rencontrée pour ce
+   * médicament. En pratique un CIS n'a qu'un traitement actif ; en cas
+   * d'homonymie inattendue, le premier trouvé est retenu sans en privilégier
+   * un autre — sert uniquement à retrouver une équivalence générique déjà
+   * confirmée lors d'un complément ultérieur.
+   */
+  treatmentId: number;
+  pendingItems: readonly Readonly<{ date: string; slot: IntakeSlot }>[];
+  pendingHalfUnits: number;
+  /** Date théorique courante du traitement (ticket 30), purement informative. */
+  theoreticalRenewalDate: string | null;
+}>;
+
+/**
+ * Cases encore « en attente de complément » (ticket 30b), toutes préparations
+ * validées confondues, groupées par médicament au sein de chaque préparation.
+ */
+export async function getPendingCompletionCases(
+  database: SQLiteDatabase,
+): Promise<readonly PendingCompletionCase[]> {
+  const rows = await database.getAllAsync<{
+    preparation_id: number;
+    start_date: string;
+    end_date: string;
+    specialty_cis: string;
+    specialty_name: string;
+    intake_date: string;
+    slot: IntakeSlot;
+    quantity_half_units: number;
+    source_treatment_id: number;
+  }>(
+    `SELECT pi.preparation_id, p.start_date, p.end_date, pi.specialty_cis,
+      pi.specialty_name, pi.intake_date, pi.slot, pi.quantity_half_units,
+      pi.source_treatment_id
+     FROM preparation_items pi
+     JOIN preparations p ON p.id = pi.preparation_id
+     WHERE pi.completion_status = 'PENDING_COMPLEMENT'
+     ORDER BY p.start_date, pi.specialty_name, pi.intake_date, pi.slot`,
+  );
+  if (rows.length === 0) return [];
+
+  const treatmentIds = [...new Set(rows.map((row) => row.source_treatment_id))];
+  const placeholders = treatmentIds.map(() => '?').join(', ');
+  const treatments = await database.getAllAsync<{
+    id: number;
+    controlled_dispensing_theoretical_renewal_date: string | null;
+  }>(
+    `SELECT id, controlled_dispensing_theoretical_renewal_date
+     FROM treatments WHERE id IN (${placeholders})`,
+    ...treatmentIds,
+  );
+  const theoreticalDateByTreatmentId = new Map(
+    treatments.map((row) => [
+      row.id,
+      row.controlled_dispensing_theoretical_renewal_date,
+    ]),
+  );
+
+  type MutableCase = {
+    preparationId: number;
+    preparationStartDate: string;
+    preparationEndDate: string;
+    specialtyCis: string;
+    specialtyName: string;
+    treatmentId: number;
+    pendingItems: { date: string; slot: IntakeSlot }[];
+    pendingHalfUnits: number;
+    theoreticalRenewalDate: string | null;
+  };
+  const groups = new Map<string, MutableCase>();
+  for (const row of rows) {
+    const key = `${row.preparation_id}:${row.specialty_cis}`;
+    const group = groups.get(key) ?? {
+      preparationId: row.preparation_id,
+      preparationStartDate: row.start_date,
+      preparationEndDate: row.end_date,
+      specialtyCis: row.specialty_cis,
+      specialtyName: row.specialty_name,
+      treatmentId: row.source_treatment_id,
+      pendingItems: [],
+      pendingHalfUnits: 0,
+      theoreticalRenewalDate:
+        theoreticalDateByTreatmentId.get(row.source_treatment_id) ?? null,
+    };
+    group.pendingItems.push({ date: row.intake_date, slot: row.slot });
+    group.pendingHalfUnits += row.quantity_half_units;
+    groups.set(key, group);
+  }
+  return [...groups.values()].map((group) =>
+    Object.freeze({
+      ...group,
+      pendingItems: Object.freeze(group.pendingItems),
+    }),
+  );
+}
+
+export type PendingCompletionContribution = Readonly<{
+  boxId: number;
+  /** Quantité couverte par cette boîte, déjà calculée par `verifyPreparationBox`. */
+  quantityHalfUnits: number;
+  verification: BoxVerificationMethod;
+  scanRaw: string | null;
+  matchedCis: string | null;
+  matchedSpecialtyName: string | null;
+}>;
+
+/**
+ * Complète une case « en attente de complément » (ticket 30b) dès qu'une
+ * boîte devient disponible, sans reprendre tout le flux de préparation.
+ * Décrémente le stock et journalise comme une préparation ordinaire.
+ * Retourne `true` lorsque plus aucune case de ce médicament, pour cette
+ * préparation, ne reste en attente.
+ */
+export async function completePendingItem(
+  database: SQLiteDatabase,
+  preparationId: number,
+  specialtyCis: string,
+  contribution: PendingCompletionContribution,
+  completionDate: string,
+): Promise<boolean> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)) {
+    throw new Error('La date de complément est invalide.');
+  }
+  assertVerificationEvidence(contribution.verification, contribution.scanRaw);
+  if (
+    (contribution.matchedCis === null) !==
+    (contribution.matchedSpecialtyName === null)
+  ) {
+    throw new Error(
+      'matchedCis et matchedSpecialtyName doivent être renseignés ensemble.',
+    );
+  }
+  if (contribution.matchedCis === specialtyCis) {
+    throw new Error(
+      'matchedCis ne peut pas être identique au CIS attendu : ce cas est une correspondance exacte.',
+    );
+  }
+
+  let resolved = false;
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const preparation = await transaction.getFirstAsync<{ status: string }>(
+      'SELECT status FROM preparations WHERE id = ?',
+      preparationId,
+    );
+    if (preparation === null) throw new Error('Préparation introuvable.');
+    if (preparation.status !== 'COMPLETED') {
+      throw new Error('Cette préparation n’a pas encore été validée.');
+    }
+
+    const pendingItems = await transaction.getAllAsync<PendingItemRow>(
+      `SELECT id, source_treatment_id, intake_date, slot, quantity_half_units
+       FROM preparation_items
+       WHERE preparation_id = ? AND specialty_cis = ? AND completion_status = 'PENDING_COMPLEMENT'`,
+      preparationId,
+      specialtyCis,
+    );
+    if (pendingItems.length === 0) {
+      throw new Error(
+        'Aucune case en attente de complément pour ce médicament.',
+      );
+    }
+    const pendingHalfUnits = pendingItems.reduce(
+      (sum, item) => sum + item.quantity_half_units,
+      0,
+    );
+    if (contribution.quantityHalfUnits > pendingHalfUnits) {
+      throw new Error(
+        'La quantité vérifiée dépasse ce qui reste en attente de complément.',
+      );
+    }
+
+    const box = await transaction.getFirstAsync<{
+      specialty_cis: string;
+      presentation_cip13: string;
+      presentation_label: string;
+      lot: string | null;
+      expiration_date: string;
+      remaining_quantity: number;
+    }>(
+      `SELECT specialty_cis, presentation_cip13, presentation_label, lot,
+        expiration_date, remaining_quantity
+       FROM medication_boxes WHERE id = ?`,
+      contribution.boxId,
+    );
+    if (box === null) throw new Error('Boîte introuvable.');
+    const acceptedCis = contribution.matchedCis ?? specialtyCis;
+    if (box.specialty_cis !== acceptedCis) {
+      throw new Error('Cette boîte ne correspond pas au médicament attendu.');
+    }
+    if (box.expiration_date < completionDate) {
+      throw new Error('Cette boîte est périmée.');
+    }
+    const consumedQuantity = contribution.quantityHalfUnits / 2;
+    const quantityAfter = box.remaining_quantity - consumedQuantity;
+    if (quantityAfter < 0) {
+      throw new Error('Le stock de cette boîte est insuffisant.');
+    }
+    const update = await transaction.runAsync(
+      `UPDATE medication_boxes
+       SET remaining_quantity = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND remaining_quantity = ?`,
+      quantityAfter,
+      contribution.boxId,
+      box.remaining_quantity,
+    );
+    if (update.changes !== 1) {
+      throw new Error('Le stock a changé. Rechargez puis réessayez.');
+    }
+    await transaction.runAsync(
+      `INSERT INTO stock_movements
+        (box_id, preparation_id, type, quantity_delta, quantity_after, explanation)
+       VALUES (?, ?, 'PILLBOX_PREPARATION', ?, ?, ?)`,
+      contribution.boxId,
+      preparationId,
+      -consumedQuantity,
+      quantityAfter,
+      `Complément différé de la préparation du ${completionDate}`,
+    );
+
+    const requirement = await transaction.getFirstAsync<{
+      specialty_name: string;
+    }>(
+      `SELECT specialty_name FROM preparation_requirements
+       WHERE preparation_id = ? AND specialty_cis = ?`,
+      preparationId,
+      specialtyCis,
+    );
+    await transaction.runAsync(
+      `INSERT INTO preparation_box_usages
+        (preparation_id, specialty_cis, specialty_name, box_id,
+         presentation_cip13, presentation_label, lot, expiration_date,
+         quantity_half_units, verification, matched_cis, matched_specialty_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(preparation_id, specialty_cis, box_id) DO UPDATE SET
+         quantity_half_units = quantity_half_units + excluded.quantity_half_units`,
+      preparationId,
+      specialtyCis,
+      requirement?.specialty_name ?? specialtyCis,
+      contribution.boxId,
+      box.presentation_cip13,
+      box.presentation_label,
+      box.lot,
+      box.expiration_date,
+      contribution.quantityHalfUnits,
+      contribution.verification,
+      contribution.matchedCis,
+      contribution.matchedSpecialtyName,
+    );
+
+    const hasPending = await persistItemCompletion(
+      transaction,
+      specialtyCis,
+      pendingItems,
+      contribution.quantityHalfUnits,
+    );
+    resolved = !hasPending;
+  });
+  return resolved;
 }
 
 export async function listPreparationHistory(

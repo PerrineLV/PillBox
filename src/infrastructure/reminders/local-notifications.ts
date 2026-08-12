@@ -12,6 +12,7 @@ import {
 import {
   INTAKE_REMINDER_KIND,
   notificationTarget,
+  PENDING_COMPLETION_REMINDER_KIND,
   POSTPONED_INTAKE_KIND,
   PREPARATION_REMINDER_KIND,
   PREPARATION_ROUTE,
@@ -27,12 +28,24 @@ import type { IntakeSlot } from '@/domain/treatments/treatment';
 
 const ANDROID_CHANNEL_ID = 'pillbox-preparation-reminders';
 const ANDROID_INTAKE_CHANNEL_ID = 'pillbox-intake-reminders';
+const ANDROID_PENDING_COMPLETION_CHANNEL_ID =
+  'pillbox-pending-completion-reminders';
 
 const APP_TITLE = 'PillBox';
 
 export const PREPARATION_REMINDER_CONTENT = {
   title: APP_TITLE,
   body: 'Vous avez un pilulier à remplir.',
+} as const;
+
+/**
+ * Contenu du rappel dédié au complément d'une case « en attente de
+ * complément » (ticket 30b) : ne nomme jamais un médicament, une posologie,
+ * un lot ni une quantité de stock, comme les autres notifications de PillBox.
+ */
+export const PENDING_COMPLETION_REMINDER_CONTENT = {
+  title: APP_TITLE,
+  body: 'Un complément de pilulier est peut-être possible.',
 } as const;
 
 /**
@@ -269,6 +282,50 @@ export async function cancelPreparationReminders(): Promise<void> {
     ours.map((request) =>
       Notifications.cancelScheduledNotificationAsync(request.identifier),
     ),
+  );
+}
+
+/**
+ * Rappel ponctuel (déclenchement unique), distinct du rappel hebdomadaire de
+ * préparation et des rappels quotidiens de prise : planifié uniquement quand
+ * une case reste « en attente de complément » après validation (ticket 30b).
+ */
+export async function schedulePendingCompletionReminder(
+  scheduledAt: Date,
+): Promise<string> {
+  await ensureAndroidPendingCompletionChannel();
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      ...PENDING_COMPLETION_REMINDER_CONTENT,
+      data: { kind: PENDING_COMPLETION_REMINDER_KIND },
+      sound: 'default',
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: scheduledAt,
+      channelId: ANDROID_PENDING_COMPLETION_CHANNEL_ID,
+    },
+  });
+}
+
+export async function cancelPendingCompletionReminderNotification(
+  notificationId: string,
+): Promise<void> {
+  await Notifications.cancelScheduledNotificationAsync(notificationId);
+}
+
+async function ensureAndroidPendingCompletionChannel(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync(
+    ANDROID_PENDING_COMPLETION_CHANNEL_ID,
+    {
+      name: 'Complément de pilulier',
+      description:
+        'Rappel local ponctuel qu’un complément de pilulier est possible',
+      importance: Notifications.AndroidImportance.DEFAULT,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+      sound: 'default',
+    },
   );
 }
 

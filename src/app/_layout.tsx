@@ -18,6 +18,7 @@ import { AppLockGate } from '@/components/privacy/app-lock-gate';
 import { BottomNavigation, colors, ToastProvider, typography } from '@/ui';
 import {
   createDeferredNotificationNavigation,
+  PENDING_COMPLETION_ROUTE,
   PLANNED_INTAKE_ROUTE,
   PREPARATION_ROUTE,
   serializeIntakeGroups,
@@ -189,6 +190,9 @@ function openNotificationTarget(target: NotificationTarget): void {
         pathname: PLANNED_INTAKE_ROUTE,
         params: { date: target.date, slot: target.slot },
       });
+      return;
+    case 'pending-completion':
+      router.push(PENDING_COMPLETION_ROUTE);
   }
 }
 
