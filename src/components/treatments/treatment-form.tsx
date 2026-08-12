@@ -42,7 +42,7 @@ import {
   typography,
 } from '@/ui';
 
-import { nextCivilDay } from './civil-date';
+import { nextCivilDay, pickerDateToCivilDate } from './civil-date';
 import { DateField } from './date-field';
 
 type Props = {
@@ -284,12 +284,17 @@ export function TreatmentForm({
 
 /**
  * Une phase 1 vide est proposée d’emblée : la posologie se saisit sans étape
- * préalable. Les phases suivantes restent ajoutées explicitement.
+ * préalable. Les phases suivantes restent ajoutées explicitement. Sa date de
+ * début est préremplie au lendemain de la date du jour (device local), pour
+ * éviter une saisie manuelle systématique dans le cas courant ; elle reste
+ * librement modifiable ou effaçable.
  */
 export function initialPhases(
   phases: readonly TreatmentPhase[],
 ): TreatmentPhase[] {
-  return phases.length > 0 ? [...phases] : [emptyPhase()];
+  if (phases.length > 0) return [...phases];
+  const tomorrow = nextCivilDay(pickerDateToCivilDate(new Date()));
+  return [{ ...emptyPhase(), startDate: tomorrow ?? '' }];
 }
 
 /**

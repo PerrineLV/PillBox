@@ -1,5 +1,6 @@
 import type { ScheduledTreatmentPhase } from '@/domain/treatments/treatment';
 
+import { nextCivilDay, pickerDateToCivilDate } from '../civil-date';
 import { PhaseEditor, initialPhases, nextPhase } from '../treatment-form';
 
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: jest.fn() }));
@@ -25,12 +26,13 @@ function render(phase: ScheduledTreatmentPhase): string {
 }
 
 describe('phases proposées à l’ouverture du formulaire', () => {
-  it('propose une phase 1 vide prête à remplir', () => {
+  it('propose une phase 1 avec sa date de début préremplie au lendemain', () => {
+    const expectedStartDate = nextCivilDay(pickerDateToCivilDate(new Date()));
     const phases = initialPhases([]);
     expect(phases).toHaveLength(1);
     expect(phases[0]).toEqual({
       id: null,
-      startDate: '',
+      startDate: expectedStartDate,
       endDate: null,
       frequency: { type: 'daily' },
       dosage: [],
@@ -39,6 +41,16 @@ describe('phases proposées à l’ouverture du formulaire', () => {
 
   it('n’ajoute jamais de phase vide supplémentaire à une phase existante', () => {
     expect(initialPhases([PHASE])).toEqual([PHASE]);
+  });
+
+  it('ne modifie pas la date de début d’une phase déjà présente (édition)', () => {
+    expect(initialPhases([PHASE])[0].startDate).toBe('2026-08-10');
+  });
+
+  it('la date préremplie reste modifiable ou effaçable comme toute autre date', () => {
+    const [phase] = initialPhases([]);
+    expect({ ...phase, startDate: '2026-01-01' }.startDate).toBe('2026-01-01');
+    expect({ ...phase, startDate: '' }.startDate).toBe('');
   });
 
   it('conserve toutes les phases déjà enregistrées', () => {
