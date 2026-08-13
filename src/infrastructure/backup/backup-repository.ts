@@ -407,6 +407,11 @@ export async function restoreBackup(
   const definitions = tableDefinitions(backup.metadata.schemaVersion);
   await database.withExclusiveTransactionAsync(async (transaction) => {
     for (const table of [...TABLES].reverse())
+      // SQLite ne permet pas de binder un identifiant de table via `?` : seules
+      // les valeurs peuvent être paramétrées. `table.name` provient toujours de
+      // la constante interne `TABLES` ci-dessus, jamais d'une saisie
+      // utilisateur ni du contenu du fichier de sauvegarde restauré ; cette
+      // interpolation est donc sûre.
       await transaction.runAsync(`DELETE FROM ${table.name}`);
     for (const table of definitions) {
       for (const row of backup.tables[table.name]) {
