@@ -57,7 +57,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toast ? (
           <View pointerEvents="box-none" style={styles.overlay}>
             <SafeAreaView edges={['top']} style={styles.safeArea}>
-              <Message tone={toast.tone}>{toast.message}</Message>
+              <View accessibilityLiveRegion="polite" accessibilityRole="alert">
+                <Message tone={toast.tone}>{toast.message}</Message>
+              </View>
             </SafeAreaView>
           </View>
         ) : null}

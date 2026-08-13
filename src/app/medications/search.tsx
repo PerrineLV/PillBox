@@ -14,6 +14,7 @@ import {
   Card,
   EmptyState,
   LoadingState,
+  Message,
   colors,
   spacing,
   typography,
@@ -82,11 +83,7 @@ function MedicationSearch() {
         value={query}
       />
       {isSearching ? <LoadingState label="Recherche en cours…" /> : null}
-      {error === null ? null : (
-        <Text accessibilityRole="alert" style={styles.error}>
-          {error}
-        </Text>
-      )}
+      {error === null ? null : <Message tone="error">{error}</Message>}
       <FlatList
         data={results}
         keyExtractor={(item) => item.cis}
@@ -141,6 +138,7 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.background,
     flex: 1,
+    gap: spacing.lg,
     padding: spacing.lg,
   },
   createTreatment: {
@@ -154,13 +152,12 @@ const styles = StyleSheet.create({
     padding: 13,
     textAlign: 'center',
   },
-  error: { color: '#b91c1c', marginBottom: 12 },
   name: typography.heading,
   presentation: {
-    borderLeftColor: '#d1d5db',
+    borderLeftColor: colors.border,
     borderLeftWidth: 2,
-    marginTop: 8,
-    paddingLeft: 8,
+    marginTop: spacing.sm,
+    paddingLeft: spacing.sm,
   },
   result: { marginBottom: spacing.md },
 });

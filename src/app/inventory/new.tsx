@@ -600,7 +600,7 @@ function ScanBox({
             <ActivityIndicator accessibilityLabel="Identification en cours" />
           ) : null}
           {medication ? (
-            <Card style={styles.identified}>
+            <Card style={styles.identified} tone="muted">
               <Text style={styles.medication}>{medication.name}</Text>
               <Text>{medication.label}</Text>
               <Text>CIP13 {medication.cip13}</Text>
@@ -713,7 +713,7 @@ const styles = StyleSheet.create({
   container: { backgroundColor: colors.background, flex: 1 },
   form: { gap: spacing.lg, padding: spacing.lg },
   guide: {
-    borderColor: '#fff',
+    borderColor: colors.surface,
     borderWidth: 2,
     left: '12%',
     padding: 12,
@@ -722,17 +722,12 @@ const styles = StyleSheet.create({
     top: '35%',
   },
   guideText: {
-    backgroundColor: '#00000099',
-    color: '#fff',
+    backgroundColor: colors.overlay,
+    color: colors.surface,
     padding: 6,
     textAlign: 'center',
   },
-  identified: {
-    backgroundColor: colors.surface,
-    borderRadius: 8,
-    marginBottom: 16,
-    padding: 14,
-  },
+  identified: { marginBottom: spacing.lg },
   medication: typography.heading,
   presentation: {
     borderColor: colors.border,
@@ -744,7 +739,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   quantityNotice: { fontWeight: '700', marginBottom: 8 },
-  raw: { color: '#4b5563', fontSize: 12, marginTop: 18 },
+  raw: { color: colors.textMuted, fontSize: 12, marginTop: 18 },
   result: { marginBottom: spacing.sm },
   secondary: { marginTop: 12 },
 });

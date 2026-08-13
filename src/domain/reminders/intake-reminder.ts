@@ -75,6 +75,11 @@ export function localCivilDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+/** Minuit heure locale du jour civil donné. */
+export function startOfLocalDay(date: string): Date {
+  return localDateTime(date, { hour: 0, minute: 0 });
+}
+
 function localDateTime(date: string, time: SlotTime): Date {
   const [year, month, day] = date.split('-').map(Number);
   return new Date(year, month - 1, day, time.hour, time.minute, 0, 0);

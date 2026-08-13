@@ -11,6 +11,8 @@ import {
   View,
 } from 'react-native';
 
+import { colors, typography } from '@/ui';
+
 import {
   civilDateToPickerDate,
   formatFrenchCivilDate,
@@ -108,11 +110,11 @@ function frenchInputToCivilDate(value: string): string {
 
 const styles = StyleSheet.create({
   clearDate: { paddingHorizontal: 8, paddingVertical: 12 },
-  clearDateText: { color: '#b91c1c' },
+  clearDateText: { color: colors.danger },
   closePicker: { alignItems: 'center', padding: 10 },
   dateActions: { alignItems: 'center', flexDirection: 'row', gap: 6 },
   dateButton: {
-    borderColor: '#9ca3af',
+    borderColor: colors.borderStrong,
     borderRadius: 8,
     borderWidth: 1,
     flex: 1,
@@ -120,15 +122,15 @@ const styles = StyleSheet.create({
   },
   dateField: { gap: 4 },
   dateInput: {
-    borderColor: '#9ca3af',
+    borderColor: colors.borderStrong,
     borderRadius: 8,
     borderWidth: 1,
     padding: 10,
   },
-  datePlaceholder: { color: '#6b7280' },
-  label: { fontWeight: '600', marginTop: 8 },
+  datePlaceholder: { color: colors.textMuted },
+  label: typography.label,
   secondaryButtonText: {
-    color: '#1d4ed8',
+    color: colors.focus,
     fontWeight: '700',
     textAlign: 'center',
   },
