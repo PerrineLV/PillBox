@@ -1,10 +1,10 @@
 import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import type { BarcodeScanningResult } from 'expo-camera';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView } from 'expo-camera';
 import { router, Stack } from 'expo-router';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
@@ -22,6 +22,7 @@ import { StockBoxChoice } from '@/components/preparations/stock-box-choice';
 import { styles } from '@/components/preparations/styles';
 import { UsageSummary } from '@/components/preparations/usage-summary';
 import { WeekChoice } from '@/components/preparations/week-choice';
+import { useBarcodeScanner } from '@/components/scanning/use-barcode-scanner';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import {
   formatFrenchCivilPeriod,
@@ -114,7 +115,7 @@ function NewPreparationScreenContent({
   personalDatabase: SQLiteDatabase;
 }) {
   const referenceDatabase = useSQLiteContext();
-  const [permission, requestPermission] = useCameraPermissions();
+  const scanner = useBarcodeScanner();
   const [snapshot, setSnapshot] = useState<PreparationSnapshot | null>(null);
   const [preparationId, setPreparationId] = useState<number | null>(null);
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
@@ -149,7 +150,6 @@ function NewPreparationScreenContent({
   const [pendingGenericMatch, setPendingGenericMatch] =
     useState<PendingGenericMatch | null>(null);
   const [confirmingGenericMatch, setConfirmingGenericMatch] = useState(false);
-  const scanLocked = useRef(false);
   const options = useMemo(() => preparationWeeks(todayIso()), []);
 
   useEffect(() => {
@@ -400,7 +400,7 @@ function NewPreparationScreenContent({
     setError(null);
     setPending(null);
     setChoosing(false);
-    scanLocked.current = false;
+    scanner.unlock();
     setScanning(true);
   }
 
@@ -545,8 +545,8 @@ function NewPreparationScreenContent({
   }
 
   function handleScan(result: BarcodeScanningResult): void {
-    if (scanLocked.current || current === null) return;
-    scanLocked.current = true;
+    if (current === null) return;
+    if (!scanner.lockOnce()) return;
     const parsed = parseGs1DataMatrix(result.data);
     const cip13 = parsed.fields.gtin
       ? normalizeScannedGtinToCip13(parsed.fields.gtin)
@@ -679,14 +679,14 @@ function NewPreparationScreenContent({
       </Centered>
     );
   if (scanning) {
-    if (permission === null)
+    if (scanner.permission === null)
       return <Centered text="Vérification de la caméra…" />;
-    if (!permission.granted)
+    if (!scanner.permission.granted)
       return (
         <Centered text="La caméra est nécessaire pour vérifier la boîte.">
           <AppButton
             label="Autoriser la caméra"
-            onPress={() => void requestPermission()}
+            onPress={() => void scanner.requestPermission()}
           />
           <AppButton
             label="Annuler"

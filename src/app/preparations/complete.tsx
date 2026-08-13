@@ -1,10 +1,11 @@
 import type { BarcodeScanningResult } from 'expo-camera';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView } from 'expo-camera';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useBarcodeScanner } from '@/components/scanning/use-barcode-scanner';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import {
@@ -68,7 +69,7 @@ export default function CompletePendingCaseScreen() {
     useLocalSearchParams<{ preparationId?: string; specialtyCis?: string }>();
   const database = useSQLiteContext();
   const { showToast } = useToast();
-  const [permission, requestPermission] = useCameraPermissions();
+  const scanner = useBarcodeScanner();
   const [pendingCase, setPendingCase] = useState<PendingCompletionCase | null>(
     null,
   );
@@ -134,6 +135,7 @@ export default function CompletePendingCaseScreen() {
     setError(null);
     setPending(null);
     setChoosing(false);
+    scanner.unlock();
     setScanning(true);
   }
 
@@ -218,6 +220,7 @@ export default function CompletePendingCaseScreen() {
 
   function handleScan(result: BarcodeScanningResult): void {
     if (!pendingCase) return;
+    if (!scanner.lockOnce()) return;
     const parsed = parseGs1DataMatrix(result.data);
     const cip13 = parsed.fields.gtin
       ? normalizeScannedGtinToCip13(parsed.fields.gtin)
@@ -320,14 +323,14 @@ export default function CompletePendingCaseScreen() {
   if (!pendingCase) return null;
 
   if (scanning) {
-    if (permission === null)
+    if (scanner.permission === null)
       return <Centered text="Vérification de la caméra…" />;
-    if (!permission.granted)
+    if (!scanner.permission.granted)
       return (
         <Centered text="La caméra est nécessaire pour vérifier la boîte.">
           <AppButton
             label="Autoriser la caméra"
-            onPress={() => void requestPermission()}
+            onPress={() => void scanner.requestPermission()}
           />
         </Centered>
       );
