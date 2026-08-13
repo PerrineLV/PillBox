@@ -60,10 +60,87 @@ describe('cible de navigation d’une notification', () => {
     });
   });
 
-  it('reconnaît le rappel dédié au complément d’une case en attente', () => {
+  it('reconnaît le rappel dédié au complément d’une case en attente, avec préparation et médicament', () => {
+    expect(
+      notificationTarget({
+        kind: 'pillbox-pending-completion-reminder',
+        preparationId: 7,
+        specialtyCis: '60000001',
+      }),
+    ).toEqual({
+      kind: 'pending-completion',
+      preparationId: 7,
+      specialtyCis: '60000001',
+    });
+  });
+
+  it('retombe sur l’écran générique quand la notification ne transporte pas la préparation et le médicament', () => {
     expect(
       notificationTarget({ kind: 'pillbox-pending-completion-reminder' }),
-    ).toEqual({ kind: 'pending-completion' });
+    ).toEqual({
+      kind: 'pending-completion',
+      preparationId: null,
+      specialtyCis: null,
+    });
+  });
+
+  it('retombe sur l’écran générique si seule la préparation ou seul le médicament est exploitable', () => {
+    expect(
+      notificationTarget({
+        kind: 'pillbox-pending-completion-reminder',
+        preparationId: 7,
+      }),
+    ).toEqual({
+      kind: 'pending-completion',
+      preparationId: null,
+      specialtyCis: null,
+    });
+    expect(
+      notificationTarget({
+        kind: 'pillbox-pending-completion-reminder',
+        specialtyCis: '60000001',
+      }),
+    ).toEqual({
+      kind: 'pending-completion',
+      preparationId: null,
+      specialtyCis: null,
+    });
+  });
+
+  it('retombe sur l’écran générique pour une préparation ou un médicament illisible', () => {
+    expect(
+      notificationTarget({
+        kind: 'pillbox-pending-completion-reminder',
+        preparationId: '7',
+        specialtyCis: '60000001',
+      }),
+    ).toEqual({
+      kind: 'pending-completion',
+      preparationId: null,
+      specialtyCis: null,
+    });
+    expect(
+      notificationTarget({
+        kind: 'pillbox-pending-completion-reminder',
+        preparationId: -1,
+        specialtyCis: '60000001',
+      }),
+    ).toEqual({
+      kind: 'pending-completion',
+      preparationId: null,
+      specialtyCis: null,
+    });
+    expect(
+      notificationTarget({
+        kind: 'pillbox-pending-completion-reminder',
+        preparationId: 7,
+        specialtyCis: '',
+      }),
+    ).toEqual({
+      kind: 'pending-completion',
+      preparationId: null,
+      specialtyCis: null,
+    });
   });
 
   it('n’invente aucune cible pour une donnée inconnue ou incomplète', () => {

@@ -24,7 +24,11 @@ export const PENDING_COMPLETION_REMINDER_KIND =
 
 export const PREPARATION_ROUTE = '/preparations/new' as const;
 export const PLANNED_INTAKE_ROUTE = '/intakes/planned' as const;
+/** Repli lorsque la préparation et le médicament concernés ne sont pas connus. */
 export const PENDING_COMPLETION_ROUTE = '/preparations/history' as const;
+/** Cible directe lorsque la notification transporte préparation et médicament. */
+export const PENDING_COMPLETION_COMPLETE_ROUTE =
+  '/preparations/complete' as const;
 
 export interface IntakeGroupReference {
   readonly date: string;
@@ -39,7 +43,17 @@ export type NotificationTarget =
       readonly groups: readonly IntakeGroupReference[];
     }
   | ({ readonly kind: 'postponed-intake' } & IntakeGroupReference)
-  | { readonly kind: 'pending-completion' };
+  | {
+      readonly kind: 'pending-completion';
+      /**
+       * Préparation et médicament concernés, lorsque la notification les
+       * transporte de façon exploitable (ticket 41) ; `null` pour une
+       * notification programmée avant ce ticket ou une donnée illisible —
+       * jamais une préparation ou un médicament devinés.
+       */
+      readonly preparationId: number | null;
+      readonly specialtyCis: string | null;
+    };
 
 const GROUP_PATTERN = /^(\d{4}-\d{2}-\d{2}):([a-z]+)$/;
 
@@ -68,8 +82,26 @@ export function notificationTarget(data: unknown): NotificationTarget | null {
         isIntakeSlot(record.slot)
         ? { kind: 'postponed-intake', date: record.date, slot: record.slot }
         : null;
-    case PENDING_COMPLETION_REMINDER_KIND:
-      return { kind: 'pending-completion' };
+    case PENDING_COMPLETION_REMINDER_KIND: {
+      const validPreparationId =
+        typeof record.preparationId === 'number' &&
+        Number.isSafeInteger(record.preparationId) &&
+        record.preparationId > 0;
+      const validSpecialtyCis =
+        typeof record.specialtyCis === 'string' &&
+        record.specialtyCis.length > 0;
+      return {
+        kind: 'pending-completion',
+        preparationId:
+          validPreparationId && validSpecialtyCis
+            ? (record.preparationId as number)
+            : null,
+        specialtyCis:
+          validPreparationId && validSpecialtyCis
+            ? (record.specialtyCis as string)
+            : null,
+      };
+    }
     default:
       return null;
   }

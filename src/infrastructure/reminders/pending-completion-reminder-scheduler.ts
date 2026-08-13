@@ -48,7 +48,11 @@ export async function schedulePendingCompletionReminderFor(
     0,
     0,
   );
-  const notificationId = await schedulePendingCompletionReminder(scheduledAt);
+  const notificationId = await schedulePendingCompletionReminder(
+    scheduledAt,
+    preparationId,
+    specialtyCis,
+  );
   await database.runAsync(
     `INSERT INTO pending_completion_reminders
       (preparation_id, specialty_cis, notification_id, scheduled_at)

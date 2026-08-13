@@ -61,6 +61,8 @@ describe('schedulePendingCompletionReminderFor', () => {
 
     expect(schedulePendingCompletionReminder).toHaveBeenCalledWith(
       new Date(2026, 8, 1, 9, 0, 0, 0),
+      1,
+      '60000001',
     );
     expect(rows.get('1:60000001')?.notification_id).toBe('notification-id');
   });
@@ -78,6 +80,8 @@ describe('schedulePendingCompletionReminderFor', () => {
 
     expect(schedulePendingCompletionReminder).toHaveBeenCalledWith(
       new Date(2026, 7, 23, 9, 0, 0, 0),
+      1,
+      '60000001',
     );
   });
 

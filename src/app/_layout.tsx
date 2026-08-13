@@ -18,6 +18,7 @@ import { AppLockGate } from '@/components/privacy/app-lock-gate';
 import { BottomNavigation, colors, ToastProvider, typography } from '@/ui';
 import {
   createDeferredNotificationNavigation,
+  PENDING_COMPLETION_COMPLETE_ROUTE,
   PENDING_COMPLETION_ROUTE,
   PLANNED_INTAKE_ROUTE,
   PREPARATION_ROUTE,
@@ -192,6 +193,19 @@ function openNotificationTarget(target: NotificationTarget): void {
       });
       return;
     case 'pending-completion':
+      if (target.preparationId !== null && target.specialtyCis !== null) {
+        router.push({
+          pathname: PENDING_COMPLETION_COMPLETE_ROUTE,
+          params: {
+            preparationId: String(target.preparationId),
+            specialtyCis: target.specialtyCis,
+          },
+        });
+        return;
+      }
+      // Donnée absente ou illisible (notification programmée avant ce
+      // ticket, ou payload corrompu) : repli sur l'écran générique plutôt
+      // que de deviner la préparation ou le médicament concernés.
       router.push(PENDING_COMPLETION_ROUTE);
   }
 }
