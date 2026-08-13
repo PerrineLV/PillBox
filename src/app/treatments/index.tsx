@@ -86,11 +86,7 @@ export default function TreatmentsScreen() {
         style={styles.search}
         value={query}
       />
-      {notice ? (
-        <Text accessibilityRole="alert" style={styles.notice}>
-          {notice}
-        </Text>
-      ) : null}
+      {notice ? <Message tone="success">{notice}</Message> : null}
       {loading ? <LoadingState label="Chargement des traitements…" /> : null}
       {error ? (
         <Message tone="error" title="Traitements indisponibles">
@@ -206,7 +202,7 @@ const styles = StyleSheet.create({
   add: {
     backgroundColor: colors.brand,
     borderRadius: radii.md,
-    color: '#fff',
+    color: colors.surface,
     fontWeight: '700',
     overflow: 'hidden',
     minHeight: 48,
@@ -256,11 +252,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   name: typography.heading,
-  notice: {
-    backgroundColor: '#dcfce7',
-    color: '#166534',
-    marginBottom: 12,
-    padding: 12,
-  },
-  summary: { color: '#4b5563', marginTop: 6 },
+  summary: { color: colors.textMuted, marginTop: spacing.xs },
 });

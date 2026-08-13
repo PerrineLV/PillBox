@@ -86,6 +86,7 @@ import {
   WEEKDAY_LABELS,
   WEEKDAY_OPTIONS,
   colors,
+  radii,
   spacing,
   typography,
 } from '@/ui';
@@ -685,7 +686,11 @@ export default function SettingsScreen() {
             value={pickerDate}
           />
           {Platform.OS === 'ios' ? (
-            <Pressable onPress={() => setShowTimePicker(false)}>
+            <Pressable
+              accessibilityLabel="Fermer le calendrier"
+              accessibilityRole="button"
+              onPress={() => setShowTimePicker(false)}
+            >
               <Text style={styles.linkText}>Fermer</Text>
             </Pressable>
           ) : null}
@@ -701,7 +706,11 @@ export default function SettingsScreen() {
       ) : null}
       {saving ? <ActivityIndicator /> : null}
       {permissionDenied ? (
-        <Pressable onPress={() => void Linking.openSettings()}>
+        <Pressable
+          accessibilityLabel="Ouvrir les réglages Android"
+          accessibilityRole="button"
+          onPress={() => void Linking.openSettings()}
+        >
           <Text style={styles.linkText}>Ouvrir les réglages Android</Text>
         </Pressable>
       ) : null}
@@ -820,18 +829,22 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     padding: spacing.lg,
   },
-  help: { ...typography.caption, marginTop: 4 },
+  help: { ...typography.caption, marginTop: spacing.xs },
   label: typography.label,
-  linkText: { color: '#0F6F70', fontWeight: '600', paddingVertical: 8 },
+  linkText: {
+    color: colors.focus,
+    fontWeight: '600',
+    paddingVertical: spacing.sm,
+  },
   restoreSummary: { backgroundColor: colors.surface },
   switchLabel: { flex: 1 },
-  switchRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
+  switchRow: { alignItems: 'center', flexDirection: 'row', gap: spacing.md },
   timeButton: {
     alignSelf: 'flex-start',
-    borderColor: '#AAB8B4',
-    borderRadius: 8,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.sm,
     borderWidth: 1,
-    padding: 12,
+    padding: spacing.md,
   },
   timeText: { fontSize: 20, fontVariant: ['tabular-nums'] },
 });

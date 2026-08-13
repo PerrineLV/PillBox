@@ -80,8 +80,8 @@ export function GenericGroupSection({ cis }: { cis: string }) {
               </Text>
               {groupMembers.map((member) => (
                 <Text key={member.cis} style={styles.member}>
-                  {member.name} — CIS {member.cis} — type source :{' '}
-                  {member.type ?? 'non renseigné'}
+                  {member.name} — CIS {member.cis}
+                  {member.type ? ` — type BDPM : ${member.type}` : ''}
                 </Text>
               ))}
             </View>

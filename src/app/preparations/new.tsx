@@ -1331,7 +1331,9 @@ function BoxConfirmation({
   return (
     <View style={isFefo ? styles.verified : styles.warning}>
       <Text style={styles.warningTitle}>
-        {isFefo ? 'Boîte vérifiée' : 'Boîte valide, mais non FEFO'}
+        {isFefo
+          ? 'Boîte vérifiée'
+          : 'Boîte valide, mais un autre lot périme plus tôt'}
       </Text>
       <Badge
         label={

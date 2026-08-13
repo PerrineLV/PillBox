@@ -215,7 +215,7 @@ export default function InventoryScreen() {
                   0,
                 );
                 return (
-                  <Card key={lot.key} style={styles.lot}>
+                  <Card key={lot.key} style={styles.lot} tone="muted">
                     <Text style={styles.lotTitle}>Lot {lot.label}</Text>
                     <Text style={styles.usable}>
                       Stock utilisable : {usable}
@@ -324,7 +324,7 @@ const styles = StyleSheet.create({
   add: {
     backgroundColor: colors.brand,
     borderRadius: radii.md,
-    color: '#fff',
+    color: colors.surface,
     fontWeight: '700',
     overflow: 'hidden',
     minHeight: 48,
@@ -332,7 +332,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     textAlign: 'center',
   },
-  box: { borderTopColor: '#d1d5db', borderTopWidth: 1, paddingVertical: 12 },
+  box: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    paddingVertical: spacing.md,
+  },
   boxTitle: { fontWeight: '700' },
   container: {
     backgroundColor: colors.background,
@@ -363,14 +367,8 @@ const styles = StyleSheet.create({
   },
   filterSelected: { backgroundColor: colors.brand, borderColor: colors.brand },
   filterTextSelected: { color: colors.surface, fontWeight: '700' },
-  expiredBox: { backgroundColor: '#fff1f2' },
-  lot: {
-    borderColor: '#d1d5db',
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 10,
-    padding: 12,
-  },
+  expiredBox: { backgroundColor: colors.dangerSoft },
+  lot: { marginTop: spacing.sm },
   lotTitle: { fontSize: 16, fontWeight: '700' },
   medication: { marginBottom: 24 },
   medicationName: typography.heading,

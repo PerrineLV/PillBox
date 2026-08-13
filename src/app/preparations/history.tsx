@@ -23,6 +23,7 @@ import {
   LoadingState,
   Message,
   colors,
+  radii,
   spacing,
   typography,
 } from '@/ui';
@@ -183,7 +184,7 @@ export default function PreparationHistoryScreen() {
           (item) => !coveredSpecialtyCis.has(item.specialtyCis),
         );
         return (
-          <Card key={preparation.id} style={styles.card}>
+          <Card key={preparation.id}>
             <Text style={styles.title}>
               Du {formatLongFrenchCivilDate(preparation.startDate)} au{' '}
               {formatLongFrenchCivilDate(preparation.endDate)}
@@ -247,12 +248,6 @@ export default function PreparationHistoryScreen() {
 }
 
 const styles = StyleSheet.create({
-  card: {
-    borderColor: '#d1d5db',
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 14,
-  },
   container: {
     backgroundColor: colors.background,
     flexGrow: 1,
@@ -260,26 +255,26 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   medication: {
-    borderTopColor: '#e5e7eb',
+    borderTopColor: colors.border,
     borderTopWidth: 1,
-    marginTop: 10,
-    paddingTop: 10,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
   },
-  muted: { color: '#4b5563', marginTop: 3 },
+  muted: { color: colors.textMuted, marginTop: spacing.xs },
   name: { fontWeight: '700' },
   pending: {
-    backgroundColor: '#fffbeb',
-    borderRadius: 8,
+    backgroundColor: colors.warningSoft,
+    borderRadius: radii.md,
     gap: spacing.xs,
-    marginTop: 8,
-    padding: 10,
+    marginTop: spacing.sm,
+    padding: spacing.sm,
   },
-  pendingItem: { color: '#4b5563' },
+  pendingItem: { color: colors.textMuted },
   title: typography.heading,
   usage: {
-    borderTopColor: '#e5e7eb',
+    borderTopColor: colors.border,
     borderTopWidth: 1,
-    marginTop: 6,
-    paddingTop: 6,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
   },
 });

@@ -275,7 +275,7 @@ export default function BoxDetailScreen() {
 
       <Text style={styles.section}>Mouvements</Text>
       {movements.map((movement) => (
-        <Card key={movement.id} style={styles.movement}>
+        <Card key={movement.id}>
           <Text style={styles.movementType}>
             {STOCK_MOVEMENT_TYPE_LABELS[movement.type]}
           </Text>
@@ -301,12 +301,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.lg,
   },
-  date: { color: '#4b5563', fontSize: 12 },
-  movement: {
-    borderBottomColor: '#d1d5db',
-    borderBottomWidth: 1,
-    paddingVertical: 10,
-  },
+  date: { color: colors.textMuted, fontSize: 12 },
   movementType: { fontWeight: '800' },
   remaining: { ...typography.heading, marginTop: 8 },
   section: { ...typography.heading, marginBottom: 10, marginTop: 24 },

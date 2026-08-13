@@ -518,7 +518,7 @@ function Toggle({
 
 const styles = StyleSheet.create({
   choice: {
-    borderColor: '#9ca3af',
+    borderColor: colors.borderStrong,
     borderRadius: 8,
     borderWidth: 1,
     paddingHorizontal: 8,
@@ -547,10 +547,10 @@ const styles = StyleSheet.create({
   form: { gap: spacing.md },
   heading: { ...typography.heading, marginTop: 12 },
   hint: typography.caption,
-  label: { fontWeight: '600', marginTop: 8 },
+  label: typography.label,
   name: typography.title,
   phase: {
-    borderColor: '#d1d5db',
+    borderColor: colors.border,
     borderRadius: radii.lg,
     borderWidth: 1,
     gap: 6,

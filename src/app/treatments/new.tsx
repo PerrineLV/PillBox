@@ -20,7 +20,7 @@ import {
   type PendingGenericEquivalenceDraft,
 } from '@/infrastructure/treatments/pending-generic-equivalence-draft';
 import { createTreatment } from '@/infrastructure/treatments/treatment-repository';
-import { AppButton, spacing } from '@/ui';
+import { AppButton, colors, spacing } from '@/ui';
 
 export default function NewTreatmentScreen() {
   const params = useLocalSearchParams<{
@@ -177,6 +177,10 @@ function DosageKindPicker({
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#fff', flexGrow: 1, padding: 16 },
+  container: {
+    backgroundColor: colors.background,
+    flexGrow: 1,
+    padding: spacing.lg,
+  },
   kindPicker: { flexDirection: 'row', gap: spacing.sm },
 });
