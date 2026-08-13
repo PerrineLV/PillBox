@@ -4,6 +4,7 @@ import {
   preparationStartDate,
   type TreatmentGenericEquivalence,
 } from '@/domain/preparations/preparation';
+import { addCivilDays } from '@/domain/shared/dates';
 import type { Treatment } from '@/domain/treatments/treatment';
 
 /** Marge au-delà du besoin hebdomadaire sous laquelle le stock est dit proche. */
@@ -107,13 +108,4 @@ function assertNonNegativeInteger(value: number, label: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new Error(`La ${label} doit être un entier positif ou nul.`);
   }
-}
-
-function addCivilDays(value: string, days: number): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('Date invalide.');
-  const date = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value)
-    throw new Error('Date invalide.');
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
 }
