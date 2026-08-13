@@ -141,6 +141,7 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: colors.background,
     flex: 1,
+    gap: spacing.lg,
     padding: spacing.lg,
   },
   createTreatment: {
