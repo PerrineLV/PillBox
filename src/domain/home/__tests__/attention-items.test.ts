@@ -210,6 +210,22 @@ describe('buildAttentionItems', () => {
       });
     });
 
+    it("garde le créneau du jour tant qu'il reste en attente, même si son heure est déjà passée", () => {
+      const items = buildAttentionItems(
+        baseInput({
+          intakeRemindersEnabled: true,
+          // 9h20 : après le créneau du matin (8h00), qui n'a pas été validé.
+          now: new Date(2026, 2, 2, 9, 20),
+          treatments: [treatment(1)],
+          pendingIntakeCounts: [pendingCount('2026-03-02', 'morning')],
+        }),
+      );
+      const next = items.find((item) => item.type === 'NEXT_INTAKE_GROUP');
+      expect(next).toMatchObject({
+        groups: [{ date: '2026-03-02', slot: 'morning' }],
+      });
+    });
+
     it("n'affiche rien lorsque tout est déjà confirmé sur la fenêtre de recherche", () => {
       const items = buildAttentionItems(
         baseInput({

@@ -9,7 +9,9 @@ import {
   type KnownPreparation,
 } from '@/domain/preparations/preparation';
 import {
+  localCivilDate,
   planIntakeReminders,
+  startOfLocalDay,
   type IntakeSlotTimes,
   type PlannedIntakeReminder,
 } from '@/domain/reminders/intake-reminder';
@@ -178,10 +180,11 @@ function buildNextIntakeGroupItems(
   if (!input.intakeRemindersEnabled) return [];
   const until = new Date(input.now);
   until.setDate(until.getDate() + NEXT_INTAKE_LOOKAHEAD_DAYS);
+  const from = startOfLocalDay(localCivilDate(input.now));
   const planned = planIntakeReminders(
     input.treatments,
     input.intakeSlotTimes,
-    input.now,
+    from,
     until,
   );
   for (const reminder of planned) {
