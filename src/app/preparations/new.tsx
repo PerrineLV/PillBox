@@ -1,13 +1,28 @@
 import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import type { BarcodeScanningResult } from 'expo-camera';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView } from 'expo-camera';
 import { router, Stack } from 'expo-router';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Text, View } from 'react-native';
 
 import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
+import {
+  BoxConfirmation,
+  type PendingBox,
+} from '@/components/preparations/box-confirmation';
+import { Centered } from '@/components/preparations/centered';
+import { DailyFinalCheck } from '@/components/preparations/daily-final-check';
+import {
+  MedicationStep,
+  type CurrentRequirement,
+} from '@/components/preparations/medication-step';
+import { StockBoxChoice } from '@/components/preparations/stock-box-choice';
+import { styles } from '@/components/preparations/styles';
+import { UsageSummary } from '@/components/preparations/usage-summary';
+import { WeekChoice } from '@/components/preparations/week-choice';
+import { useBarcodeScanner } from '@/components/scanning/use-barcode-scanner';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import {
   formatFrenchCivilPeriod,
@@ -21,7 +36,6 @@ import {
 import { normalizeScannedGtinToCip13 } from '@/domain/medications/normalize-scanned-identifier';
 import {
   effectiveUsableBoxes,
-  evaluateBoxAvailability,
   generatePreparationSnapshot,
   listBoxesForMedication,
   matchScannedBox,
@@ -29,20 +43,12 @@ import {
   preparationWeekState,
   remainingHalfUnitsFor,
   verifyPreparationBox,
-  type BoxVerification,
   type BoxVerificationMethod,
   type KnownPreparation,
-  type MedicationRequirement,
   type PreparationSnapshot,
-  type PreparationWeek,
   type PreparationWeekChoice,
-  type PreparationWeekState,
 } from '@/domain/preparations/preparation';
-import {
-  formatHalfUnits,
-  type IntakeSlot,
-  type Treatment,
-} from '@/domain/treatments/treatment';
+import { type Treatment } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
   getGenericGroupMembers,
@@ -72,34 +78,8 @@ import {
   LoadingState,
   Message,
   Screen,
-  SectionTitle,
-  colors,
-  radii,
-  spacing,
   typography,
 } from '@/ui';
-
-const WEEK_LABELS: Record<PreparationWeekChoice, string> = {
-  CURRENT: 'Semaine à venir',
-  NEXT: 'Semaine suivante',
-};
-
-const SLOT_LABELS: Record<IntakeSlot, string> = {
-  morning: 'matin',
-  noon: 'midi',
-  evening: 'soir',
-  bedtime: 'coucher',
-};
-
-type PendingBox = Readonly<{
-  method: BoxVerificationMethod;
-  /** Preuve brute du DataMatrix, absente lorsque la boîte est choisie dans le stock. */
-  raw: string | null;
-  verification: Extract<BoxVerification, { status: 'VALID' | 'PARTIAL' }>;
-  /** Renseigné lorsque la boîte est un autre membre du groupe générique attendu, confirmé. */
-  matchedCis: string | null;
-  matchedSpecialtyName: string | null;
-}>;
 
 /** Boîte en attente d'une confirmation explicite de correspondance générique. */
 type PendingGenericMatch = Readonly<{
@@ -109,16 +89,6 @@ type PendingGenericMatch = Readonly<{
   treatmentId: number;
   groupLabel: string;
 }>;
-
-/**
- * Médicament en cours de vérification : le besoin restant tient compte des
- * boîtes déjà retenues dans cette préparation, lorsque la première s'est
- * terminée avant de couvrir toute la semaine.
- */
-type CurrentRequirement = MedicationRequirement & {
-  remainingHalfUnits: number;
-  contributions: readonly SavedPreparationProgress[];
-};
 
 /**
  * Ouvre une seconde connexion, vers le référentiel médicaments en lecture
@@ -145,7 +115,7 @@ function NewPreparationScreenContent({
   personalDatabase: SQLiteDatabase;
 }) {
   const referenceDatabase = useSQLiteContext();
-  const [permission, requestPermission] = useCameraPermissions();
+  const scanner = useBarcodeScanner();
   const [snapshot, setSnapshot] = useState<PreparationSnapshot | null>(null);
   const [preparationId, setPreparationId] = useState<number | null>(null);
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
@@ -180,7 +150,6 @@ function NewPreparationScreenContent({
   const [pendingGenericMatch, setPendingGenericMatch] =
     useState<PendingGenericMatch | null>(null);
   const [confirmingGenericMatch, setConfirmingGenericMatch] = useState(false);
-  const scanLocked = useRef(false);
   const options = useMemo(() => preparationWeeks(todayIso()), []);
 
   useEffect(() => {
@@ -431,7 +400,7 @@ function NewPreparationScreenContent({
     setError(null);
     setPending(null);
     setChoosing(false);
-    scanLocked.current = false;
+    scanner.unlock();
     setScanning(true);
   }
 
@@ -576,8 +545,8 @@ function NewPreparationScreenContent({
   }
 
   function handleScan(result: BarcodeScanningResult): void {
-    if (scanLocked.current || current === null) return;
-    scanLocked.current = true;
+    if (current === null) return;
+    if (!scanner.lockOnce()) return;
     const parsed = parseGs1DataMatrix(result.data);
     const cip13 = parsed.fields.gtin
       ? normalizeScannedGtinToCip13(parsed.fields.gtin)
@@ -710,14 +679,14 @@ function NewPreparationScreenContent({
       </Centered>
     );
   if (scanning) {
-    if (permission === null)
+    if (scanner.permission === null)
       return <Centered text="Vérification de la caméra…" />;
-    if (!permission.granted)
+    if (!scanner.permission.granted)
       return (
         <Centered text="La caméra est nécessaire pour vérifier la boîte.">
           <AppButton
             label="Autoriser la caméra"
-            onPress={() => void requestPermission()}
+            onPress={() => void scanner.requestPermission()}
           />
           <AppButton
             label="Annuler"
@@ -988,507 +957,6 @@ function NewPreparationScreenContent({
   );
 }
 
-/**
- * Choix explicite de la semaine à préparer. La semaine à venir reste
- * sélectionnée par défaut ; une semaine déjà validée ne peut pas être relancée.
- */
-function WeekChoice({
-  options,
-  weeks,
-  choice,
-  selectedState,
-  onChoose,
-  onStart,
-}: {
-  options: readonly PreparationWeek[];
-  weeks: readonly KnownPreparation[];
-  choice: PreparationWeekChoice;
-  selectedState: PreparationWeekState;
-  onChoose(choice: PreparationWeekChoice): void;
-  onStart(): void;
-}) {
-  return (
-    <Card style={styles.card}>
-      <SectionTitle>Quelle semaine préparer ?</SectionTitle>
-      <View accessibilityRole="radiogroup" style={styles.weekOptions}>
-        {options.map((option) => {
-          const state = preparationWeekState(option.startDate, weeks);
-          const selected = option.choice === choice;
-          return (
-            <Pressable
-              accessibilityLabel={`${WEEK_LABELS[option.choice]}, semaine ${formatFrenchCivilPeriod(option.startDate, option.endDate)}`}
-              accessibilityRole="radio"
-              accessibilityState={{ selected }}
-              key={option.choice}
-              onPress={() => onChoose(option.choice)}
-              style={[styles.weekOption, selected && styles.weekOptionSelected]}
-            >
-              <Text style={styles.weekOptionTitle}>
-                {WEEK_LABELS[option.choice]}
-              </Text>
-              <Text style={styles.weekOptionPeriod}>
-                Semaine{' '}
-                {formatFrenchCivilPeriod(option.startDate, option.endDate)}
-              </Text>
-              {state === 'ALREADY_PREPARED' ? (
-                <Badge label="Déjà préparée" tone="success" />
-              ) : null}
-              {state === 'IN_PROGRESS' ? (
-                <Badge label="Préparation en cours" tone="warning" />
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </View>
-      {selectedState === 'ALREADY_PREPARED' ? (
-        <Message tone="warning" title="Semaine déjà préparée">
-          Une préparation validée existe déjà pour cette période. Choisissez une
-          autre semaine plutôt que de créer un doublon.
-        </Message>
-      ) : null}
-      {selectedState === 'IN_PROGRESS' ? (
-        <Message tone="warning" title="Préparation déjà commencée">
-          Une préparation incomplète existe pour cette période. Reprenez-la
-          depuis l’accueil plutôt que d’en créer une nouvelle.
-        </Message>
-      ) : null}
-      <AppButton
-        label="Générer la préparation de 7 jours"
-        disabled={selectedState !== 'AVAILABLE'}
-        onPress={onStart}
-      />
-    </Card>
-  );
-}
-
-function DailyFinalCheck({ snapshot }: { snapshot: PreparationSnapshot }) {
-  const dates = Array.from({ length: 7 }, (_, offset) => {
-    const date = new Date(`${snapshot.startDate}T00:00:00.000Z`);
-    date.setUTCDate(date.getUTCDate() + offset);
-    return date.toISOString().slice(0, 10);
-  });
-  return (
-    <View style={styles.finalCheck}>
-      {dates.map((date) => (
-        <View key={date} style={styles.day}>
-          <Text style={styles.dayTitle}>{formatLongFrenchCivilDate(date)}</Text>
-          {snapshot.items
-            .filter((item) => item.date === date)
-            .map((item, index) => (
-              <Text
-                key={`${item.slot}-${item.specialtyCis}-${index}`}
-                style={styles.case}
-              >
-                • {SLOT_LABELS[item.slot]} · {item.specialtyName} :{' '}
-                {formatHalfUnits(item.quantityHalfUnits)}
-              </Text>
-            ))}
-          {snapshot.items.every((item) => item.date !== date) ? (
-            <Text style={styles.case}>Aucune prise</Text>
-          ) : null}
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function MedicationStep({
-  snapshot,
-  current,
-  boxes,
-}: {
-  snapshot: PreparationSnapshot;
-  current: CurrentRequirement;
-  boxes: readonly MedicationBox[];
-}) {
-  const cases = snapshot.items.filter(
-    (item) => item.specialtyCis === current.specialtyCis,
-  );
-  return (
-    <Card style={styles.card}>
-      <Text style={styles.name}>{current.specialtyName}</Text>
-      {cases[0]?.pharmaceuticalForm ? (
-        <Text style={typography.body}>{cases[0].pharmaceuticalForm}</Text>
-      ) : null}
-      <Text style={styles.total}>
-        Quantité totale : {formatHalfUnits(current.requiredHalfUnits)}
-      </Text>
-      {current.contributions.length > 0 ? (
-        <Message
-          tone="warning"
-          title="Boîte précédente épuisée : reste à couvrir"
-        >
-          {current.contributions.map((contribution) => {
-            const box = boxes.find((item) => item.id === contribution.boxId);
-            return (
-              <Text key={contribution.boxId} style={styles.case}>
-                • Lot {box?.lot ?? 'non renseigné'} :{' '}
-                {formatHalfUnits(contribution.quantityHalfUnits)} déjà attribués
-              </Text>
-            );
-          })}
-          <Text style={styles.case}>
-            Reste à couvrir avec une seconde boîte :{' '}
-            {formatHalfUnits(current.remainingHalfUnits)}
-          </Text>
-        </Message>
-      ) : null}
-      <Text style={styles.casesTitle}>Cases concernées</Text>
-      {cases.map((item, index) => (
-        <Text key={`${item.date}-${item.slot}-${index}`} style={styles.case}>
-          • {formatLongFrenchCivilDate(item.date)} · {SLOT_LABELS[item.slot]} :{' '}
-          {formatHalfUnits(item.quantityHalfUnits)}
-        </Text>
-      ))}
-    </Card>
-  );
-}
-
-/**
- * Récapitulatif des lots réellement retenus pour chaque médicament, affiché
- * juste avant la validation finale : lorsque plusieurs boîtes couvrent un
- * même médicament, les deux doivent être visibles avant la décrémentation.
- */
-function UsageSummary({
-  snapshot,
-  progress,
-  boxes,
-}: {
-  snapshot: PreparationSnapshot;
-  progress: readonly SavedPreparationProgress[];
-  boxes: readonly MedicationBox[];
-}) {
-  return (
-    <View style={styles.finalCheck}>
-      {snapshot.requirements.map((requirement) => {
-        const contributions = progress.filter(
-          (item) => item.specialtyCis === requirement.specialtyCis,
-        );
-        return (
-          <View key={requirement.specialtyCis} style={styles.day}>
-            <Text style={styles.dayTitle}>{requirement.specialtyName}</Text>
-            {contributions.map((contribution) => {
-              const box = boxes.find((item) => item.id === contribution.boxId);
-              return (
-                <Text key={contribution.boxId} style={styles.case}>
-                  • Lot {box?.lot ?? 'non renseigné'} · péremption{' '}
-                  {box ? formatLongFrenchCivilDate(box.expirationDate) : '—'} ·{' '}
-                  {formatHalfUnits(contribution.quantityHalfUnits)} ·{' '}
-                  {contribution.verification === 'SCAN'
-                    ? 'vérifiée par scan'
-                    : 'choisie sans scan'}
-                </Text>
-              );
-            })}
-            {contributions.length === 0 ? (
-              <Text style={styles.case}>Aucune boîte retenue</Text>
-            ) : null}
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-/**
- * Boîtes déjà enregistrées pour ce médicament, du lot à utiliser en priorité
- * vers les boîtes inutilisables. Rien n'est masqué silencieusement : une
- * quantité insuffisante est signalée avant même la sélection, pour permettre
- * de choisir directement une seconde boîte lorsque la première est presque
- * terminée plutôt que de découvrir le problème après validation.
- */
-function StockBoxChoice({
-  boxes,
-  expectedSpecialtyCis,
-  requiredHalfUnits,
-  onCancel,
-  onSelect,
-}: {
-  boxes: readonly MedicationBox[];
-  expectedSpecialtyCis: string;
-  requiredHalfUnits: number;
-  onCancel(): void;
-  onSelect(box: MedicationBox): void;
-}) {
-  const today = todayIso();
-  return (
-    <Card style={styles.card}>
-      <Text style={styles.casesTitle}>Boîtes enregistrées dans le stock</Text>
-      <Text style={typography.caption}>
-        Aucune lecture de DataMatrix ne sera enregistrée : les contrôles de
-        médicament, de lot et de péremption restent appliqués. Un autre membre
-        du même groupe générique officiel exige une confirmation explicite.
-      </Text>
-      {boxes.length === 0 ? (
-        <Text style={styles.case}>
-          Aucune boîte de ce médicament n’est enregistrée dans le stock.
-        </Text>
-      ) : null}
-      {boxes.map((box) => {
-        const availability = evaluateBoxAvailability(
-          box,
-          requiredHalfUnits,
-          today,
-        );
-        return (
-          <Pressable
-            accessibilityRole="button"
-            key={box.id}
-            onPress={() => onSelect(box)}
-            style={styles.stockOption}
-          >
-            <Text style={styles.stockOptionTitle}>
-              Boîte #{box.id} · lot {box.lot ?? 'non renseigné'}
-            </Text>
-            <Text>
-              Péremption {formatLongFrenchCivilDate(box.expirationDate)} · reste{' '}
-              {box.remainingQuantity}
-            </Text>
-            {availability === 'EXPIRED' ? (
-              <Badge label="Périmée" tone="danger" />
-            ) : null}
-            {availability === 'INSUFFICIENT' ? (
-              <Badge label="Quantité insuffisante seule" tone="warning" />
-            ) : null}
-            {box.origin === 'MANUAL' ? (
-              <Badge label="Ajoutée sans DataMatrix" />
-            ) : null}
-            {box.specialtyCis !== expectedSpecialtyCis ? (
-              <Badge
-                label={`Autre spécialité du même groupe générique : ${box.specialtyName}`}
-                tone="warning"
-              />
-            ) : null}
-          </Pressable>
-        );
-      })}
-      <AppButton label="Annuler" variant="quiet" onPress={onCancel} />
-    </Card>
-  );
-}
-
-function BoxConfirmation({
-  pending,
-  saving,
-  onRestart,
-  onValidate,
-}: {
-  pending: PendingBox;
-  saving: boolean;
-  onRestart(): void;
-  onValidate(acknowledgeNonFefo: boolean): Promise<void>;
-}) {
-  const { verification } = pending;
-  const scanned = pending.method === 'SCAN';
-
-  if (verification.status === 'PARTIAL') {
-    const { box, quantityHalfUnits, remainingAfterHalfUnits } = verification;
-    return (
-      <View style={styles.warning}>
-        <Text style={styles.warningTitle}>
-          Boîte insuffisante seule : contribution partielle
-        </Text>
-        <Badge
-          label={
-            scanned
-              ? 'Vérifiée par scan DataMatrix'
-              : 'Choisie dans le stock, sans scan'
-          }
-          tone={scanned ? 'success' : 'warning'}
-        />
-        <Text>
-          Lot {box.lot ?? 'non renseigné'} · péremption{' '}
-          {formatLongFrenchCivilDate(box.expirationDate)}
-        </Text>
-        {pending.matchedSpecialtyName ? (
-          <Badge
-            label={`Équivalence générique confirmée : ${pending.matchedSpecialtyName}`}
-            tone="warning"
-          />
-        ) : null}
-        <Text>
-          Cette boîte couvre {formatHalfUnits(quantityHalfUnits)}. Il restera{' '}
-          {formatHalfUnits(remainingAfterHalfUnits)} à couvrir avec une seconde
-          boîte.
-        </Text>
-        <AppButton
-          loading={saving}
-          label="Utiliser cette boîte entièrement"
-          onPress={() => void onValidate(false)}
-        />
-        <AppButton
-          label={
-            scanned ? 'Scanner une autre boîte' : 'Choisir une autre boîte'
-          }
-          variant="secondary"
-          onPress={onRestart}
-        />
-      </View>
-    );
-  }
-
-  const { box, isFefo, recommendedBox } = verification;
-  return (
-    <View style={isFefo ? styles.verified : styles.warning}>
-      <Text style={styles.warningTitle}>
-        {isFefo
-          ? 'Boîte vérifiée'
-          : 'Boîte valide, mais un autre lot périme plus tôt'}
-      </Text>
-      <Badge
-        label={
-          scanned
-            ? 'Vérifiée par scan DataMatrix'
-            : 'Choisie dans le stock, sans scan'
-        }
-        tone={scanned ? 'success' : 'warning'}
-      />
-      <Text>
-        Lot {box.lot ?? 'non renseigné'} · péremption{' '}
-        {formatLongFrenchCivilDate(box.expirationDate)}
-      </Text>
-      {pending.matchedSpecialtyName ? (
-        <Badge
-          label={`Équivalence générique confirmée : ${pending.matchedSpecialtyName}`}
-          tone="warning"
-        />
-      ) : null}
-      {!isFefo ? (
-        <Text>
-          Lot recommandé : {recommendedBox.lot ?? 'non renseigné'} · péremption{' '}
-          {formatLongFrenchCivilDate(recommendedBox.expirationDate)}. Vous
-          pouvez continuer en confirmant cet avertissement.
-        </Text>
-      ) : null}
-      <AppButton
-        loading={saving}
-        label={
-          isFefo ? 'Valider ce médicament' : 'Utiliser quand même cette boîte'
-        }
-        onPress={() => void onValidate(!isFefo)}
-      />
-      <AppButton
-        label={scanned ? 'Scanner une autre boîte' : 'Choisir une autre boîte'}
-        variant="secondary"
-        onPress={onRestart}
-      />
-    </View>
-  );
-}
-
-function Centered({
-  text,
-  children,
-}: {
-  text: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <View style={styles.centered}>
-      <Stack.Screen
-        options={{ headerShown: true, title: 'Préparer mon pilulier' }}
-      />
-      <Text>{text}</Text>
-      {children}
-    </View>
-  );
-}
 function message(reason: unknown, fallback: string): string {
   return reason instanceof Error ? reason.message : fallback;
 }
-
-const styles = StyleSheet.create({
-  camera: { flex: 1 },
-  cameraContainer: { flex: 1 },
-  case: { color: colors.textMuted, marginTop: 5 },
-  casesTitle: { fontWeight: '700', marginTop: 14 },
-  card: {
-    borderColor: colors.border,
-    marginBottom: 16,
-    padding: 14,
-  },
-  centered: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 16,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  finalCheck: { gap: 12, marginVertical: 12 },
-  footerActions: { gap: 10 },
-  day: { borderTopColor: colors.border, borderTopWidth: 1, paddingTop: 8 },
-  dayTitle: { fontSize: 16, fontWeight: '800' },
-  stockOption: {
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    gap: 4,
-    marginTop: 10,
-    padding: 12,
-  },
-  stockOptionTitle: { fontWeight: '700' },
-  guide: {
-    borderColor: '#fff',
-    borderWidth: 2,
-    left: '10%',
-    padding: 12,
-    position: 'absolute',
-    right: '10%',
-    top: '35%',
-  },
-  guideText: {
-    backgroundColor: '#0009',
-    color: '#fff',
-    padding: 6,
-    textAlign: 'center',
-  },
-  intro: typography.body,
-  name: typography.title,
-  period: typography.heading,
-  periodHeader: { gap: spacing.xs },
-  periodDetail: { ...typography.caption, marginTop: spacing.sm },
-  cancelArea: { gap: spacing.xs, marginTop: spacing.lg },
-  weekOptions: { gap: spacing.sm },
-  weekOption: {
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    gap: spacing.xs,
-    padding: spacing.md,
-  },
-  weekOptionSelected: {
-    backgroundColor: colors.brandSoft,
-    borderColor: colors.brand,
-    borderWidth: 2,
-  },
-  weekOptionTitle: typography.label,
-  weekOptionPeriod: { fontSize: 17, fontWeight: '800' },
-  progress: { marginBottom: 16, marginTop: 4 },
-  success: { backgroundColor: colors.surface },
-  successTitle: {
-    color: colors.success,
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 5,
-  },
-  total: { fontSize: 17, fontWeight: '700', marginTop: 8 },
-  verified: {
-    backgroundColor: colors.successSoft,
-    borderColor: colors.success,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    gap: 10,
-    marginTop: 14,
-    padding: 12,
-  },
-  warning: {
-    backgroundColor: colors.warningSoft,
-    borderColor: colors.warning,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    gap: 10,
-    marginBottom: 16,
-    padding: 12,
-  },
-  warningTitle: { color: colors.warning, fontWeight: '800' },
-});

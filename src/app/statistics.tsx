@@ -31,6 +31,7 @@ import {
   SectionTitle,
   colors,
   radii,
+  sizes,
   spacing,
   typography,
 } from '@/ui';
@@ -291,7 +292,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.pill,
     borderWidth: 1,
-    minHeight: 44,
+    minHeight: sizes.touch,
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
   },

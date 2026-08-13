@@ -1,13 +1,13 @@
 import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import type { BarcodeScanningResult } from 'expo-camera';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView } from 'expo-camera';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import {
   SQLiteProvider,
   type SQLiteDatabase,
   useSQLiteContext,
 } from 'expo-sqlite';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -23,6 +23,7 @@ import { useDuplicateLotGate } from '@/components/inventory/use-duplicate-lot-ga
 import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
 import { useDraftGenericEquivalencePrompt } from '@/components/medications/use-draft-generic-equivalence-prompt';
 import { useGenericEquivalenceGate } from '@/components/medications/use-generic-equivalence-gate';
+import { useBarcodeScanner } from '@/components/scanning/use-barcode-scanner';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import { buildAttachedSpecialtyCisSet } from '@/domain/inventory/box-attachment';
 import { parseGs1Expiration } from '@/domain/inventory/inventory';
@@ -435,7 +436,7 @@ function ScanBox({
 }) {
   const referenceDatabase = useSQLiteContext();
   const { showToast } = useToast();
-  const [permission, requestPermission] = useCameraPermissions();
+  const scanner = useBarcodeScanner();
   const [scan, setScan] = useState<BarcodeScanningResult | null>(null);
   const [medication, setMedication] =
     useState<IdentifiedMedicationPresentation | null>(null);
@@ -445,7 +446,6 @@ function ScanBox({
   const [quantity, setQuantity] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const locked = useRef(false);
   const genericGate = useGenericEquivalenceGate(
     personalDatabase,
     referenceDatabase,
@@ -508,7 +508,7 @@ function ScanBox({
     setMedication(null);
     setQuantity('');
     setError(null);
-    locked.current = false;
+    scanner.unlock();
   };
 
   const save = async () => {
@@ -555,14 +555,14 @@ function ScanBox({
     }
   };
 
-  if (permission === null)
+  if (scanner.permission === null)
     return <Centered text="Vérification de la caméra…" />;
-  if (!permission.granted) {
+  if (!scanner.permission.granted) {
     return (
       <Centered text="La caméra est nécessaire pour scanner une boîte.">
         <AppButton
           label="Autoriser la caméra"
-          onPress={() => void requestPermission()}
+          onPress={() => void scanner.requestPermission()}
         />
         <AppButton
           label="Ajouter sans DataMatrix"
@@ -581,10 +581,7 @@ function ScanBox({
           style={styles.camera}
           barcodeScannerSettings={{ barcodeTypes: ['datamatrix'] }}
           onBarcodeScanned={(result) => {
-            if (!locked.current) {
-              locked.current = true;
-              setScan(result);
-            }
+            if (scanner.lockOnce()) setScan(result);
           }}
         >
           <View style={styles.guide}>

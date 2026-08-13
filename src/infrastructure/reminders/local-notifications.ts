@@ -289,15 +289,23 @@ export async function cancelPreparationReminders(): Promise<void> {
  * Rappel ponctuel (déclenchement unique), distinct du rappel hebdomadaire de
  * préparation et des rappels quotidiens de prise : planifié uniquement quand
  * une case reste « en attente de complément » après validation (ticket 30b).
+ * Transporte la préparation et le médicament concernés (ticket 41) afin que
+ * l'appui sur la notification ouvre directement l'écran de complément exact.
  */
 export async function schedulePendingCompletionReminder(
   scheduledAt: Date,
+  preparationId: number,
+  specialtyCis: string,
 ): Promise<string> {
   await ensureAndroidPendingCompletionChannel();
   return Notifications.scheduleNotificationAsync({
     content: {
       ...PENDING_COMPLETION_REMINDER_CONTENT,
-      data: { kind: PENDING_COMPLETION_REMINDER_KIND },
+      data: {
+        kind: PENDING_COMPLETION_REMINDER_KIND,
+        preparationId,
+        specialtyCis,
+      },
       sound: 'default',
     },
     trigger: {

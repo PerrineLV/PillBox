@@ -36,6 +36,7 @@ import {
   Message,
   colors,
   radii,
+  sizes,
   spacing,
   typography,
 } from '@/ui';
@@ -362,7 +363,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     borderWidth: 1,
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: sizes.touch,
     paddingHorizontal: spacing.md,
   },
   filterSelected: { backgroundColor: colors.brand, borderColor: colors.brand },
