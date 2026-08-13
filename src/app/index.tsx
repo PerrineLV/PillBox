@@ -277,6 +277,7 @@ function LastPreparationCard({ detail }: { detail: string }) {
   return (
     <Link href="/preparations/history" asChild>
       <Pressable
+        accessibilityLabel={`Dernière préparation : ${detail}`}
         accessibilityRole="button"
         style={({ pressed }) => pressed && styles.lastPreparationPressed}
       >

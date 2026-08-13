@@ -445,6 +445,17 @@ function StockBoxChoice({
         );
         return (
           <Pressable
+            accessibilityLabel={`Boîte numéro ${box.id}, lot ${box.lot ?? 'non renseigné'}, péremption ${formatLongFrenchCivilDate(box.expirationDate)}, reste ${box.remainingQuantity}${
+              availability === 'EXPIRED'
+                ? ', périmée'
+                : availability === 'INSUFFICIENT'
+                  ? ', quantité insuffisante seule'
+                  : ''
+            }${
+              box.specialtyCis !== expectedSpecialtyCis
+                ? `, équivalence générique déjà confirmée : ${box.specialtyName}`
+                : ''
+            }`}
             accessibilityRole="button"
             key={box.id}
             onPress={() => onSelect(box)}
