@@ -77,7 +77,7 @@ export default function TimelineScreen() {
   const database = useSQLiteContext();
   const [events, setEvents] = useState<TimelineEvent[] | null>(null);
   const [treatments, setTreatments] = useState<Treatment[]>([]);
-  const [period, setPeriod] = useState<Period>('all');
+  const [period, setPeriod] = useState<Period>(90);
   const [treatmentId, setTreatmentId] = useState<number | null>(
     treatmentIdParam ? Number(treatmentIdParam) : null,
   );
@@ -86,10 +86,12 @@ export default function TimelineScreen() {
   );
   const [error, setError] = useState<string | null>(null);
 
+  const startDate = period === 'all' ? null : dateDaysAgo(period - 1);
+
   const load = useCallback(async () => {
     try {
       const [loadedEvents, loadedTreatments] = await Promise.all([
-        listTimelineEvents(database, { treatmentId }),
+        listTimelineEvents(database, { treatmentId, startDate }),
         listTreatments(database),
       ]);
       setEvents(loadedEvents);
@@ -100,7 +102,7 @@ export default function TimelineScreen() {
         reason instanceof Error ? reason.message : 'Chronologie indisponible.',
       );
     }
-  }, [database, treatmentId]);
+  }, [database, treatmentId, startDate]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -113,16 +115,11 @@ export default function TimelineScreen() {
     );
   }
 
-  const startDate = period === 'all' ? null : dateDaysAgo(period - 1);
   const allowedTypes = EVENT_GROUPS.filter((group) =>
     selectedGroups.includes(group.key),
   ).flatMap((group) => group.types);
   const filtered = (events ?? [])
     .filter((event) => allowedTypes.includes(event.type))
-    .filter(
-      (event) =>
-        startDate === null || event.occurredAt.slice(0, 10) >= startDate,
-    )
     .slice()
     .reverse();
 

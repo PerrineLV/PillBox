@@ -185,7 +185,10 @@ describe('listTimelineEvents', () => {
     const { raw, database } = await setup();
     const { treatmentId } = await buildFullHistory(database);
 
-    const events = await listTimelineEvents(database, { treatmentId });
+    const events = await listTimelineEvents(database, {
+      treatmentId,
+      startDate: null,
+    });
     const types = new Set(events.map((event) => event.type));
 
     expect(types).toEqual(
@@ -218,7 +221,10 @@ describe('listTimelineEvents', () => {
     const { raw, database } = await setup();
     const { treatmentId } = await buildFullHistory(database);
 
-    const events = await listTimelineEvents(database, { treatmentId });
+    const events = await listTimelineEvents(database, {
+      treatmentId,
+      startDate: null,
+    });
     const stockMovements = events.filter(
       (event) => event.type === 'STOCK_MOVEMENT',
     );
@@ -245,6 +251,7 @@ describe('listTimelineEvents', () => {
 
     const events = await listTimelineEvents(database, {
       treatmentId: secondId,
+      startDate: null,
     });
 
     expect(events.every((event) => event.treatmentId === secondId)).toBe(true);
@@ -254,8 +261,42 @@ describe('listTimelineEvents', () => {
 
     const missing = await listTimelineEvents(database, {
       treatmentId: 999999,
+      startDate: null,
     });
     expect(missing).toEqual([]);
+    raw.close();
+  });
+
+  it('borne les quatre types de sources par startDate en SQL', async () => {
+    const { raw, database } = await setup();
+    const { treatmentId } = await buildFullHistory(database);
+
+    // buildFullHistory produit un historique de cycle de vie (archivage,
+    // réactivation), une préparation avec boîte utilisée, un mouvement de
+    // stock manuel et une prise, tous situés en 2026-08. Seuls
+    // TREATMENT_CREATED et PHASE_STARTED proviennent du traitement lui-même,
+    // hors périmètre de ce filtre : ils restent présents quelle que soit la
+    // borne basse.
+    const futureEvents = await listTimelineEvents(database, {
+      treatmentId,
+      startDate: '2030-01-01',
+    });
+    expect(new Set(futureEvents.map((event) => event.type))).toEqual(
+      new Set(['TREATMENT_CREATED', 'PHASE_STARTED']),
+    );
+
+    const allEvents = await listTimelineEvents(database, {
+      treatmentId,
+      startDate: null,
+    });
+    expect(allEvents.length).toBeGreaterThan(futureEvents.length);
+
+    // Une borne basse antérieure à tout l'historique doit le laisser intact.
+    const pastEvents = await listTimelineEvents(database, {
+      treatmentId,
+      startDate: '2020-01-01',
+    });
+    expect(pastEvents).toEqual(allEvents);
     raw.close();
   });
 });
