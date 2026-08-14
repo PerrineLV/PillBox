@@ -18,7 +18,7 @@ type PrescriptionRow = {
   id: number;
   label: string;
   issue_date: string;
-  valid_until: string;
+  valid_until: string | null;
   is_replaced: number;
 };
 

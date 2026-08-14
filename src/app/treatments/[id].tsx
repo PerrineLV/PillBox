@@ -114,7 +114,13 @@ export default function EditTreatmentScreen() {
         // Une seule connexion partagée vers medication-reference.db pour
         // cette section : GenericGroupSection a besoin du référentiel, et
         // deux `SQLiteProvider` distincts avec `forceOverwrite` sur le même
-        // fichier entrent en course et font planter l'import.
+        // fichier entrent en course et font planter l'import. `useSuspense`
+        // volontairement omis : son mode s'appuie sur un cache global
+        // partagé entre tous les `SQLiteProvider` du même nom de base, quel
+        // que soit l'écran — naviguer vers un autre écran ouvrant aussi
+        // `medication-reference.db` en mode suspense ferme alors cette
+        // connexion pendant qu'elle est encore utilisée ici (constaté :
+        // crash « unable to close due to unfinalized statements »).
         <SQLiteProvider
           databaseName="medication-reference.db"
           assetSource={{

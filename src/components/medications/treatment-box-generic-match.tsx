@@ -11,6 +11,7 @@ import {
   type GenericEquivalenceBoxCandidate,
 } from '@/infrastructure/treatments/generic-equivalence-candidates';
 import { confirmGenericEquivalence } from '@/infrastructure/treatments/generic-equivalence-repository';
+import { LoadingState } from '@/ui';
 
 import { GenericMatchConfirmation } from './generic-match-confirmation';
 
@@ -45,9 +46,18 @@ export function TreatmentBoxGenericMatchWithDatabase({
   onDone,
 }: Props) {
   return (
+    // `useSuspense` volontairement omis : son mode s'appuie sur un cache
+    // global partagé entre tous les `SQLiteProvider` du même nom de base,
+    // quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
+    // `medication-reference.db` en mode suspense ferme alors cette connexion
+    // pendant qu'elle est encore utilisée ici (constaté : crash « unable to
+    // close due to unfinalized statements »).
     <SQLiteProvider
       databaseName="medication-reference.db"
-      assetSource={{ assetId: medicationReferenceAsset, forceOverwrite: true }}
+      assetSource={{
+        assetId: medicationReferenceAsset,
+        forceOverwrite: true,
+      }}
       options={{ useNewConnection: true }}
     >
       <TreatmentBoxGenericMatch
@@ -101,7 +111,11 @@ export function TreatmentBoxGenericMatch({
     if (queue !== null && queue.length === 0) onDone();
   }, [queue, onDone]);
 
-  if (queue === null || queue.length === 0) return null;
+  // Sans indicateur ici, la vérification (asynchrone) ne rend rien pendant
+  // qu'elle tourne : le clic sur « Enregistrer » semblait alors sans effet,
+  // le temps que `onDone` s'exécute et redirige effectivement l'écran.
+  if (queue === null) return <LoadingState label="Vérification du stock…" />;
+  if (queue.length === 0) return null;
   const current = queue[0];
 
   async function resolve(confirm: boolean): Promise<void> {

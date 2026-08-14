@@ -146,6 +146,18 @@ describe('Prescription (ticket 45)', () => {
     expect(prescription?.status).toBe('EXPIRED');
   });
 
+  it('accepte une fin de validité inconnue, jamais EXPIRED par elle-même', async () => {
+    const { database } = await setup();
+    const id = await createPrescription(database, {
+      label: 'Ordo sans date connue',
+      issueDate: '2020-01-01',
+      validUntil: null,
+    });
+
+    const prescription = await getPrescription(database, id, '2026-08-14');
+    expect(prescription).toMatchObject({ validUntil: null, status: 'ACTIVE' });
+  });
+
   it('calcule le statut REPLACED lorsqu’une ordonnance plus récente couvre le même traitement', async () => {
     const { database, treatmentId } = await setup();
     const oldId = await createPrescription(database, {

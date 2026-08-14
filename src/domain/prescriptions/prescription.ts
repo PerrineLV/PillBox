@@ -12,11 +12,31 @@ export type Prescription = {
   /** Texte libre court (ex. "ordo psychiatre") : jamais le nom du médecin. */
   label: string;
   issueDate: string;
-  validUntil: string;
+  /** `null` lorsque l'utilisatrice ne connaît pas encore la fin de validité. */
+  validUntil: string | null;
   status: PrescriptionStatus;
 };
 
 export type PrescriptionDraft = Omit<Prescription, 'id' | 'status'>;
+
+/**
+ * Ordre d'affichage de la liste des ordonnances (ticket 46) : les actives
+ * d'abord, puis par fin de validité croissante — une fin inconnue (`null`)
+ * est traitée comme la plus lointaine, jamais mise en avant faute
+ * d'information.
+ */
+export function comparePrescriptionsForList(
+  left: Prescription,
+  right: Prescription,
+): number {
+  const leftActive = left.status === 'ACTIVE' ? 0 : 1;
+  const rightActive = right.status === 'ACTIVE' ? 0 : 1;
+  if (leftActive !== rightActive) return leftActive - rightActive;
+  if (left.validUntil === right.validUntil) return 0;
+  if (left.validUntil === null) return 1;
+  if (right.validUntil === null) return -1;
+  return left.validUntil.localeCompare(right.validUntil);
+}
 
 /**
  * Ligne d'ordonnance reliant une `Prescription` à un `Treatment`. Un même
@@ -102,14 +122,17 @@ export function computeTheoreticalRenewalDate(
 /**
  * `isReplaced` est déterminé par l'appelant (repository) : une ordonnance
  * plus récente couvre au moins un même traitement. Purement informatif,
- * jamais bloquant.
+ * jamais bloquant. Une fin de validité inconnue (`null`) ne rend jamais une
+ * ordonnance EXPIRED par elle-même : seul un remplacement explicite la fait
+ * changer de statut.
  */
 export function computePrescriptionStatus(
-  prescription: { validUntil: string },
+  prescription: { validUntil: string | null },
   isReplaced: boolean,
   today: string,
 ): PrescriptionStatus {
   if (isReplaced) return 'REPLACED';
+  if (prescription.validUntil === null) return 'ACTIVE';
   return prescription.validUntil >= today ? 'ACTIVE' : 'EXPIRED';
 }
 
@@ -117,6 +140,7 @@ export function assertValidPrescriptionDraft(draft: PrescriptionDraft): void {
   if (draft.label.trim() === '')
     throw new Error('L’ordonnance doit avoir un intitulé.');
   assertCivilDate(draft.issueDate, 'La date d’émission est invalide.');
+  if (draft.validUntil === null) return;
   assertCivilDate(draft.validUntil, 'La date de fin de validité est invalide.');
   if (draft.validUntil < draft.issueDate)
     throw new Error('La fin de validité doit suivre la date d’émission.');
