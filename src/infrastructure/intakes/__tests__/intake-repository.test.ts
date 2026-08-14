@@ -287,7 +287,6 @@ describe('suivi local des prises', () => {
         maxQuantityPerDayHalfUnits: null,
         minIntervalHours: null,
       },
-      controlledDispensing: null,
     });
     expect(await getTreatmentRemovalAction(database, 1)).toBe('ARCHIVE');
     await archiveTreatment(database, 1);

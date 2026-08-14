@@ -76,7 +76,6 @@ const AS_NEEDED_DRAFT: TreatmentDraft = {
   includedInPillbox: false,
   phases: [],
   asNeededInfo: { maxQuantityPerDayHalfUnits: 8, minIntervalHours: 4 },
-  controlledDispensing: null,
 };
 
 describe('traitements « si besoin »', () => {

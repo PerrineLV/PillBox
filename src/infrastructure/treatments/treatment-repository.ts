@@ -2,14 +2,11 @@ import type { SQLiteDatabase, SQLiteRunResult } from 'expo-sqlite';
 
 import {
   assertValidAsNeededTreatment,
-  assertValidControlledDispensingInfo,
   assertValidTreatmentPhases,
-  DEFAULT_CONTROLLED_DISPENSING_PERIODICITY_DAYS,
   isIntakeSlot,
   isTreatmentDosageKind,
   isWeekday,
   treatmentPhasesEqual,
-  type ControlledDispensingInfo,
   type LegacyDosage,
   type PhaseDosage,
   type Treatment,
@@ -27,10 +24,6 @@ type TreatmentRow = {
   archived_at: string | null;
   as_needed_max_quantity_half_units: number | null;
   as_needed_min_interval_hours: number | null;
-  controlled_dispensing_enabled: number | null;
-  controlled_dispensing_periodicity_days: number | null;
-  controlled_dispensing_last_dispensed_at: string | null;
-  controlled_dispensing_theoretical_renewal_date: string | null;
 };
 
 type PhaseRow = {
@@ -181,10 +174,8 @@ export async function createTreatment(
     result = await transaction.runAsync(
       `INSERT INTO treatments
        (specialty_cis, specialty_name, pharmaceutical_form, dosage_kind, included_in_pillbox,
-        as_needed_max_quantity_half_units, as_needed_min_interval_hours,
-        controlled_dispensing_enabled, controlled_dispensing_periodicity_days,
-        controlled_dispensing_last_dispensed_at, controlled_dispensing_theoretical_renewal_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        as_needed_max_quantity_half_units, as_needed_min_interval_hours)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       draft.specialtyCis,
       draft.specialtyName,
       draft.pharmaceuticalForm,
@@ -192,7 +183,6 @@ export async function createTreatment(
       draft.includedInPillbox ? 1 : 0,
       draft.asNeededInfo.maxQuantityPerDayHalfUnits,
       draft.asNeededInfo.minIntervalHours,
-      ...controlledDispensingParameters(draft.controlledDispensing),
     );
     await insertPhases(transaction, result.lastInsertRowId, draft.phases);
   });
@@ -210,9 +200,7 @@ export async function updateTreatment(
     const result = await transaction.runAsync(
       `UPDATE treatments SET specialty_cis = ?, specialty_name = ?, pharmaceutical_form = ?,
        dosage_kind = ?, included_in_pillbox = ?, as_needed_max_quantity_half_units = ?,
-       as_needed_min_interval_hours = ?, controlled_dispensing_enabled = ?,
-       controlled_dispensing_periodicity_days = ?, controlled_dispensing_last_dispensed_at = ?,
-       controlled_dispensing_theoretical_renewal_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+       as_needed_min_interval_hours = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       treatment.specialtyCis,
       treatment.specialtyName,
       treatment.pharmaceuticalForm,
@@ -220,7 +208,6 @@ export async function updateTreatment(
       treatment.includedInPillbox ? 1 : 0,
       treatment.asNeededInfo.maxQuantityPerDayHalfUnits,
       treatment.asNeededInfo.minIntervalHours,
-      ...controlledDispensingParameters(treatment.controlledDispensing),
       treatment.id,
     );
     if (result.changes !== 1) throw new Error('Traitement introuvable.');
@@ -248,18 +235,6 @@ export async function updateTreatment(
       );
     }
   });
-}
-
-function controlledDispensingParameters(
-  info: ControlledDispensingInfo | null,
-): readonly [number | null, number | null, string | null, string | null] {
-  if (info === null) return [null, null, null, null];
-  return [
-    info.enabled ? 1 : 0,
-    info.periodicityDays,
-    info.lastDispensedAt,
-    info.theoreticalRenewalDate,
-  ];
 }
 
 async function insertPhases(
@@ -412,18 +387,6 @@ async function hydrateTreatments(
         maxQuantityPerDayHalfUnits: row.as_needed_max_quantity_half_units,
         minIntervalHours: row.as_needed_min_interval_hours,
       },
-      controlledDispensing:
-        row.controlled_dispensing_enabled === null
-          ? null
-          : {
-              enabled: row.controlled_dispensing_enabled === 1,
-              periodicityDays:
-                row.controlled_dispensing_periodicity_days ??
-                DEFAULT_CONTROLLED_DISPENSING_PERIODICITY_DAYS,
-              lastDispensedAt: row.controlled_dispensing_last_dispensed_at,
-              theoreticalRenewalDate:
-                row.controlled_dispensing_theoretical_renewal_date,
-            },
     };
   });
 }
@@ -433,11 +396,8 @@ function validateDraft(draft: TreatmentDraft): void {
     throw new Error('La spécialité doit provenir du référentiel.');
   if (draft.dosageKind === 'AS_NEEDED') assertValidAsNeededTreatment(draft);
   else assertValidTreatmentPhases(draft.phases);
-  assertValidControlledDispensingInfo(draft.controlledDispensing);
 }
 
 const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form, dosage_kind,
-  included_in_pillbox, archived_at, as_needed_max_quantity_half_units, as_needed_min_interval_hours,
-  controlled_dispensing_enabled, controlled_dispensing_periodicity_days,
-  controlled_dispensing_last_dispensed_at, controlled_dispensing_theoretical_renewal_date
+  included_in_pillbox, archived_at, as_needed_max_quantity_half_units, as_needed_min_interval_hours
   FROM treatments`;

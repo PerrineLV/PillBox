@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 25;
+export const LATEST_SCHEMA_VERSION = 26;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -760,6 +760,104 @@ export const SCHEMA_MIGRATIONS = [
           PRIMARY KEY (preparation_id, specialty_cis)
         );
       `);
+    },
+  },
+  {
+    version: 26,
+    name: 'ordonnances et lignes d’ordonnance (ticket 45)',
+    async up(transaction) {
+      // La cadence de délivrance (complète ou fractionnée) devient une
+      // propriété de la ligne d'ordonnance plutôt que du traitement : un même
+      // traitement peut être couvert par plusieurs ordonnances successives,
+      // avec des modes de délivrance différents d'une ordonnance à l'autre.
+      // Réutilisable pour tout traitement, plus seulement les stupéfiants
+      // détectés par la BDPM.
+      await transaction.execute(`
+        CREATE TABLE prescriptions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          label TEXT NOT NULL,
+          issue_date TEXT NOT NULL CHECK (issue_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          valid_until TEXT NOT NULL CHECK (valid_until GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE prescription_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          prescription_id INTEGER NOT NULL REFERENCES prescriptions(id) ON DELETE CASCADE,
+          treatment_id INTEGER NOT NULL REFERENCES treatments(id) ON DELETE CASCADE,
+          quantity_kind TEXT NOT NULL CHECK (quantity_kind IN ('DURATION', 'BOX_COUNT')),
+          duration_days INTEGER CHECK (duration_days IS NULL OR duration_days > 0),
+          box_count INTEGER CHECK (box_count IS NULL OR box_count > 0),
+          dispensing_mode TEXT NOT NULL CHECK (dispensing_mode IN ('FULL', 'FRACTIONAL')),
+          periodicity_days INTEGER CHECK (periodicity_days IS NULL OR periodicity_days > 0),
+          last_dispensed_at TEXT,
+          theoretical_renewal_date TEXT,
+          tolerance_days INTEGER CHECK (tolerance_days IS NULL OR tolerance_days >= 0),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK (
+            (quantity_kind = 'DURATION' AND duration_days IS NOT NULL AND box_count IS NULL) OR
+            (quantity_kind = 'BOX_COUNT' AND box_count IS NOT NULL AND duration_days IS NULL)
+          ),
+          CHECK (
+            (dispensing_mode = 'FULL' AND periodicity_days IS NULL AND last_dispensed_at IS NULL
+              AND theoretical_renewal_date IS NULL AND tolerance_days IS NULL) OR
+            (dispensing_mode = 'FRACTIONAL' AND periodicity_days IS NOT NULL)
+          )
+        );
+
+        CREATE INDEX prescription_items_prescription_idx
+          ON prescription_items(prescription_id);
+        CREATE INDEX prescription_items_treatment_idx
+          ON prescription_items(treatment_id);
+
+        -- Préserve l'information des traitements déjà suivis en délivrance
+        -- encadrée (ticket 30, en production) sous forme d'une ordonnance de
+        -- secours par traitement concerné, plutôt que de la perdre : seuls
+        -- les traitements où l'indicateur était explicitement activé (1, pas
+        -- seulement détecté) sont concernés, à l'identique du comportement
+        -- précédent (buildTheoreticalRenewalDateIndex et la validation
+        -- partielle du ticket 30b ignoraient déjà un indicateur décoché).
+        -- Le libellé intègre l'id du traitement pour permettre de
+        -- recorréler chaque ordonnance de secours à son traitement d'origine
+        -- par une jointure exacte, sans dépendre de l'ordre d'insertion ni
+        -- d'un identifiant technique renvoyé par le moteur.
+        INSERT INTO prescriptions (label, issue_date, valid_until)
+        SELECT
+          'Ordonnance existante (migration délivrance encadrée, traitement #' || t.id || ')',
+          COALESCE(t.controlled_dispensing_last_dispensed_at, date('now')),
+          date(COALESCE(t.controlled_dispensing_last_dispensed_at, date('now')), '+1 year')
+        FROM treatments t
+        WHERE t.controlled_dispensing_enabled = 1;
+
+        INSERT INTO prescription_items
+          (prescription_id, treatment_id, quantity_kind, duration_days, box_count,
+           dispensing_mode, periodicity_days, last_dispensed_at,
+           theoretical_renewal_date, tolerance_days)
+        SELECT
+          p.id, t.id, 'DURATION', t.controlled_dispensing_periodicity_days, NULL,
+          'FRACTIONAL', t.controlled_dispensing_periodicity_days,
+          t.controlled_dispensing_last_dispensed_at,
+          t.controlled_dispensing_theoretical_renewal_date, NULL
+        FROM treatments t
+        JOIN prescriptions p
+          ON p.label = 'Ordonnance existante (migration délivrance encadrée, traitement #' || t.id || ')'
+        WHERE t.controlled_dispensing_enabled = 1;
+      `);
+      // Les 4 colonnes controlled_dispensing_* de `treatments` (ticket 30)
+      // sont volontairement laissées en place plutôt que supprimées :
+      // `treatments` est référencé par de nombreuses tables via clé
+      // étrangère (treatment_phases, treatment_lifecycle_events,
+      // generic_equivalence_confirmations, l'orpheline treatment_dosages
+      // déjà laissée en l'état depuis la migration 4, etc.) et SQLite
+      // réécrit silencieusement ces références vers l'ancien nom lors d'un
+      // ALTER TABLE ... RENAME, ce qui casserait ces tables si l'ancienne
+      // copie de `treatments` était ensuite supprimée sans reconstruire
+      // aussi chacune d'elles dans la même migration. Un risque disproportionné
+      // pour la suppression de 4 colonnes désormais mortes : ni lues ni
+      // écrites par aucun code applicatif à partir de ce ticket, leur
+      // information vivante a été reprise ci-dessus par `prescription_items`.
     },
   },
 ] satisfies readonly SchemaMigration[];

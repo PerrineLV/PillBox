@@ -4,6 +4,7 @@ import type {
   MedicationForecast,
   StockForecast,
 } from '@/domain/forecast/stock-forecast';
+import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
 
 function coverageRunsOut(
@@ -44,9 +45,27 @@ function treatment(overrides: Partial<Treatment> = {}): Treatment {
     archivedAt: null,
     phases: [],
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
-    controlledDispensing: null,
     ...overrides,
   } satisfies Treatment;
+}
+
+function prescriptionItem(
+  overrides: Partial<PrescriptionItem> = {},
+): PrescriptionItem {
+  return {
+    id: 1,
+    prescriptionId: 1,
+    treatmentId: 1,
+    quantityKind: 'DURATION',
+    durationDays: 28,
+    boxCount: null,
+    dispensingMode: 'FRACTIONAL',
+    periodicityDays: 28,
+    lastDispensedAt: '2026-01-01',
+    theoreticalRenewalDate: '2026-01-29',
+    toleranceDays: null,
+    ...overrides,
+  } satisfies PrescriptionItem;
 }
 
 function forecast(
@@ -189,38 +208,30 @@ describe('buildRenewalList', () => {
     expect(item.theoreticalRenewalDate).toBeNull();
   });
 
-  it('joint la date théorique d’une délivrance encadrée activée, sans changer l’urgence ni le tri', () => {
+  it('joint la date théorique d’une ligne d’ordonnance FRACTIONAL, sans changer l’urgence ni le tri', () => {
     const [item] = buildRenewalList(
       forecast([
         medication({ coverage: coverageRunsOut({ date: '2026-01-05' }) }),
       ]),
-      [
-        treatment({
-          controlledDispensing: {
-            enabled: true,
-            periodicityDays: 28,
-            lastDispensedAt: '2026-01-01',
-            theoreticalRenewalDate: '2026-01-29',
-          },
-        }),
-      ],
+      [treatment()],
+      [prescriptionItem()],
     );
 
     expect(item.theoreticalRenewalDate).toBe('2026-01-29');
     expect(item.urgency).toBe('RUNS_OUT_SOON');
   });
 
-  it('ignore la date théorique d’un traitement dont l’indicateur est décoché', () => {
+  it('ignore la date théorique d’une ligne en mode FULL', () => {
     const [item] = buildRenewalList(
       forecast([medication({ coverage: coverageRunsOut() })]),
+      [treatment()],
       [
-        treatment({
-          controlledDispensing: {
-            enabled: false,
-            periodicityDays: 28,
-            lastDispensedAt: '2026-01-01',
-            theoreticalRenewalDate: '2026-01-29',
-          },
+        prescriptionItem({
+          dispensingMode: 'FULL',
+          periodicityDays: null,
+          lastDispensedAt: null,
+          theoreticalRenewalDate: null,
+          toleranceDays: null,
         }),
       ],
     );
@@ -228,20 +239,11 @@ describe('buildRenewalList', () => {
     expect(item.theoreticalRenewalDate).toBeNull();
   });
 
-  it('ignore un traitement sans rapport avec un autre CIS', () => {
+  it('ignore une ligne d’ordonnance sans rapport avec un autre CIS', () => {
     const [item] = buildRenewalList(
       forecast([medication({ coverage: coverageRunsOut() })]),
-      [
-        treatment({
-          specialtyCis: 'autre-cis',
-          controlledDispensing: {
-            enabled: true,
-            periodicityDays: 28,
-            lastDispensedAt: '2026-01-01',
-            theoreticalRenewalDate: '2026-01-29',
-          },
-        }),
-      ],
+      [treatment({ id: 2, specialtyCis: 'autre-cis' })],
+      [prescriptionItem({ treatmentId: 2 })],
     );
 
     expect(item.theoreticalRenewalDate).toBeNull();

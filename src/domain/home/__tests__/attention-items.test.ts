@@ -39,7 +39,6 @@ function treatment(id: number, overrides: Partial<Treatment> = {}): Treatment {
     archivedAt: null,
     phases: [scheduledPhase(id * 10)],
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
-    controlledDispensing: null,
     ...overrides,
   };
 }

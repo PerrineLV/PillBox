@@ -2,6 +2,7 @@ import type {
   MedicationForecast,
   StockForecast,
 } from '@/domain/forecast/stock-forecast';
+import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
 
 /**
@@ -44,16 +45,21 @@ const URGENCY_ORDER: Record<RenewalUrgency, number> = {
 /**
  * Construit la liste des médicaments à renouveler à partir de la seule
  * prévision de stock, classés par urgence puis, à urgence égale, par
- * proximité de rupture ou par quantité manquante. `treatments` ne sert qu'à
- * joindre, à titre indicatif, la date de renouvellement théorique d'une
- * délivrance encadrée (ticket 30) : elle n'intervient jamais dans le calcul
- * de l'urgence ni dans le tri.
+ * proximité de rupture ou par quantité manquante. `treatments` et
+ * `prescriptionItems` ne servent qu'à joindre, à titre indicatif, la date de
+ * renouvellement théorique d'une ligne d'ordonnance en mode `FRACTIONAL`
+ * (ticket 45) : elles n'interviennent jamais dans le calcul de l'urgence ni
+ * dans le tri.
  */
 export function buildRenewalList(
   forecast: StockForecast,
   treatments: readonly Treatment[] = [],
+  prescriptionItems: readonly PrescriptionItem[] = [],
 ): readonly RenewalItem[] {
-  const theoreticalRenewalDates = buildTheoreticalRenewalDateIndex(treatments);
+  const theoreticalRenewalDates = buildTheoreticalRenewalDateIndex(
+    treatments,
+    prescriptionItems,
+  );
   return forecast.medications
     .map((medication) =>
       classify(medication, forecast.endDate, theoreticalRenewalDates),
@@ -65,23 +71,30 @@ export function buildRenewalList(
 
 /**
  * Une spécialité n'a normalement qu'un traitement actif : en cas d'homonymie
- * inattendue, la première date de renouvellement théorique activée trouvée
- * est retenue, sans en privilégier une autre — purement informatif.
+ * inattendue ou de plusieurs lignes d'ordonnance FRACTIONAL pour un même
+ * traitement (historique, ticket 45), la première rencontrée est retenue —
+ * `prescriptionItems` est attendu trié de la plus récemment émise à la plus
+ * ancienne (voir `listPrescriptionItems`) — sans en privilégier une autre :
+ * purement informatif.
  */
 function buildTheoreticalRenewalDateIndex(
   treatments: readonly Treatment[],
+  prescriptionItems: readonly PrescriptionItem[],
 ): ReadonlyMap<string, string> {
+  const specialtyCisByTreatmentId = new Map<number, string>();
+  for (const treatment of treatments)
+    specialtyCisByTreatmentId.set(treatment.id, treatment.specialtyCis);
+
   const index = new Map<string, string>();
-  for (const treatment of treatments) {
-    const info = treatment.controlledDispensing;
+  for (const item of prescriptionItems) {
     if (
-      info === null ||
-      !info.enabled ||
-      info.theoreticalRenewalDate === null ||
-      index.has(treatment.specialtyCis)
+      item.dispensingMode !== 'FRACTIONAL' ||
+      item.theoreticalRenewalDate === null
     )
       continue;
-    index.set(treatment.specialtyCis, info.theoreticalRenewalDate);
+    const specialtyCis = specialtyCisByTreatmentId.get(item.treatmentId);
+    if (specialtyCis === undefined || index.has(specialtyCis)) continue;
+    index.set(specialtyCis, item.theoreticalRenewalDate);
   }
   return index;
 }

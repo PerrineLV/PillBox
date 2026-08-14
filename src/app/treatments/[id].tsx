@@ -112,9 +112,8 @@ export default function EditTreatmentScreen() {
       ) : null}
       {treatment ? (
         // Une seule connexion partagée vers medication-reference.db pour
-        // cette section : TreatmentForm (délivrance encadrée, ticket 30) et
-        // GenericGroupSection ont chacun besoin du référentiel, et deux
-        // `SQLiteProvider` distincts avec `forceOverwrite` sur le même
+        // cette section : GenericGroupSection a besoin du référentiel, et
+        // deux `SQLiteProvider` distincts avec `forceOverwrite` sur le même
         // fichier entrent en course et font planter l'import.
         <SQLiteProvider
           databaseName="medication-reference.db"

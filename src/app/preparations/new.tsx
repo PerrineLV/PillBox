@@ -48,6 +48,7 @@ import {
   type PreparationSnapshot,
   type PreparationWeekChoice,
 } from '@/domain/preparations/preparation';
+import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
 import { type Treatment } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
@@ -63,6 +64,7 @@ import {
   savePreparationProgress,
   type SavedPreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
+import { listPrescriptionItems } from '@/infrastructure/prescriptions/prescription-repository';
 import { schedulePendingCompletionReminderFor } from '@/infrastructure/reminders/pending-completion-reminder-scheduler';
 import {
   confirmGenericEquivalence,
@@ -120,6 +122,9 @@ function NewPreparationScreenContent({
   const [preparationId, setPreparationId] = useState<number | null>(null);
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
   const [treatments, setTreatments] = useState<Treatment[]>([]);
+  const [prescriptionItems, setPrescriptionItems] = useState<
+    PrescriptionItem[]
+  >([]);
   const [weeks, setWeeks] = useState<KnownPreparation[]>([]);
   const [choice, setChoice] = useState<PreparationWeekChoice>('CURRENT');
   const [progress, setProgress] = useState<SavedPreparationProgress[]>([]);
@@ -159,24 +164,35 @@ function NewPreparationScreenContent({
       listMedicationBoxes(personalDatabase),
       listPreparationWeeks(personalDatabase),
       listTreatments(personalDatabase),
+      listPrescriptionItems(personalDatabase),
     ])
-      .then(([saved, inventory, knownWeeks, allTreatments]) => {
-        if (!active) return;
-        setBoxes(inventory);
-        setWeeks(knownWeeks);
-        setTreatments(allTreatments);
-        if (saved) {
-          setSnapshot(saved.snapshot);
-          setPreparationId(saved.id);
-          setProgress([...saved.progress]);
-          return;
-        }
-        const available = options.find(
-          (option) =>
-            preparationWeekState(option.startDate, knownWeeks) === 'AVAILABLE',
-        );
-        setChoice(available?.choice ?? 'CURRENT');
-      })
+      .then(
+        ([
+          saved,
+          inventory,
+          knownWeeks,
+          allTreatments,
+          allPrescriptionItems,
+        ]) => {
+          if (!active) return;
+          setBoxes(inventory);
+          setWeeks(knownWeeks);
+          setTreatments(allTreatments);
+          setPrescriptionItems(allPrescriptionItems);
+          if (saved) {
+            setSnapshot(saved.snapshot);
+            setPreparationId(saved.id);
+            setProgress([...saved.progress]);
+            return;
+          }
+          const available = options.find(
+            (option) =>
+              preparationWeekState(option.startDate, knownWeeks) ===
+              'AVAILABLE',
+          );
+          setChoice(available?.choice ?? 'CURRENT');
+        },
+      )
       .catch((reason: unknown) => {
         if (active)
           setError(message(reason, 'Chargement de la préparation impossible.'));
@@ -190,19 +206,51 @@ function NewPreparationScreenContent({
   }, [personalDatabase, options]);
 
   /**
-   * CIS des traitements dont l'indicateur de délivrance encadrée est actif
-   * (ticket 30) : seuls eux peuvent être laissés en attente de complément
+   * CIS des traitements couverts par au moins une ligne d'ordonnance en mode
+   * FRACTIONAL (ticket 45, anciennement `controlledDispensing` sur
+   * Treatment) : seuls eux peuvent être laissés en attente de complément
    * (ticket 30b), jamais un traitement sans ce dispositif.
    */
+  const fractionalTreatmentIds = useMemo(
+    () =>
+      new Set(
+        prescriptionItems
+          .filter((item) => item.dispensingMode === 'FRACTIONAL')
+          .map((item) => item.treatmentId),
+      ),
+    [prescriptionItems],
+  );
   const controlledDispensingActiveCis = useMemo(
     () =>
       new Set(
         treatments
-          .filter((treatment) => treatment.controlledDispensing?.enabled)
+          .filter((treatment) => fractionalTreatmentIds.has(treatment.id))
           .map((treatment) => treatment.specialtyCis),
       ),
-    [treatments],
+    [treatments, fractionalTreatmentIds],
   );
+  /**
+   * Date théorique de renouvellement à joindre lors du passage en attente de
+   * complément (ticket 30b) : la ligne FRACTIONAL la plus récemment émise
+   * pour le traitement, cohérent avec `listPrescriptionItems` et la même
+   * jointure côté `preparation-repository.ts`.
+   */
+  const theoreticalRenewalDateBySpecialtyCis = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of prescriptionItems) {
+      if (
+        item.dispensingMode !== 'FRACTIONAL' ||
+        item.theoreticalRenewalDate === null
+      )
+        continue;
+      const treatment = treatments.find(
+        (entry) => entry.id === item.treatmentId,
+      );
+      if (!treatment || map.has(treatment.specialtyCis)) continue;
+      map.set(treatment.specialtyCis, item.theoreticalRenewalDate);
+    }
+    return map;
+  }, [treatments, prescriptionItems]);
 
   const current = useMemo<CurrentRequirement | null>(() => {
     if (!snapshot) return null;
@@ -648,16 +696,11 @@ function NewPreparationScreenContent({
       // distinct du rappel hebdomadaire de préparation et des rappels
       // quotidiens de prise : jamais fondu avec eux.
       for (const specialtyCis of pendingSpecialtyCis) {
-        const treatment = treatments.find(
-          (item) =>
-            item.specialtyCis === specialtyCis &&
-            item.controlledDispensing?.enabled,
-        );
         await schedulePendingCompletionReminderFor(
           personalDatabase,
           preparationId,
           specialtyCis,
-          treatment?.controlledDispensing?.theoreticalRenewalDate ?? null,
+          theoreticalRenewalDateBySpecialtyCis.get(specialtyCis) ?? null,
           referenceDate,
         );
       }

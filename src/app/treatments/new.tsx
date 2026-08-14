@@ -80,7 +80,6 @@ export default function NewTreatmentScreen() {
               maxQuantityPerDayHalfUnits: null,
               minIntervalHours: null,
             },
-            controlledDispensing: null,
           }}
           submitLabel="Créer le traitement"
           onSubmit={async (draft) => {
@@ -89,8 +88,7 @@ export default function NewTreatmentScreen() {
           }}
         />
       ) : (
-        // Une seule connexion partagée vers medication-reference.db pour
-        // TreatmentForm (section délivrance encadrée, ticket 30) et la
+        // Connexion partagée vers medication-reference.db pour la
         // confirmation d'équivalence générique après création (ticket 29) :
         // deux `SQLiteProvider` distincts avec `forceOverwrite` sur le même
         // fichier entrent en course et font planter l'import.
@@ -117,7 +115,6 @@ export default function NewTreatmentScreen() {
                 maxQuantityPerDayHalfUnits: null,
                 minIntervalHours: null,
               },
-              controlledDispensing: null,
             }}
             submitLabel="Créer le traitement"
             onSubmit={async (draft) => {
