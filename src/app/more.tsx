@@ -13,12 +13,14 @@ import {
 } from '@/ui';
 
 type MenuRoute =
+  | '/prescriptions'
   | '/preparations/history'
   | '/intakes/history'
   | '/history'
   | '/statistics'
   | '/settings';
-type IconName = 'calendar' | 'check' | 'timeline' | 'chart' | 'settings';
+type IconName =
+  'calendar' | 'check' | 'timeline' | 'chart' | 'settings' | 'document';
 
 const ITEMS: readonly {
   href: MenuRoute;
@@ -26,6 +28,12 @@ const ITEMS: readonly {
   title: string;
   detail: string;
 }[] = [
+  {
+    href: '/prescriptions',
+    icon: 'document',
+    title: 'Ordonnances',
+    detail: 'Créer, consulter et renouveler vos ordonnances',
+  },
   {
     href: '/preparations/history',
     icon: 'calendar',
@@ -139,6 +147,20 @@ function MenuCard({
 }
 
 function LineIcon({ kind }: { kind: IconName }) {
+  if (kind === 'document')
+    return (
+      <View style={styles.documentIcon}>
+        {[0, 1, 2].map((line) => (
+          <View
+            key={line}
+            style={[
+              styles.documentLine,
+              line === 2 && styles.documentLineShort,
+            ]}
+          />
+        ))}
+      </View>
+    );
   if (kind === 'timeline')
     return (
       <View style={styles.timelineIcon}>
@@ -287,6 +309,18 @@ const styles = StyleSheet.create({
   },
   calendarRingLeft: { left: 5 },
   calendarRingRight: { right: 5 },
+  documentIcon: {
+    borderColor: colors.brand,
+    borderRadius: 3,
+    borderWidth: 2,
+    gap: 3,
+    height: 22,
+    justifyContent: 'center',
+    padding: 4,
+    width: 18,
+  },
+  documentLine: { backgroundColor: colors.brand, height: 2 },
+  documentLineShort: { width: '60%' },
   checkIcon: {
     borderColor: colors.brand,
     borderRadius: 12,

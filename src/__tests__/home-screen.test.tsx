@@ -97,6 +97,9 @@ describe('HomeScreen', () => {
           ruptureDate: null,
           ruptureCause: null,
           theoreticalRenewalDate: null,
+          theoreticalRenewalWindow: null,
+          runsOutBeforeRenewalWindow: false,
+          usableBoxCount: null,
         },
       },
       {

@@ -1,6 +1,6 @@
 import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
-import { Link, Stack } from 'expo-router';
+import { Link, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 
@@ -22,9 +22,18 @@ import {
 
 export default function MedicationSearchScreen() {
   return (
+    // `useSuspense` volontairement omis : son mode s'appuie sur un cache
+    // global partagé entre tous les `SQLiteProvider` du même nom de base,
+    // quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
+    // `medication-reference.db` en mode suspense ferme alors cette connexion
+    // pendant qu'elle est encore utilisée ici (constaté : crash « unable to
+    // close due to unfinalized statements »).
     <SQLiteProvider
       databaseName="medication-reference.db"
-      assetSource={{ assetId: medicationReferenceAsset, forceOverwrite: true }}
+      assetSource={{
+        assetId: medicationReferenceAsset,
+        forceOverwrite: true,
+      }}
       options={{ useNewConnection: true }}
     >
       <MedicationSearch />
@@ -34,6 +43,13 @@ export default function MedicationSearchScreen() {
 
 function MedicationSearch() {
   const database = useSQLiteContext();
+  /**
+   * Présent lorsque la recherche est atteinte depuis la saisie d'une ligne
+   * d'ordonnance (ticket 46) : transmis à `/treatments/new` pour qu'il
+   * revienne vers cet écran (`router.dismissTo`) une fois le traitement créé,
+   * au lieu d'aller vers la liste des traitements.
+   */
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MedicationSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -96,13 +112,21 @@ function MedicationSearch() {
             />
           ) : null
         }
-        renderItem={({ item }) => <MedicationResult result={item} />}
+        renderItem={({ item }) => (
+          <MedicationResult result={item} returnTo={returnTo} />
+        )}
       />
     </View>
   );
 }
 
-function MedicationResult({ result }: { result: MedicationSearchResult }) {
+function MedicationResult({
+  result,
+  returnTo,
+}: {
+  result: MedicationSearchResult;
+  returnTo?: string;
+}) {
   return (
     <Card style={styles.result}>
       <Text style={styles.name}>{result.name}</Text>
@@ -117,6 +141,7 @@ function MedicationResult({ result }: { result: MedicationSearchResult }) {
             cis: result.cis,
             name: result.name,
             form: result.pharmaceuticalForm ?? '',
+            ...(returnTo ? { returnTo } : {}),
           },
         }}
         style={styles.createTreatment}

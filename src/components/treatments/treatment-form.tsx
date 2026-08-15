@@ -10,14 +10,12 @@ import {
   View,
 } from 'react-native';
 
-import { ControlledDispensingField } from '@/components/medications/controlled-dispensing-field';
 import { isTreatmentWithoutStock } from '@/domain/inventory/box-attachment';
 import {
   INTAKE_SLOTS,
   assertValidTreatmentPhases,
   formatHalfUnits,
   isLegacyTreatmentPhase,
-  type ControlledDispensingInfo,
   type IntakeSlot,
   type ScheduledTreatmentPhase,
   type TreatmentDraft,
@@ -48,9 +46,10 @@ import { DateField } from './date-field';
 type Props = {
   /**
    * Reçue en prop plutôt que lue via `useSQLiteContext()` : cet écran ouvre
-   * aussi une connexion dédiée à `medication-reference.db` (pour la section
-   * délivrance encadrée, ticket 30) et deux `SQLiteProvider` imbriqués
-   * rendraient ambigu le contexte SQLite actif pour ce composant.
+   * aussi une connexion dédiée à `medication-reference.db` (pour la
+   * correspondance générique après création, ticket 29) et deux
+   * `SQLiteProvider` imbriqués rendraient ambigu le contexte SQLite actif
+   * pour ce composant.
    */
   personalDatabase: SQLiteDatabase;
   initialValue: TreatmentDraft;
@@ -86,10 +85,6 @@ export function TreatmentForm({
     initialPhases(initialValue.phases),
   );
   const [included, setIncluded] = useState(initialValue.includedInPillbox);
-  const [controlledDispensing, setControlledDispensing] =
-    useState<ControlledDispensingInfo | null>(
-      initialValue.controlledDispensing,
-    );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [withoutStock, setWithoutStock] = useState<boolean | null>(null);
@@ -148,7 +143,6 @@ export function TreatmentForm({
         ...initialValue,
         includedInPillbox: included,
         phases: orderedPhases,
-        controlledDispensing,
       });
     } catch (reason: unknown) {
       setError(
@@ -176,18 +170,6 @@ export function TreatmentForm({
         La posologie est saisie par vous. Elle n’est jamais déduite du
         médicament.
       </Message>
-      {/*
-        Suppose que la connexion medication-reference.db est déjà fournie par
-        un SQLiteProvider ancêtre, partagé avec le reste de l'écran (voir
-        treatments/new.tsx et treatments/[id].tsx) : ce composant n'ouvre pas
-        sa propre connexion pour éviter deux `forceOverwrite` en parallèle
-        sur le même fichier.
-      */}
-      <ControlledDispensingField
-        specialtyCis={initialValue.specialtyCis}
-        value={controlledDispensing}
-        onChange={setControlledDispensing}
-      />
       {withoutStock && included ? (
         <>
           <Message tone="warning" title="Aucune boîte en stock">

@@ -13,9 +13,11 @@ import {
   usableQuantity,
   type MedicationBox,
 } from '@/domain/inventory/inventory';
+import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { listPreparationWeeks } from '@/infrastructure/preparations/preparation-repository';
+import { listPrescriptionItems } from '@/infrastructure/prescriptions/prescription-repository';
 import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import { buildInventoryAlerts } from '@/domain/alerts/inventory-alerts';
@@ -54,6 +56,9 @@ export default function InventoryScreen() {
     new Set(),
   );
   const [treatments, setTreatments] = useState<Treatment[]>([]);
+  const [prescriptionItems, setPrescriptionItems] = useState<
+    PrescriptionItem[]
+  >([]);
 
   // Une carte d'attention de l'accueil peut ouvrir directement l'onglet
   // « À renouveler » : le paramètre n'est appliqué qu'aux valeurs connues.
@@ -73,35 +78,45 @@ export default function InventoryScreen() {
         listTreatments(database),
         listPreparationWeeks(database),
         listAllGenericEquivalenceConfirmations(database),
+        listPrescriptionItems(database),
       ])
-        .then(([items, treatments, preparations, equivalenceConfirmations]) => {
-          if (active) {
-            setBoxes(items);
-            setTreatments(treatments);
-            const today = todayIso();
-            const equivalences = equivalenceConfirmations.map(
-              (confirmation) => ({
-                treatmentId: confirmation.treatmentId,
-                cis: confirmation.cis,
-              }),
-            );
-            const alerts = buildInventoryAlerts(treatments, items, today, {
-              equivalences,
-            });
-            setExpiringBoxIds(
-              new Set(alerts.expirations.map((item) => item.boxId)),
-            );
-            setForecast(
-              buildStockForecast(treatments, items, today, preparations, {
+        .then(
+          ([
+            items,
+            treatments,
+            preparations,
+            equivalenceConfirmations,
+            fetchedPrescriptionItems,
+          ]) => {
+            if (active) {
+              setBoxes(items);
+              setTreatments(treatments);
+              setPrescriptionItems(fetchedPrescriptionItems);
+              const today = todayIso();
+              const equivalences = equivalenceConfirmations.map(
+                (confirmation) => ({
+                  treatmentId: confirmation.treatmentId,
+                  cis: confirmation.cis,
+                }),
+              );
+              const alerts = buildInventoryAlerts(treatments, items, today, {
                 equivalences,
-              }),
-            );
-            setAttachedCis(
-              buildAttachedSpecialtyCisSet(treatments, equivalences),
-            );
-            setError(null);
-          }
-        })
+              });
+              setExpiringBoxIds(
+                new Set(alerts.expirations.map((item) => item.boxId)),
+              );
+              setForecast(
+                buildStockForecast(treatments, items, today, preparations, {
+                  equivalences,
+                }),
+              );
+              setAttachedCis(
+                buildAttachedSpecialtyCisSet(treatments, equivalences),
+              );
+              setError(null);
+            }
+          },
+        )
         .catch((reason: unknown) => {
           if (active)
             setError(
@@ -136,11 +151,20 @@ export default function InventoryScreen() {
     [boxes, expiringBoxIds, filter],
   );
   const groups = useMemo(() => groupBoxes(filteredBoxes), [filteredBoxes]);
-  const renewalList = useMemo(
-    () => (forecast ? buildRenewalList(forecast, treatments) : []),
-    [forecast, treatments],
-  );
   const today = todayIso();
+  const renewalList = useMemo(
+    () =>
+      forecast
+        ? buildRenewalList(
+            forecast,
+            treatments,
+            prescriptionItems,
+            boxes,
+            today,
+          )
+        : [],
+    [forecast, treatments, prescriptionItems, boxes, today],
+  );
 
   return (
     <ScrollView contentContainerStyle={styles.container}>

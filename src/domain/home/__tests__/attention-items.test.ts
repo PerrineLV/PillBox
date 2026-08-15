@@ -4,6 +4,7 @@ import {
   type AsNeededTreatmentInput,
   type AttentionItemsInput,
   type ExpirationAlertInput,
+  type PrescriptionAttentionInput,
 } from '../attention-items';
 import type { PendingIntakeCount } from '@/domain/intakes/intake-tracking';
 import type { KnownPreparation } from '@/domain/preparations/preparation';
@@ -39,7 +40,6 @@ function treatment(id: number, overrides: Partial<Treatment> = {}): Treatment {
     archivedAt: null,
     phases: [scheduledPhase(id * 10)],
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
-    controlledDispensing: null,
     ...overrides,
   };
 }
@@ -62,6 +62,9 @@ function renewalItem(overrides: Partial<RenewalItem> = {}): RenewalItem {
     ruptureDate: '2026-03-10',
     ruptureCause: 'CONSUMED',
     theoreticalRenewalDate: null,
+    theoreticalRenewalWindow: null,
+    runsOutBeforeRenewalWindow: false,
+    usableBoxCount: null,
     ...overrides,
   };
 }
@@ -75,6 +78,18 @@ function expiration(
     lot: 'LOT-1',
     expirationDate: '2026-03-15',
     remainingQuantity: 3,
+    ...overrides,
+  };
+}
+
+function prescription(
+  overrides: Partial<PrescriptionAttentionInput> = {},
+): PrescriptionAttentionInput {
+  return {
+    id: 1,
+    label: 'Ordo généraliste',
+    status: 'ACTIVE',
+    validUntil: '2026-03-10',
     ...overrides,
   };
 }
@@ -102,6 +117,7 @@ function baseInput(
     renewalItems: [],
     expirations: [],
     asNeededTreatments: [],
+    prescriptions: [],
     ...overrides,
   };
 }
@@ -113,7 +129,7 @@ describe('buildAttentionItems', () => {
     expect(items[0]).toMatchObject({ type: 'PREPARATION', mode: 'START' });
   });
 
-  it('ordonne les catégories par priorité : prochaine prise, préparation, renouvellement, péremption, si besoin', () => {
+  it('ordonne les catégories par priorité : prochaine prise, préparation, renouvellement, ordonnance, péremption, si besoin', () => {
     const asNeeded: AsNeededTreatmentInput = {
       treatmentId: 9,
       specialtyName: 'Gamma',
@@ -129,12 +145,14 @@ describe('buildAttentionItems', () => {
         renewalItems: [renewalItem()],
         expirations: [expiration()],
         asNeededTreatments: [asNeeded],
+        prescriptions: [prescription()],
       }),
     );
     expect(items.map((item) => item.type)).toEqual([
       'NEXT_INTAKE_GROUP',
       'PREPARATION',
       'STOCK_RENEWAL',
+      'PRESCRIPTION_EXPIRY',
       'EXPIRATION',
       'AS_NEEDED_INFO',
     ]);
@@ -314,6 +332,60 @@ describe('buildAttentionItems', () => {
     });
   });
 
+  describe('ordonnance', () => {
+    it('signale une ordonnance active dont la fin de validité approche', () => {
+      const built = buildAttentionItems(
+        baseInput({ prescriptions: [prescription()] }),
+      );
+      const items = built.filter((item) => item.type === 'PRESCRIPTION_EXPIRY');
+      expect(items).toMatchObject([
+        {
+          prescriptionId: 1,
+          label: 'Ordo généraliste',
+          validUntil: '2026-03-10',
+        },
+      ]);
+    });
+
+    it("n'affiche rien tant que la fin de validité est lointaine", () => {
+      const built = buildAttentionItems(
+        baseInput({
+          prescriptions: [prescription({ validUntil: '2026-12-01' })],
+        }),
+      );
+      expect(built.some((item) => item.type === 'PRESCRIPTION_EXPIRY')).toBe(
+        false,
+      );
+    });
+
+    it('ignore une ordonnance EXPIRED ou REPLACED, ou sans fin de validité connue', () => {
+      const built = buildAttentionItems(
+        baseInput({
+          prescriptions: [
+            prescription({ id: 1, status: 'EXPIRED' }),
+            prescription({ id: 2, status: 'REPLACED' }),
+            prescription({ id: 3, validUntil: null }),
+          ],
+        }),
+      );
+      expect(built.some((item) => item.type === 'PRESCRIPTION_EXPIRY')).toBe(
+        false,
+      );
+    });
+
+    it('distingue cette alerte du renouvellement en pharmacie (ticket 47)', () => {
+      const built = buildAttentionItems(
+        baseInput({
+          renewalItems: [renewalItem()],
+          prescriptions: [prescription()],
+        }),
+      );
+      expect(built.map((item) => item.type)).toEqual(
+        expect.arrayContaining(['STOCK_RENEWAL', 'PRESCRIPTION_EXPIRY']),
+      );
+    });
+  });
+
   describe('traitements si besoin', () => {
     it("n'affiche que les traitements avec une limite ou un intervalle renseigné", () => {
       const withLimit: AsNeededTreatmentInput = {
@@ -406,6 +478,15 @@ describe('isAttentionItemActionRequired', () => {
         type: 'EXPIRATION',
         id: 'e',
         ...expiration(),
+      }),
+    ).toBe(true);
+    expect(
+      isAttentionItemActionRequired({
+        type: 'PRESCRIPTION_EXPIRY',
+        id: 'pe',
+        prescriptionId: 1,
+        label: 'Ordo',
+        validUntil: '2026-03-10',
       }),
     ).toBe(true);
   });

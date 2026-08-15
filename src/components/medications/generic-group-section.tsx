@@ -99,9 +99,18 @@ export function GenericGroupSection({ cis }: { cis: string }) {
  */
 export function GenericGroupSectionWithDatabase({ cis }: { cis: string }) {
   return (
+    // `useSuspense` volontairement omis : son mode s'appuie sur un cache
+    // global partagé entre tous les `SQLiteProvider` du même nom de base,
+    // quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
+    // `medication-reference.db` en mode suspense ferme alors cette connexion
+    // pendant qu'elle est encore utilisée ici (constaté : crash « unable to
+    // close due to unfinalized statements »).
     <SQLiteProvider
       databaseName="medication-reference.db"
-      assetSource={{ assetId: medicationReferenceAsset, forceOverwrite: true }}
+      assetSource={{
+        assetId: medicationReferenceAsset,
+        forceOverwrite: true,
+      }}
       options={{ useNewConnection: true }}
     >
       <GenericGroupSection cis={cis} />

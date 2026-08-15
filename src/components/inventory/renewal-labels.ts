@@ -14,6 +14,11 @@ export function renewalUrgencyTone(
 }
 
 export function renewalAvailabilityLabel(item: RenewalItem): string {
+  if (item.usableBoxCount !== null) {
+    return item.usableBoxCount === 0
+      ? 'Plus aucune boîte utilisable en stock.'
+      : `${item.usableBoxCount} boîte${item.usableBoxCount > 1 ? 's' : ''} utilisable(s) en stock.`;
+  }
   const available = formatHalfUnits(item.availableHalfUnits);
   if (item.nextPreparationHalfUnits === 0)
     return `${available} disponible(s), aucune prise prévue la semaine prochaine.`;
@@ -30,13 +35,36 @@ export function renewalRuptureLabel(item: RenewalItem): string | null {
 }
 
 /**
- * Information complémentaire, purement indicative (ticket 30) : n'influence
- * jamais l'urgence affichée ni l'ordre de la liste. `null` en l'absence de
- * délivrance encadrée activée pour ce médicament.
+ * Information complémentaire, purement indicative (tickets 30 puis 47) :
+ * n'influence jamais l'urgence affichée ni l'ordre de la liste. `null` en
+ * l'absence de ligne d'ordonnance FRACTIONAL pour ce médicament. Sans
+ * tolérance (`start === end`, ex. stupéfiants), la date exacte reste
+ * affichée comme avant le ticket 47 ; avec tolérance, la fenêtre complète est
+ * montrée pour ne jamais suggérer qu'un renouvellement est possible avant son
+ * début.
  */
 export function renewalTheoreticalRenewalLabel(
   item: RenewalItem,
 ): string | null {
-  if (item.theoreticalRenewalDate === null) return null;
-  return `Renouvellement théorique (délivrance encadrée) : ${formatLongFrenchCivilDate(item.theoreticalRenewalDate)}.`;
+  if (item.theoreticalRenewalWindow === null) return null;
+  const { start, end } = item.theoreticalRenewalWindow;
+  if (start === end)
+    return `Renouvellement théorique (délivrance encadrée) : ${formatLongFrenchCivilDate(start)}.`;
+  return `Renouvellement possible entre le ${formatLongFrenchCivilDate(start)} et le ${formatLongFrenchCivilDate(end)} (délivrance fractionnée).`;
+}
+
+/**
+ * Alerte dédiée (ticket 47) : la rupture de stock prévue tombe avant le
+ * début de la fenêtre de renouvellement, donc avant qu'une nouvelle
+ * délivrance ne soit possible. `null` sinon.
+ */
+export function renewalRunsOutBeforeWindowLabel(
+  item: RenewalItem,
+): string | null {
+  if (
+    !item.runsOutBeforeRenewalWindow ||
+    item.theoreticalRenewalWindow === null
+  )
+    return null;
+  return `Le stock s’épuise avant de pouvoir renouveler : rupture estimée avant le ${formatLongFrenchCivilDate(item.theoreticalRenewalWindow.start)}.`;
 }
