@@ -4,6 +4,7 @@ import type {
   MedicationForecast,
   StockForecast,
 } from '@/domain/forecast/stock-forecast';
+import type { MedicationBox } from '@/domain/inventory/inventory';
 import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
 
@@ -80,6 +81,24 @@ function forecast(
     medications,
     ...overrides,
   } satisfies StockForecast;
+}
+
+function box(overrides: Partial<MedicationBox> = {}): MedicationBox {
+  return {
+    id: 1,
+    specialtyCis: '60000001',
+    specialtyName: 'Alpha',
+    pharmaceuticalForm: 'comprimé',
+    presentationCip13: '3400000000001',
+    presentationLabel: 'Boîte',
+    lot: 'LOT-A',
+    expirationDate: '2027-01-01',
+    initialQuantity: 1,
+    remainingQuantity: 1,
+    origin: 'SCAN',
+    scanRaw: 'raw',
+    ...overrides,
+  } satisfies MedicationBox;
 }
 
 describe('buildRenewalList', () => {
@@ -247,5 +266,173 @@ describe('buildRenewalList', () => {
     );
 
     expect(item.theoreticalRenewalDate).toBeNull();
+  });
+
+  it('sans tolérance, la fenêtre se réduit à la date théorique exacte (ex. stupéfiants)', () => {
+    const [item] = buildRenewalList(
+      forecast([medication({ coverage: coverageRunsOut() })]),
+      [treatment()],
+      [prescriptionItem({ toleranceDays: null })],
+    );
+
+    expect(item.theoreticalRenewalWindow).toEqual({
+      start: '2026-01-29',
+      end: '2026-01-29',
+    });
+  });
+
+  it('avec une tolérance, la fenêtre encadre la date théorique', () => {
+    const [item] = buildRenewalList(
+      forecast([medication({ coverage: coverageRunsOut() })]),
+      [treatment()],
+      [prescriptionItem({ toleranceDays: 3 })],
+    );
+
+    expect(item.theoreticalRenewalWindow).toEqual({
+      start: '2026-01-26',
+      end: '2026-02-01',
+    });
+  });
+
+  it('signale une rupture prévue avant le début de la fenêtre de renouvellement', () => {
+    const [item] = buildRenewalList(
+      forecast([
+        medication({ coverage: coverageRunsOut({ date: '2026-01-20' }) }),
+      ]),
+      [treatment()],
+      [prescriptionItem({ toleranceDays: 3 })], // fenêtre : 26/01 → 01/02
+    );
+
+    expect(item.runsOutBeforeRenewalWindow).toBe(true);
+  });
+
+  it('ne signale rien quand la rupture tombe dans ou après la fenêtre de renouvellement', () => {
+    const [item] = buildRenewalList(
+      forecast([
+        medication({ coverage: coverageRunsOut({ date: '2026-01-27' }) }),
+      ]),
+      [treatment()],
+      [prescriptionItem({ toleranceDays: 3 })], // fenêtre : 26/01 → 01/02
+    );
+
+    expect(item.runsOutBeforeRenewalWindow).toBe(false);
+  });
+
+  it('classe une ligne BOX_COUNT à sec par le nombre de boîtes, sans passer par la prévision de consommation', () => {
+    const items = buildRenewalList(
+      forecast([]),
+      [treatment()],
+      [
+        prescriptionItem({
+          quantityKind: 'BOX_COUNT',
+          durationDays: null,
+          boxCount: 3,
+          periodicityDays: 90,
+          lastDispensedAt: '2026-01-01',
+          theoreticalRenewalDate: '2026-04-01',
+          toleranceDays: 5,
+        }),
+      ],
+      [],
+      '2026-01-15',
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      specialtyCis: '60000001',
+      urgency: 'RUNS_OUT_SOON',
+      usableBoxCount: 0,
+      availableHalfUnits: 0,
+      nextPreparationHalfUnits: 0,
+      ruptureDate: null,
+    });
+  });
+
+  it('classe une ligne BOX_COUNT en stock faible avec une seule boîte utilisable', () => {
+    const items = buildRenewalList(
+      forecast([]),
+      [treatment()],
+      [
+        prescriptionItem({
+          quantityKind: 'BOX_COUNT',
+          boxCount: 3,
+          durationDays: null,
+        }),
+      ],
+      [box({ specialtyCis: '60000001', expirationDate: '2099-01-01' })],
+      '2026-01-15',
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0].urgency).toBe('LOW_STOCK');
+    expect(items[0].usableBoxCount).toBe(1);
+  });
+
+  it('n’alerte pas une ligne BOX_COUNT avec plus d’une boîte utilisable', () => {
+    const items = buildRenewalList(
+      forecast([]),
+      [treatment()],
+      [
+        prescriptionItem({
+          quantityKind: 'BOX_COUNT',
+          boxCount: 3,
+          durationDays: null,
+        }),
+      ],
+      [
+        box({ id: 1, specialtyCis: '60000001', expirationDate: '2099-01-01' }),
+        box({ id: 2, specialtyCis: '60000001', expirationDate: '2099-01-01' }),
+      ],
+      '2026-01-15',
+    );
+
+    expect(items).toHaveLength(0);
+  });
+
+  it('ignore une boîte périmée dans le décompte BOX_COUNT', () => {
+    const items = buildRenewalList(
+      forecast([]),
+      [treatment()],
+      [
+        prescriptionItem({
+          quantityKind: 'BOX_COUNT',
+          boxCount: 3,
+          durationDays: null,
+        }),
+      ],
+      [box({ specialtyCis: '60000001', expirationDate: '2020-01-01' })],
+      '2026-01-15',
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0].usableBoxCount).toBe(0);
+  });
+
+  it('une ligne BOX_COUNT n’apparaît jamais via la prévision de consommation, même si le CIS y figure aussi', () => {
+    const items = buildRenewalList(
+      forecast([
+        medication({
+          insufficientForNextPreparation: true,
+          missingHalfUnits: 4,
+        }),
+      ]),
+      [treatment()],
+      [
+        prescriptionItem({
+          quantityKind: 'BOX_COUNT',
+          boxCount: 3,
+          durationDays: null,
+        }),
+      ],
+      [
+        box({ id: 1, specialtyCis: '60000001', expirationDate: '2099-01-01' }),
+        box({ id: 2, specialtyCis: '60000001', expirationDate: '2099-01-01' }),
+      ],
+      '2026-01-15',
+    );
+
+    // Ni classé par la prévision (exclu volontairement), ni alerté par le
+    // décompte de boîtes (2 boîtes utilisables, au-dessus du seuil bas).
+    expect(items).toHaveLength(0);
   });
 });

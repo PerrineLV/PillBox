@@ -38,6 +38,9 @@ const RENEWAL: AttentionItem = {
     ruptureDate: '2026-08-15',
     ruptureCause: 'CONSUMED',
     theoreticalRenewalDate: null,
+    theoreticalRenewalWindow: null,
+    runsOutBeforeRenewalWindow: false,
+    usableBoxCount: null,
   },
 };
 

@@ -3,6 +3,7 @@ import {
   computePrescriptionStatus,
   computeTheoreticalRenewalDate,
   suggestedToleranceDays,
+  theoreticalRenewalWindow,
   type Prescription,
 } from '../prescription';
 
@@ -80,6 +81,26 @@ describe('suggestedToleranceDays', () => {
 
   it('suggère une valeur raisonnable pour les autres spécialités', () => {
     expect(suggestedToleranceDays(false)).toBe(3);
+  });
+});
+
+describe('theoreticalRenewalWindow', () => {
+  it('réduit la fenêtre à la date exacte sans tolérance', () => {
+    expect(theoreticalRenewalWindow('2026-01-29', null)).toEqual({
+      start: '2026-01-29',
+      end: '2026-01-29',
+    });
+    expect(theoreticalRenewalWindow('2026-01-29', 0)).toEqual({
+      start: '2026-01-29',
+      end: '2026-01-29',
+    });
+  });
+
+  it('encadre la date théorique de la tolérance donnée', () => {
+    expect(theoreticalRenewalWindow('2026-01-29', 3)).toEqual({
+      start: '2026-01-26',
+      end: '2026-02-01',
+    });
   });
 });
 

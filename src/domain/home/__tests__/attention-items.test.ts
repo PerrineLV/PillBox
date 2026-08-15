@@ -61,6 +61,9 @@ function renewalItem(overrides: Partial<RenewalItem> = {}): RenewalItem {
     ruptureDate: '2026-03-10',
     ruptureCause: 'CONSUMED',
     theoreticalRenewalDate: null,
+    theoreticalRenewalWindow: null,
+    runsOutBeforeRenewalWindow: false,
+    usableBoxCount: null,
     ...overrides,
   };
 }

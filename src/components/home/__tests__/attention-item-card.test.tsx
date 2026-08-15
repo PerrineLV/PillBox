@@ -83,6 +83,9 @@ describe('AttentionItemContent', () => {
         ruptureDate: '2026-08-15',
         ruptureCause: 'CONSUMED',
         theoreticalRenewalDate: null,
+        theoreticalRenewalWindow: null,
+        runsOutBeforeRenewalWindow: false,
+        usableBoxCount: null,
       },
     });
     expect(rendered).toContain('Alpha');

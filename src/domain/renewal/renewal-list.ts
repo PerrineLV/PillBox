@@ -2,8 +2,24 @@ import type {
   MedicationForecast,
   StockForecast,
 } from '@/domain/forecast/stock-forecast';
-import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
+import {
+  usableQuantity,
+  type MedicationBox,
+} from '@/domain/inventory/inventory';
+import {
+  theoreticalRenewalWindow,
+  type PrescriptionItem,
+  type PrescriptionItemQuantityKind,
+  type TheoreticalRenewalWindow,
+} from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
+
+/**
+ * En dessous ou à ce nombre de boîtes utilisables, une ligne FRACTIONAL en
+ * BOX_COUNT (typiquement AS_NEEDED) est signalée : simple seuil informatif,
+ * sans lien avec une règle pharmaceutique.
+ */
+const LOW_BOX_COUNT_THRESHOLD = 1;
 
 /**
  * Ordonnées de la plus urgente à la moins urgente. `RUNS_OUT_SOON` désigne une
@@ -29,11 +45,32 @@ export type RenewalItem = Readonly<{
   ruptureDate: string | null;
   ruptureCause: 'CONSUMED' | 'EXPIRED' | null;
   /**
-   * Renouvellement théorique d'une délivrance encadrée (ticket 30), purement
-   * informatif. `null` en l'absence de traitement concerné : n'influence
-   * jamais l'urgence ni le tri, calculés uniquement depuis le stock réel.
+   * Renouvellement théorique d'une ligne d'ordonnance FRACTIONAL (tickets 30
+   * puis 47), purement informatif. `null` en l'absence de ligne concernée :
+   * n'influence jamais l'urgence ni le tri, calculés uniquement depuis le
+   * stock réel.
    */
   theoreticalRenewalDate: string | null;
+  /**
+   * Fenêtre de délivrance possible autour de `theoreticalRenewalDate`,
+   * tolérance incluse (`start === end` sans tolérance, ex. stupéfiants).
+   * `null` sans date théorique.
+   */
+  theoreticalRenewalWindow: TheoreticalRenewalWindow | null;
+  /**
+   * `true` quand la rupture prévue (`ruptureDate`) tombe avant le début de la
+   * fenêtre de renouvellement : « tu vas être à sec avant de pouvoir
+   * renouveler ». Toujours `false` sans rupture ou sans date théorique.
+   */
+  runsOutBeforeRenewalWindow: boolean;
+  /**
+   * Nombre de boîtes utilisables en stock, uniquement pour une ligne
+   * FRACTIONAL en BOX_COUNT (typiquement AS_NEEDED) : la notion de
+   * consommation régulière de `buildStockForecast` n'a pas de sens dans ce
+   * cas. `null` pour un médicament classé depuis la prévision de stock
+   * habituelle.
+   */
+  usableBoxCount: number | null;
 }>;
 
 const URGENCY_ORDER: Record<RenewalUrgency, number> = {
@@ -43,31 +80,60 @@ const URGENCY_ORDER: Record<RenewalUrgency, number> = {
 };
 
 /**
- * Construit la liste des médicaments à renouveler à partir de la seule
- * prévision de stock, classés par urgence puis, à urgence égale, par
- * proximité de rupture ou par quantité manquante. `treatments` et
- * `prescriptionItems` ne servent qu'à joindre, à titre indicatif, la date de
- * renouvellement théorique d'une ligne d'ordonnance en mode `FRACTIONAL`
- * (ticket 45) : elles n'interviennent jamais dans le calcul de l'urgence ni
- * dans le tri.
+ * Construit la liste des médicaments à renouveler, classés par urgence puis,
+ * à urgence égale, par proximité de rupture ou par quantité manquante.
+ * `treatments` et `prescriptionItems` servent à joindre, à titre indicatif,
+ * le renouvellement théorique d'une ligne d'ordonnance en mode `FRACTIONAL`
+ * (tickets 45 et 47) : ils n'interviennent jamais dans le calcul de
+ * l'urgence ni dans le tri, qui restent basés exclusivement sur le stock
+ * réel — la prévision de consommation (`forecast`) pour les lignes en
+ * `DURATION`, le nombre de boîtes utilisables (`boxes`) pour les lignes en
+ * `BOX_COUNT`, typiquement des traitements `AS_NEEDED` que `buildStockForecast`
+ * exclut faute de prise future régulière. `today` ne sert qu'à cette
+ * dernière vérification ; par défaut la date de départ de la prévision.
  */
 export function buildRenewalList(
   forecast: StockForecast,
   treatments: readonly Treatment[] = [],
   prescriptionItems: readonly PrescriptionItem[] = [],
+  boxes: readonly MedicationBox[] = [],
+  today: string = forecast.startDate,
 ): readonly RenewalItem[] {
-  const theoreticalRenewalDates = buildTheoreticalRenewalDateIndex(
+  const renewalInfo = indexPrescriptionRenewalInfo(
     treatments,
     prescriptionItems,
   );
-  return forecast.medications
-    .map((medication) =>
-      classify(medication, forecast.endDate, theoreticalRenewalDates),
+  const boxCountCis = new Set(
+    [...renewalInfo.entries()]
+      .filter(([, info]) => info.quantityKind === 'BOX_COUNT')
+      .map(([specialtyCis]) => specialtyCis),
+  );
+
+  const consumptionItems = forecast.medications
+    .filter((medication) => !boxCountCis.has(medication.specialtyCis))
+    .map((medication) => classify(medication, forecast.endDate, renewalInfo))
+    .filter((item): item is RenewalItem => item !== null);
+
+  const boxCountItems = [...boxCountCis]
+    .map((specialtyCis) =>
+      classifyByBoxCount(
+        specialtyCis,
+        renewalInfo.get(specialtyCis)!,
+        boxes,
+        today,
+      ),
     )
-    .filter((item): item is RenewalItem => item !== null)
-    .slice()
-    .sort(compareItems);
+    .filter((item): item is RenewalItem => item !== null);
+
+  return [...consumptionItems, ...boxCountItems].sort(compareItems);
 }
+
+type PrescriptionRenewalInfo = Readonly<{
+  specialtyName: string;
+  quantityKind: PrescriptionItemQuantityKind;
+  theoreticalRenewalDate: string | null;
+  toleranceDays: number | null;
+}>;
 
 /**
  * Une spécialité n'a normalement qu'un traitement actif : en cas d'homonymie
@@ -77,24 +143,25 @@ export function buildRenewalList(
  * ancienne (voir `listPrescriptionItems`) — sans en privilégier une autre :
  * purement informatif.
  */
-function buildTheoreticalRenewalDateIndex(
+function indexPrescriptionRenewalInfo(
   treatments: readonly Treatment[],
   prescriptionItems: readonly PrescriptionItem[],
-): ReadonlyMap<string, string> {
-  const specialtyCisByTreatmentId = new Map<number, string>();
-  for (const treatment of treatments)
-    specialtyCisByTreatmentId.set(treatment.id, treatment.specialtyCis);
+): ReadonlyMap<string, PrescriptionRenewalInfo> {
+  const treatmentById = new Map(
+    treatments.map((treatment) => [treatment.id, treatment]),
+  );
 
-  const index = new Map<string, string>();
+  const index = new Map<string, PrescriptionRenewalInfo>();
   for (const item of prescriptionItems) {
-    if (
-      item.dispensingMode !== 'FRACTIONAL' ||
-      item.theoreticalRenewalDate === null
-    )
-      continue;
-    const specialtyCis = specialtyCisByTreatmentId.get(item.treatmentId);
-    if (specialtyCis === undefined || index.has(specialtyCis)) continue;
-    index.set(specialtyCis, item.theoreticalRenewalDate);
+    if (item.dispensingMode !== 'FRACTIONAL') continue;
+    const treatment = treatmentById.get(item.treatmentId);
+    if (!treatment || index.has(treatment.specialtyCis)) continue;
+    index.set(treatment.specialtyCis, {
+      specialtyName: treatment.specialtyName,
+      quantityKind: item.quantityKind,
+      theoreticalRenewalDate: item.theoreticalRenewalDate,
+      toleranceDays: item.toleranceDays,
+    });
   }
   return index;
 }
@@ -102,13 +169,13 @@ function buildTheoreticalRenewalDateIndex(
 function classify(
   medication: MedicationForecast,
   nextPreparationEndDate: string,
-  theoreticalRenewalDates: ReadonlyMap<string, string>,
+  renewalInfo: ReadonlyMap<string, PrescriptionRenewalInfo>,
 ): RenewalItem | null {
   if (medication.insufficientForNextPreparation) {
     return toRenewalItem(
       medication,
       'INSUFFICIENT_FOR_NEXT_PREPARATION',
-      theoreticalRenewalDates,
+      renewalInfo,
     );
   }
   if (medication.coverage.status === 'RUNS_OUT') {
@@ -116,7 +183,7 @@ function classify(
       medication.coverage.date <= nextPreparationEndDate
         ? 'RUNS_OUT_SOON'
         : 'LOW_STOCK';
-    return toRenewalItem(medication, urgency, theoreticalRenewalDates);
+    return toRenewalItem(medication, urgency, renewalInfo);
   }
   return null;
 }
@@ -124,9 +191,19 @@ function classify(
 function toRenewalItem(
   medication: MedicationForecast,
   urgency: RenewalUrgency,
-  theoreticalRenewalDates: ReadonlyMap<string, string>,
+  renewalInfo: ReadonlyMap<string, PrescriptionRenewalInfo>,
 ): RenewalItem {
   const coverage = medication.coverage;
+  const ruptureDate = coverage.status === 'RUNS_OUT' ? coverage.date : null;
+  const info = renewalInfo.get(medication.specialtyCis) ?? null;
+  const theoreticalRenewalDate = info?.theoreticalRenewalDate ?? null;
+  const window =
+    theoreticalRenewalDate === null
+      ? null
+      : theoreticalRenewalWindow(
+          theoreticalRenewalDate,
+          info?.toleranceDays ?? null,
+        );
   return Object.freeze({
     specialtyCis: medication.specialtyCis,
     specialtyName: medication.specialtyName,
@@ -134,10 +211,52 @@ function toRenewalItem(
     availableHalfUnits: medication.availableHalfUnits,
     nextPreparationHalfUnits: medication.nextPreparationHalfUnits,
     missingHalfUnits: medication.missingHalfUnits,
-    ruptureDate: coverage.status === 'RUNS_OUT' ? coverage.date : null,
+    ruptureDate,
     ruptureCause: coverage.status === 'RUNS_OUT' ? coverage.cause : null,
-    theoreticalRenewalDate:
-      theoreticalRenewalDates.get(medication.specialtyCis) ?? null,
+    theoreticalRenewalDate,
+    theoreticalRenewalWindow: window,
+    runsOutBeforeRenewalWindow:
+      window !== null && ruptureDate !== null && ruptureDate < window.start,
+    usableBoxCount: null,
+  });
+}
+
+/**
+ * Cas `BOX_COUNT` (ticket 47) : pas de prévision de consommation régulière
+ * pour un traitement typiquement `AS_NEEDED`, donc pas de rupture datée ni de
+ * vérification croisée avec la fenêtre de renouvellement — seul le nombre de
+ * boîtes réellement utilisables en stock déclenche l'alerte.
+ */
+function classifyByBoxCount(
+  specialtyCis: string,
+  info: PrescriptionRenewalInfo,
+  boxes: readonly MedicationBox[],
+  today: string,
+): RenewalItem | null {
+  const usableBoxCount = boxes.filter(
+    (box) =>
+      box.specialtyCis === specialtyCis && usableQuantity(box, today) > 0,
+  ).length;
+  if (usableBoxCount > LOW_BOX_COUNT_THRESHOLD) return null;
+
+  const theoreticalRenewalDate = info.theoreticalRenewalDate;
+  const window =
+    theoreticalRenewalDate === null
+      ? null
+      : theoreticalRenewalWindow(theoreticalRenewalDate, info.toleranceDays);
+  return Object.freeze({
+    specialtyCis,
+    specialtyName: info.specialtyName,
+    urgency: usableBoxCount === 0 ? 'RUNS_OUT_SOON' : 'LOW_STOCK',
+    availableHalfUnits: 0,
+    nextPreparationHalfUnits: 0,
+    missingHalfUnits: 0,
+    ruptureDate: null,
+    ruptureCause: null,
+    theoreticalRenewalDate,
+    theoreticalRenewalWindow: window,
+    runsOutBeforeRenewalWindow: false,
+    usableBoxCount,
   });
 }
 

@@ -116,7 +116,7 @@ export function PrescriptionForm({
     <View style={styles.form}>
       <AppField
         label="Intitulé"
-        placeholder="Ex. « ordo psychiatre », « ordo généraliste »"
+        placeholder="Ex. « ordo généraliste »"
         value={label}
         onChangeText={setLabel}
       />

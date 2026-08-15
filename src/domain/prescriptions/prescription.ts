@@ -1,3 +1,5 @@
+import { addCivilDays } from '@/domain/shared/dates';
+
 /**
  * Une ordonnance (ticket 45) : période de validité purement informative,
  * jamais bloquante. `status` n'est pas stocké : il est recalculé par le
@@ -117,6 +119,26 @@ export function computeTheoreticalRenewalDate(
   const date = new Date(`${lastDispensedAt}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + periodicityDays);
   return date.toISOString().slice(0, 10);
+}
+
+export type TheoreticalRenewalWindow = Readonly<{ start: string; end: string }>;
+
+/**
+ * Fenêtre de délivrance possible autour d'une date théorique de
+ * renouvellement (ticket 47). Sans tolérance (stupéfiants, `toleranceDays`
+ * nul), la fenêtre se réduit à la date théorique elle-même : comportement
+ * exact inchangé depuis le ticket 30.
+ */
+export function theoreticalRenewalWindow(
+  theoreticalRenewalDate: string,
+  toleranceDays: number | null,
+): TheoreticalRenewalWindow {
+  const tolerance =
+    toleranceDays !== null && toleranceDays > 0 ? toleranceDays : 0;
+  return Object.freeze({
+    start: addCivilDays(theoreticalRenewalDate, -tolerance),
+    end: addCivilDays(theoreticalRenewalDate, tolerance),
+  });
 }
 
 /**

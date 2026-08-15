@@ -151,12 +151,20 @@ export default function InventoryScreen() {
     [boxes, expiringBoxIds, filter],
   );
   const groups = useMemo(() => groupBoxes(filteredBoxes), [filteredBoxes]);
+  const today = todayIso();
   const renewalList = useMemo(
     () =>
-      forecast ? buildRenewalList(forecast, treatments, prescriptionItems) : [],
-    [forecast, treatments, prescriptionItems],
+      forecast
+        ? buildRenewalList(
+            forecast,
+            treatments,
+            prescriptionItems,
+            boxes,
+            today,
+          )
+        : [],
+    [forecast, treatments, prescriptionItems, boxes, today],
   );
-  const today = todayIso();
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
