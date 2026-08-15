@@ -33,6 +33,8 @@ describe('buildTimeline', () => {
           explanation: 'Ajout',
           createdAt: '2026-08-01 10:00:00',
           specialtyName: 'Doliprane',
+          lot: 'LOT-A',
+          expirationDate: '2027-01-01',
         },
       ],
       intakeRecords: [
@@ -305,6 +307,41 @@ describe('buildTimeline', () => {
     expect(boxEvent.specialtyName).toBe('Zoloft');
   });
 
+  it('joint le lot et la péremption de la boîte à un mouvement de stock (ticket 49)', () => {
+    const source: TimelineSource = {
+      ...EMPTY_SOURCE,
+      treatments: [
+        {
+          id: 1,
+          specialtyName: 'Doliprane',
+          createdAt: '2026-01-01 08:00:00',
+          phases: [],
+        },
+      ],
+      stockMovements: [
+        {
+          treatmentId: 1,
+          id: 10,
+          type: 'MANUAL_ADJUSTMENT',
+          quantityDelta: -5,
+          explanation: 'Comptage physique',
+          createdAt: '2026-08-01 10:00:00',
+          specialtyName: 'Doliprane',
+          lot: 'LOT-A',
+          expirationDate: '2027-01-01',
+        },
+      ],
+    };
+
+    const events = buildTimeline(source);
+    const movement = events.find((event) => event.type === 'STOCK_MOVEMENT');
+
+    if (!movement || movement.type !== 'STOCK_MOVEMENT')
+      throw new Error('événement STOCK_MOVEMENT attendu');
+    expect(movement.lot).toBe('LOT-A');
+    expect(movement.expirationDate).toBe('2027-01-01');
+  });
+
   it('exclut une prise jamais renseignée, distincte de « ignorée »', () => {
     const source: TimelineSource = {
       ...EMPTY_SOURCE,
@@ -360,6 +397,8 @@ describe('filterTimelineEvents', () => {
         explanation: 'Ajout',
         createdAt: '2026-06-01 10:00:00',
         specialtyName: 'Doliprane',
+        lot: 'LOT-A',
+        expirationDate: '2027-01-01',
       },
     ],
   });

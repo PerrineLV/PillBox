@@ -141,14 +141,22 @@ export default function InventoryScreen() {
       ),
     [forecast],
   );
+  // Une boîte épuisée n'a plus aucune utilité opérationnelle sur cet écran
+  // (ticket 49) : masquée de l'affichage (liste, regroupements, compteur),
+  // jamais supprimée — son historique reste consultable depuis la
+  // Chronologie, et la fiche boîte reste accessible par un lien direct.
+  const visibleBoxes = useMemo(
+    () => boxes.filter((box) => box.remainingQuantity > 0),
+    [boxes],
+  );
   const filteredBoxes = useMemo(
     () =>
-      boxes.filter(
+      visibleBoxes.filter(
         (box) =>
           filter === 'all' ||
           (filter === 'expiring' && expiringBoxIds.has(box.id)),
       ),
-    [boxes, expiringBoxIds, filter],
+    [visibleBoxes, expiringBoxIds, filter],
   );
   const groups = useMemo(() => groupBoxes(filteredBoxes), [filteredBoxes]);
   const today = todayIso();
@@ -174,8 +182,8 @@ export default function InventoryScreen() {
             Stock
           </Text>
           <Text style={typography.caption}>
-            {boxes.length} boîte{boxes.length > 1 ? 's' : ''} enregistrée
-            {boxes.length > 1 ? 's' : ''}
+            {visibleBoxes.length} boîte{visibleBoxes.length > 1 ? 's' : ''}{' '}
+            enregistrée{visibleBoxes.length > 1 ? 's' : ''}
           </Text>
         </View>
         <Link href="/inventory/new" style={styles.add}>
@@ -209,7 +217,7 @@ export default function InventoryScreen() {
       {!loading && !error && filter === 'renew' ? (
         <RenewalList items={renewalList} />
       ) : null}
-      {!loading && !error && filter !== 'renew' && boxes.length === 0 ? (
+      {!loading && !error && filter !== 'renew' && visibleBoxes.length === 0 ? (
         <EmptyState
           title="Aucune boîte enregistrée"
           description="Scannez le DataMatrix d’une boîte, ou ajoutez-la sans DataMatrix, pour suivre son lot, sa péremption et sa quantité."
@@ -218,7 +226,7 @@ export default function InventoryScreen() {
       {!loading &&
       !error &&
       filter !== 'renew' &&
-      boxes.length > 0 &&
+      visibleBoxes.length > 0 &&
       groups.length === 0 ? (
         <EmptyState
           title="Aucune boîte pour ce filtre"

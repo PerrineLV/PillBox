@@ -48,6 +48,13 @@ export type TimelineEvent =
       movementType: 'BOX_ADDED' | 'MANUAL_ADJUSTMENT' | 'CORRECTION';
       quantityDelta: number;
       explanation: string;
+      /**
+       * Lot et péremption de la boîte concernée (ticket 49) : purement
+       * informatif, sans lien cliquable, pour retrouver une boîte y compris
+       * épuisée et donc masquée de l'écran Stock.
+       */
+      lot: string | null;
+      expirationDate: string;
     })
   | (TimelineEventBase & {
       type: 'INTAKE_RECORDED';
@@ -119,6 +126,8 @@ export type TimelineStockMovementSource = Readonly<{
   explanation: string;
   createdAt: string;
   specialtyName: string;
+  lot: string | null;
+  expirationDate: string;
 }>;
 
 export type TimelineIntakeSource = Readonly<{
@@ -259,6 +268,8 @@ export function buildTimeline(source: TimelineSource): TimelineEvent[] {
       movementType: movement.type,
       quantityDelta: movement.quantityDelta,
       explanation: movement.explanation,
+      lot: movement.lot,
+      expirationDate: movement.expirationDate,
     });
   }
 

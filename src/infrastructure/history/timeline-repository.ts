@@ -146,9 +146,12 @@ export async function listTimelineEvents(
     explanation: string;
     created_at: string;
     specialty_name: string;
+    lot: string | null;
+    expiration_date: string;
   }>(
     `SELECT t.id AS treatment_id, sm.id, sm.type, sm.quantity_delta,
-      sm.explanation, sm.created_at, box.specialty_name
+      sm.explanation, sm.created_at, box.specialty_name, box.lot,
+      box.expiration_date
      FROM stock_movements sm
      JOIN medication_boxes box ON box.id = sm.box_id
      JOIN treatments t ON t.specialty_cis = box.specialty_cis
@@ -176,6 +179,8 @@ export async function listTimelineEvents(
         explanation: row.explanation,
         createdAt: row.created_at,
         specialtyName: row.specialty_name,
+        lot: row.lot,
+        expirationDate: row.expiration_date,
       };
     },
   );

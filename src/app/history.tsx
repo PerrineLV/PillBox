@@ -251,7 +251,9 @@ function describeEvent(event: TimelineEvent): {
     case 'STOCK_MOVEMENT':
       return {
         title: STOCK_MOVEMENT_TYPE_LABELS[event.movementType],
-        detail: `${event.quantityDelta > 0 ? '+' : ''}${event.quantityDelta} · ${event.explanation}`,
+        detail:
+          `${event.quantityDelta > 0 ? '+' : ''}${event.quantityDelta} · ${event.explanation}` +
+          ` · lot ${event.lot ?? 'non renseigné'} · péremption ${formatLongFrenchCivilDate(event.expirationDate)}`,
         tone: 'neutral',
       };
     case 'INTAKE_RECORDED':

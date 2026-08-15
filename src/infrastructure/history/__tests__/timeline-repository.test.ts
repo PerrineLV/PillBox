@@ -239,6 +239,27 @@ describe('listTimelineEvents', () => {
     raw.close();
   });
 
+  it('joint le lot et la péremption de la boîte à chaque mouvement de stock (ticket 49)', async () => {
+    const { raw, database } = await setup();
+    const { treatmentId } = await buildFullHistory(database);
+
+    const events = await listTimelineEvents(database, {
+      treatmentId,
+      startDate: null,
+    });
+    const stockMovements = events.filter(
+      (event) => event.type === 'STOCK_MOVEMENT',
+    );
+
+    expect(stockMovements).toHaveLength(2);
+    for (const movement of stockMovements) {
+      if (movement.type !== 'STOCK_MOVEMENT') continue;
+      expect(movement.lot).toBe('LOT-A');
+      expect(movement.expirationDate).toBe('2027-01-01');
+    }
+    raw.close();
+  });
+
   it('isole la timeline par traitement et retourne un tableau vide pour un identifiant absent', async () => {
     const { raw, database } = await setup();
     const { treatmentId } = await buildFullHistory(database);
