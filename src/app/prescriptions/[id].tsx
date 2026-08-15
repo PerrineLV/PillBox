@@ -21,6 +21,7 @@ import type {
 } from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
 import {
+  confirmPrescriptionReplacement,
   createPrescriptionItem,
   deletePrescriptionItem,
   getPrescription,
@@ -154,6 +155,7 @@ function PrescriptionEditContent({
   return (
     <PrescriptionForm
       personalDatabase={personalDatabase}
+      currentPrescriptionId={prescription.id}
       initialValue={{
         label: prescription.label,
         issueDate: prescription.issueDate,
@@ -165,7 +167,13 @@ function PrescriptionEditContent({
         await onReload();
       }}
       submitLabel="Enregistrer les modifications"
-      onSubmit={async ({ label, issueDate, validUntil, newLines }) => {
+      onSubmit={async ({
+        label,
+        issueDate,
+        validUntil,
+        newLines,
+        replacesPrescriptionIds,
+      }) => {
         await updatePrescription(personalDatabase, prescription.id, {
           label,
           issueDate,
@@ -176,6 +184,13 @@ function PrescriptionEditContent({
             ...draft,
             prescriptionId: prescription.id,
           });
+        }
+        for (const replacedId of replacesPrescriptionIds) {
+          await confirmPrescriptionReplacement(
+            personalDatabase,
+            replacedId,
+            prescription.id,
+          );
         }
         router.replace('/prescriptions');
       }}

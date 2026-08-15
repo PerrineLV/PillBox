@@ -3,8 +3,9 @@ import { addCivilDays } from '@/domain/shared/dates';
 /**
  * Une ordonnance (ticket 45) : période de validité purement informative,
  * jamais bloquante. `status` n'est pas stocké : il est recalculé par le
- * repository à partir de `validUntil` et de la présence d'une ordonnance plus
- * récente couvrant au moins un même traitement (voir `computePrescriptionStatus`).
+ * repository à partir de `validUntil` et d'une confirmation explicite de
+ * remplacement (ticket 48, jamais automatique — voir
+ * `computePrescriptionStatus` et `confirmPrescriptionReplacement`).
  */
 export const PRESCRIPTION_STATUSES = ['ACTIVE', 'EXPIRED', 'REPLACED'] as const;
 export type PrescriptionStatus = (typeof PRESCRIPTION_STATUSES)[number];
@@ -142,10 +143,12 @@ export function theoreticalRenewalWindow(
 }
 
 /**
- * `isReplaced` est déterminé par l'appelant (repository) : une ordonnance
- * plus récente couvre au moins un même traitement. Purement informatif,
- * jamais bloquant. Une fin de validité inconnue (`null`) ne rend jamais une
- * ordonnance EXPIRED par elle-même : seul un remplacement explicite la fait
+ * `isReplaced` est déterminé par l'appelant (repository) à partir d'une
+ * confirmation explicite de l'utilisatrice (ticket 48,
+ * `confirmPrescriptionReplacement`), jamais automatiquement à la seule
+ * présence d'une ordonnance plus récente. Purement informatif, jamais
+ * bloquant. Une fin de validité inconnue (`null`) ne rend jamais une
+ * ordonnance EXPIRED par elle-même : seul un remplacement confirmé la fait
  * changer de statut.
  */
 export function computePrescriptionStatus(
@@ -156,6 +159,36 @@ export function computePrescriptionStatus(
   if (isReplaced) return 'REPLACED';
   if (prescription.validUntil === null) return 'ACTIVE';
   return prescription.validUntil >= today ? 'ACTIVE' : 'EXPIRED';
+}
+
+/**
+ * Fenêtre calendaire, date du jour incluse, avant `validUntil` où une
+ * ordonnance active est jugée proche de sa fin de validité (ticket 48) :
+ * même valeur que `EXPIRATION_WARNING_DAYS` (péremption des boîtes,
+ * `inventory-alerts.ts`), seul autre seuil d'approche du projet, pour rester
+ * cohérent sans dupliquer une règle pharmaceutique — c'est un choix de
+ * confort, jamais un délai médical.
+ */
+export const PRESCRIPTION_VALIDITY_WARNING_DAYS = 30;
+
+/**
+ * Une ordonnance déjà `EXPIRED` ou `REPLACED` ne redemande jamais de rendez-
+ * vous ici : cette alerte anticipe uniquement la fin de validité d'une
+ * ordonnance encore `ACTIVE`, distincte de l'alerte de renouvellement en
+ * pharmacie (ticket 47) qui concerne la délivrance, pas la validité de
+ * l'ordonnance.
+ */
+export function isPrescriptionValidityApproaching(
+  prescription: Readonly<{
+    status: PrescriptionStatus;
+    validUntil: string | null;
+  }>,
+  today: string,
+  warningDays: number = PRESCRIPTION_VALIDITY_WARNING_DAYS,
+): boolean {
+  if (prescription.status !== 'ACTIVE' || prescription.validUntil === null)
+    return false;
+  return addCivilDays(prescription.validUntil, -warningDays) <= today;
 }
 
 export function assertValidPrescriptionDraft(draft: PrescriptionDraft): void {

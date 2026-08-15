@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 26;
+export const LATEST_SCHEMA_VERSION = 27;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -858,6 +858,23 @@ export const SCHEMA_MIGRATIONS = [
       // pour la suppression de 4 colonnes désormais mortes : ni lues ni
       // écrites par aucun code applicatif à partir de ce ticket, leur
       // information vivante a été reprise ci-dessus par `prescription_items`.
+    },
+  },
+  {
+    version: 27,
+    name: 'confirmation explicite du remplacement d’une ordonnance',
+    async up(transaction) {
+      // Jusqu'ici REPLACED était déduit automatiquement (une ordonnance plus
+      // récente couvrant le même traitement) : silencieux, contraire au
+      // principe de confirmation explicite déjà appliqué ailleurs (ticket
+      // 24, équivalences génériques). Cette colonne, renseignée uniquement
+      // depuis une confirmation de l'utilisatrice, devient la seule source
+      // du statut REPLACED (ticket 48).
+      await transaction.execute(`
+        ALTER TABLE prescriptions
+          ADD COLUMN replaced_by_prescription_id INTEGER
+            REFERENCES prescriptions(id) ON DELETE SET NULL;
+      `);
     },
   },
 ] satisfies readonly SchemaMigration[];

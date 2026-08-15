@@ -80,10 +80,22 @@ function treatment(overrides: Partial<Treatment> = {}): Treatment {
   };
 }
 
-function formElement(onSubmit: jest.Mock): ReactElement {
+// `getAllAsync` mocké par défaut sans chevauchement : la détection de
+// remplacement (ticket 48) ne doit jamais bloquer les tests qui ne portent
+// pas dessus. Les tests dédiés à ce mécanisme fournissent leur propre mock.
+function personalDatabase(overlaps: readonly unknown[] = []): {
+  getAllAsync: jest.Mock;
+} {
+  return { getAllAsync: jest.fn().mockResolvedValue(overlaps) };
+}
+
+function formElement(
+  onSubmit: jest.Mock,
+  database: { getAllAsync: jest.Mock } = personalDatabase(),
+): ReactElement {
   return (
     <PrescriptionForm
-      personalDatabase={{} as never}
+      personalDatabase={database as never}
       initialValue={{ label: '', issueDate: '2026-08-01', validUntil: null }}
       submitLabel="Créer l’ordonnance"
       onSubmit={onSubmit}
@@ -91,10 +103,13 @@ function formElement(onSubmit: jest.Mock): ReactElement {
   );
 }
 
-async function renderForm(onSubmit: jest.Mock): Promise<ReactTestRenderer> {
+async function renderForm(
+  onSubmit: jest.Mock,
+  database?: { getAllAsync: jest.Mock },
+): Promise<ReactTestRenderer> {
   let renderer!: ReactTestRenderer;
   await act(async () => {
-    renderer = create(formElement(onSubmit));
+    renderer = create(formElement(onSubmit, database));
     await Promise.resolve();
   });
   return renderer;
@@ -142,39 +157,43 @@ describe('validation du formulaire', () => {
   });
 });
 
+/** Ajoute une ligne « renouveler un traitement existant » couvrant le traitement 1. */
+async function addRenewalLine(renderer: ReactTestRenderer): Promise<void> {
+  await act(async () =>
+    renderer.root
+      .findByProps({ accessibilityLabel: 'Ajouter une ligne' })
+      .props.onPress(),
+  );
+  await act(async () =>
+    renderer.root
+      .findByProps({
+        accessibilityLabel: 'Renouveler un traitement existant',
+      })
+      .props.onPress(),
+  );
+  await act(async () =>
+    renderer.root
+      .findByProps({
+        accessibilityLabel: 'Traitement à renouveler, Choisir un traitement',
+      })
+      .props.onPress(),
+  );
+  await act(async () =>
+    renderer.root
+      .findByProps({ accessibilityRole: 'menuitem' })
+      .props.onPress(),
+  );
+  const durationField = renderer.root.findByProps({
+    accessibilityLabel: 'Durée couverte (jours)',
+  });
+  await act(async () => durationField.props.onChangeText('28'));
+}
+
 describe('renouvellement d’un traitement existant', () => {
   it('soumet une ligne de renouvellement correctement construite', async () => {
     const onSubmit = jest.fn().mockResolvedValue(undefined);
     const renderer = await renderForm(onSubmit);
-
-    await act(async () =>
-      renderer.root
-        .findByProps({ accessibilityLabel: 'Ajouter une ligne' })
-        .props.onPress(),
-    );
-    await act(async () =>
-      renderer.root
-        .findByProps({
-          accessibilityLabel: 'Renouveler un traitement existant',
-        })
-        .props.onPress(),
-    );
-    await act(async () =>
-      renderer.root
-        .findByProps({
-          accessibilityLabel: 'Traitement à renouveler, Choisir un traitement',
-        })
-        .props.onPress(),
-    );
-    await act(async () =>
-      renderer.root
-        .findByProps({ accessibilityRole: 'menuitem' })
-        .props.onPress(),
-    );
-    const durationField = renderer.root.findByProps({
-      accessibilityLabel: 'Durée couverte (jours)',
-    });
-    await act(async () => durationField.props.onChangeText('28'));
+    await addRenewalLine(renderer);
 
     await act(async () =>
       renderer.root
@@ -192,7 +211,115 @@ describe('renouvellement d’un traitement existant', () => {
             dispensingMode: 'FULL',
           }),
         ],
+        replacesPrescriptionIds: [],
       }),
+    );
+  });
+});
+
+describe('confirmation de remplacement (ticket 48)', () => {
+  function overlapRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 7,
+      label: 'Ordo ancienne',
+      issue_date: '2026-01-01',
+      valid_until: '2026-12-01',
+      replaced_by_prescription_id: null,
+      ...overrides,
+    };
+  }
+
+  it('demande confirmation avant toute soumission quand un traitement est déjà couvert par une ordonnance active', async () => {
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    const database = personalDatabase([overlapRow()]);
+    const renderer = await renderForm(onSubmit, database);
+    await addRenewalLine(renderer);
+
+    await act(async () =>
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Créer l’ordonnance' })
+        .props.onPress(),
+    );
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(JSON.stringify(renderer.toJSON())).toContain('Ordo ancienne');
+  });
+
+  it('confirme le remplacement et le transmet à la soumission', async () => {
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    const database = personalDatabase([overlapRow({ id: 7 })]);
+    const renderer = await renderForm(onSubmit, database);
+    await addRenewalLine(renderer);
+    await act(async () =>
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Créer l’ordonnance' })
+        .props.onPress(),
+    );
+
+    await act(async () =>
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Marquer comme remplacée' })
+        .props.onPress(),
+    );
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ replacesPrescriptionIds: [7] }),
+    );
+  });
+
+  it('ignore la proposition sans bloquer la création de l’ordonnance', async () => {
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    const database = personalDatabase([overlapRow({ id: 7 })]);
+    const renderer = await renderForm(onSubmit, database);
+    await addRenewalLine(renderer);
+    await act(async () =>
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Créer l’ordonnance' })
+        .props.onPress(),
+    );
+
+    await act(async () =>
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Annuler' })
+        .props.onPress(),
+    );
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ replacesPrescriptionIds: [] }),
+    );
+  });
+
+  it('propose chaque ordonnance en chevauchement l’une après l’autre', async () => {
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    const database = personalDatabase([
+      overlapRow({ id: 7, label: 'Ordo A' }),
+      overlapRow({ id: 8, label: 'Ordo B' }),
+    ]);
+    const renderer = await renderForm(onSubmit, database);
+    await addRenewalLine(renderer);
+    await act(async () =>
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Créer l’ordonnance' })
+        .props.onPress(),
+    );
+
+    expect(JSON.stringify(renderer.toJSON())).toContain('Ordo A');
+    await act(async () =>
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Marquer comme remplacée' })
+        .props.onPress(),
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(JSON.stringify(renderer.toJSON())).toContain('Ordo B');
+
+    await act(async () =>
+      renderer.root
+        .findByProps({ accessibilityLabel: 'Annuler' })
+        .props.onPress(),
+    );
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ replacesPrescriptionIds: [7] }),
     );
   });
 });

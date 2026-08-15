@@ -14,13 +14,16 @@ import {
 } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { todayIso } from '@/domain/inventory/inventory';
 import {
   assertValidPrescriptionItemDraft,
+  type Prescription,
   type PrescriptionItem,
   type PrescriptionItemDraft,
 } from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
 import { drainCreatedTreatmentForPrescription } from '@/infrastructure/prescriptions/pending-new-treatment-for-prescription';
+import { listActivePrescriptionsCoveringTreatments } from '@/infrastructure/prescriptions/prescription-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import { AppButton, AppField, Message, spacing, typography } from '@/ui';
 
@@ -31,6 +34,7 @@ import {
   PrescriptionLineEditor,
   type PrescriptionLineDraft,
 } from './prescription-line-editor';
+import { PrescriptionReplacementConfirmation } from './prescription-replacement-confirmation';
 
 export type PrescriptionFormExistingItem = Readonly<{
   item: PrescriptionItem;
@@ -42,6 +46,12 @@ export type PrescriptionFormValue = Readonly<{
   issueDate: string;
   validUntil: string | null;
   newLines: readonly Omit<PrescriptionItemDraft, 'prescriptionId'>[];
+  /**
+   * Ordonnances actives dont le remplacement par celle-ci a été confirmé
+   * explicitement (ticket 48) : à l'appelant de les marquer REPLACED une
+   * fois cette ordonnance créée ou mise à jour, jamais avant.
+   */
+  replacesPrescriptionIds: readonly number[];
 }>;
 
 type Props = {
@@ -51,6 +61,8 @@ type Props = {
     issueDate: string;
     validUntil: string | null;
   };
+  /** `null` en création : rien à exclure de la détection de chevauchement. */
+  currentPrescriptionId?: number | null;
   /** Lignes déjà enregistrées, affichées en lecture seule (édition uniquement). */
   existingItems?: readonly PrescriptionFormExistingItem[];
   onRemoveExistingItem?: (itemId: number) => Promise<void>;
@@ -58,9 +70,17 @@ type Props = {
   onSubmit: (value: PrescriptionFormValue) => Promise<void>;
 };
 
+/** Ligne construite, en attente de la confirmation explicite d'un ou plusieurs remplacements avant soumission finale. */
+type PendingReplacementConfirmation = Readonly<{
+  newLines: readonly Omit<PrescriptionItemDraft, 'prescriptionId'>[];
+  queue: readonly Prescription[];
+  confirmed: readonly number[];
+}>;
+
 export function PrescriptionForm({
   personalDatabase,
   initialValue,
+  currentPrescriptionId = null,
   existingItems = [],
   onRemoveExistingItem,
   submitLabel,
@@ -72,6 +92,8 @@ export function PrescriptionForm({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [removingItemId, setRemovingItemId] = useState<number | null>(null);
+  const [pendingReplacement, setPendingReplacement] =
+    useState<PendingReplacementConfirmation | null>(null);
   const linesSectionRef = useRef<PrescriptionLinesSectionHandle>(null);
 
   async function removeExistingItem(itemId: number): Promise<void> {
@@ -97,11 +119,49 @@ export function PrescriptionForm({
       const newLines = lines.map((line) => buildDraftFromLine(line));
       for (const draft of newLines)
         assertValidPrescriptionItemDraft({ ...draft, prescriptionId: 0 });
+
+      const treatmentIds = [
+        ...new Set(newLines.map((draft) => draft.treatmentId)),
+      ];
+      const overlaps =
+        treatmentIds.length > 0
+          ? await listActivePrescriptionsCoveringTreatments(
+              personalDatabase,
+              treatmentIds,
+              todayIso(),
+              currentPrescriptionId,
+            )
+          : [];
+      if (overlaps.length > 0) {
+        // Jamais automatique (ticket 48) : chaque ordonnance déjà active sur
+        // l'un des traitements est proposée une par une, avant tout
+        // enregistrement.
+        setPendingReplacement({ newLines, queue: overlaps, confirmed: [] });
+        setSaving(false);
+        return;
+      }
+      await finalizeSubmit(newLines, []);
+    } catch (reason: unknown) {
+      setError(
+        reason instanceof Error ? reason.message : 'Enregistrement impossible.',
+      );
+      setSaving(false);
+    }
+  }
+
+  async function finalizeSubmit(
+    newLines: readonly Omit<PrescriptionItemDraft, 'prescriptionId'>[],
+    replacesPrescriptionIds: readonly number[],
+  ): Promise<void> {
+    setSaving(true);
+    setError(null);
+    try {
       await onSubmit({
         label,
         issueDate,
         validUntil: validUntil.trim() === '' ? null : validUntil,
         newLines,
+        replacesPrescriptionIds,
       });
     } catch (reason: unknown) {
       setError(
@@ -110,6 +170,32 @@ export function PrescriptionForm({
     } finally {
       setSaving(false);
     }
+  }
+
+  function confirmCurrentReplacement(): void {
+    if (!pendingReplacement) return;
+    const [current, ...rest] = pendingReplacement.queue;
+    const confirmed = [...pendingReplacement.confirmed, current.id];
+    if (rest.length === 0) {
+      setPendingReplacement(null);
+      void finalizeSubmit(pendingReplacement.newLines, confirmed);
+      return;
+    }
+    setPendingReplacement({ ...pendingReplacement, queue: rest, confirmed });
+  }
+
+  function skipCurrentReplacement(): void {
+    if (!pendingReplacement) return;
+    const rest = pendingReplacement.queue.slice(1);
+    if (rest.length === 0) {
+      setPendingReplacement(null);
+      void finalizeSubmit(
+        pendingReplacement.newLines,
+        pendingReplacement.confirmed,
+      );
+      return;
+    }
+    setPendingReplacement({ ...pendingReplacement, queue: rest });
   }
 
   return (
@@ -190,6 +276,13 @@ export function PrescriptionForm({
         label={submitLabel}
         loading={saving}
         onPress={() => void submit()}
+      />
+      <PrescriptionReplacementConfirmation
+        visible={pendingReplacement !== null}
+        overlapping={pendingReplacement?.queue[0] ?? null}
+        busy={saving}
+        onSkip={skipCurrentReplacement}
+        onConfirm={confirmCurrentReplacement}
       />
     </View>
   );

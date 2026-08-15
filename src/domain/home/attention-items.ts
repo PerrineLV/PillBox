@@ -9,6 +9,10 @@ import {
   type KnownPreparation,
 } from '@/domain/preparations/preparation';
 import {
+  isPrescriptionValidityApproaching,
+  type PrescriptionStatus,
+} from '@/domain/prescriptions/prescription';
+import {
   localCivilDate,
   planIntakeReminders,
   startOfLocalDay,
@@ -71,6 +75,19 @@ export type AsNeededAttentionItem = Readonly<{
 }>;
 
 /**
+ * Distincte de `StockRenewalAttentionItem` (ticket 47, délivrance en
+ * pharmacie) : celle-ci anticipe la fin de validité de l'ordonnance
+ * elle-même, pour prendre rendez-vous avec le médecin (ticket 48).
+ */
+export type PrescriptionExpiryAttentionItem = Readonly<{
+  type: 'PRESCRIPTION_EXPIRY';
+  id: string;
+  prescriptionId: number;
+  label: string;
+  validUntil: string;
+}>;
+
+/**
  * Collection extensible : chaque type d'item porte ses propres données. Un
  * nouveau type d'alerte (par exemple une boîte de stock sans traitement
  * associé) s'ajoute en étendant cette union et en poussant ses entrées dans
@@ -81,7 +98,8 @@ export type AttentionItem =
   | PreparationAttentionItem
   | StockRenewalAttentionItem
   | ExpirationAttentionItem
-  | AsNeededAttentionItem;
+  | AsNeededAttentionItem
+  | PrescriptionExpiryAttentionItem;
 
 export type DraftPreparationSummary = Readonly<{
   startDate: string;
@@ -106,6 +124,13 @@ export type AsNeededTreatmentInput = Readonly<{
   lastIntake: AsNeededIntakeRecord | null;
 }>;
 
+export type PrescriptionAttentionInput = Readonly<{
+  id: number;
+  label: string;
+  status: PrescriptionStatus;
+  validUntil: string | null;
+}>;
+
 export type AttentionItemsInput = Readonly<{
   referenceDate: string;
   now: Date;
@@ -121,6 +146,8 @@ export type AttentionItemsInput = Readonly<{
   /** Déjà filtrée aux péremptions nécessitant une action et triée par date. */
   expirations: readonly ExpirationAlertInput[];
   asNeededTreatments: readonly AsNeededTreatmentInput[];
+  /** Toutes les ordonnances connues, quel que soit leur statut (ticket 48) : filtrées ici même. */
+  prescriptions: readonly PrescriptionAttentionInput[];
 }>;
 
 /**
@@ -141,6 +168,7 @@ export function buildAttentionItems(
       id: `stock-renewal:${item.specialtyCis}`,
       item,
     })),
+    ...buildPrescriptionExpiryItems(input.prescriptions, input.referenceDate),
     ...input.expirations.map((expiration): ExpirationAttentionItem => ({
       type: 'EXPIRATION',
       id: `expiration:${expiration.boxId}`,
@@ -161,6 +189,7 @@ export function isAttentionItemActionRequired(item: AttentionItem): boolean {
       return item.mode !== 'READY';
     case 'STOCK_RENEWAL':
     case 'EXPIRATION':
+    case 'PRESCRIPTION_EXPIRY':
       return true;
     case 'NEXT_INTAKE_GROUP':
     case 'AS_NEEDED_INFO':
@@ -246,6 +275,35 @@ function buildPreparationItem(
     completedCount: 0,
     totalCount: 0,
   };
+}
+
+/**
+ * Ordonnances actives dont la fin de validité approche (ticket 48), pour
+ * anticiper la prise de rendez-vous médical — distinct de l'alerte de
+ * renouvellement en pharmacie (`STOCK_RENEWAL`, ticket 47).
+ */
+function buildPrescriptionExpiryItems(
+  prescriptions: readonly PrescriptionAttentionInput[],
+  today: string,
+): readonly PrescriptionExpiryAttentionItem[] {
+  return prescriptions
+    .flatMap((prescription): PrescriptionExpiryAttentionItem[] => {
+      if (
+        prescription.validUntil === null ||
+        !isPrescriptionValidityApproaching(prescription, today)
+      )
+        return [];
+      return [
+        {
+          type: 'PRESCRIPTION_EXPIRY',
+          id: `prescription-expiry:${prescription.id}`,
+          prescriptionId: prescription.id,
+          label: prescription.label,
+          validUntil: prescription.validUntil,
+        },
+      ];
+    })
+    .sort((left, right) => left.validUntil.localeCompare(right.validUntil));
 }
 
 function buildAsNeededItems(

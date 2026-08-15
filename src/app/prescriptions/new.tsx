@@ -5,6 +5,7 @@ import { ScrollView, StyleSheet } from 'react-native';
 import { PrescriptionForm } from '@/components/prescriptions/prescription-form';
 import { todayIso } from '@/domain/inventory/inventory';
 import {
+  confirmPrescriptionReplacement,
   createPrescription,
   createPrescriptionItem,
 } from '@/infrastructure/prescriptions/prescription-repository';
@@ -28,7 +29,13 @@ export default function NewPrescriptionScreen() {
           validUntil: null,
         }}
         submitLabel="Créer l’ordonnance"
-        onSubmit={async ({ label, issueDate, validUntil, newLines }) => {
+        onSubmit={async ({
+          label,
+          issueDate,
+          validUntil,
+          newLines,
+          replacesPrescriptionIds,
+        }) => {
           const prescriptionId = await createPrescription(database, {
             label,
             issueDate,
@@ -39,6 +46,13 @@ export default function NewPrescriptionScreen() {
               ...draft,
               prescriptionId,
             });
+          }
+          for (const replacedId of replacesPrescriptionIds) {
+            await confirmPrescriptionReplacement(
+              database,
+              replacedId,
+              prescriptionId,
+            );
           }
           router.replace('/prescriptions');
         }}

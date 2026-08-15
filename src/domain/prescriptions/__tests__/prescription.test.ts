@@ -2,6 +2,7 @@ import {
   comparePrescriptionsForList,
   computePrescriptionStatus,
   computeTheoreticalRenewalDate,
+  isPrescriptionValidityApproaching,
   suggestedToleranceDays,
   theoreticalRenewalWindow,
   type Prescription,
@@ -45,7 +46,7 @@ describe('computePrescriptionStatus', () => {
     ).toBe('ACTIVE');
   });
 
-  it('est REPLACED dès qu’une ordonnance plus récente couvre le même traitement, même encore valide', () => {
+  it('est REPLACED dès qu’un remplacement est confirmé, même encore valide', () => {
     expect(
       computePrescriptionStatus(
         { validUntil: '2026-12-01' },
@@ -101,6 +102,60 @@ describe('theoreticalRenewalWindow', () => {
       start: '2026-01-26',
       end: '2026-02-01',
     });
+  });
+});
+
+describe('isPrescriptionValidityApproaching', () => {
+  it('signale une ordonnance active dont la fin de validité approche', () => {
+    expect(
+      isPrescriptionValidityApproaching(
+        prescription({ status: 'ACTIVE', validUntil: '2026-08-20' }),
+        '2026-08-14',
+      ),
+    ).toBe(true);
+  });
+
+  it('ne signale rien tant que la fenêtre d’approche n’est pas atteinte', () => {
+    expect(
+      isPrescriptionValidityApproaching(
+        prescription({ status: 'ACTIVE', validUntil: '2026-12-01' }),
+        '2026-08-14',
+      ),
+    ).toBe(false);
+  });
+
+  it('ne signale jamais une ordonnance sans fin de validité connue', () => {
+    expect(
+      isPrescriptionValidityApproaching(
+        prescription({ status: 'ACTIVE', validUntil: null }),
+        '2026-08-14',
+      ),
+    ).toBe(false);
+  });
+
+  it('ne signale jamais une ordonnance EXPIRED ou REPLACED', () => {
+    expect(
+      isPrescriptionValidityApproaching(
+        prescription({ status: 'EXPIRED', validUntil: '2026-08-20' }),
+        '2026-08-14',
+      ),
+    ).toBe(false);
+    expect(
+      isPrescriptionValidityApproaching(
+        prescription({ status: 'REPLACED', validUntil: '2026-08-20' }),
+        '2026-08-14',
+      ),
+    ).toBe(false);
+  });
+
+  it('accepte un seuil personnalisé', () => {
+    expect(
+      isPrescriptionValidityApproaching(
+        prescription({ status: 'ACTIVE', validUntil: '2026-08-20' }),
+        '2026-08-14',
+        5,
+      ),
+    ).toBe(false);
   });
 });
 

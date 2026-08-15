@@ -6,12 +6,14 @@ import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 import { createTreatment } from '@/infrastructure/treatments/treatment-repository';
 
 import {
+  confirmPrescriptionReplacement,
   createPrescription,
   createPrescriptionItem,
   deletePrescription,
   deletePrescriptionItem,
   getPrescription,
   getPrescriptionItem,
+  listActivePrescriptionsCoveringTreatments,
   listPrescriptionItems,
   listPrescriptionItemsByPrescription,
   listPrescriptionItemsByTreatment,
@@ -158,7 +160,7 @@ describe('Prescription (ticket 45)', () => {
     expect(prescription).toMatchObject({ validUntil: null, status: 'ACTIVE' });
   });
 
-  it('calcule le statut REPLACED lorsqu’une ordonnance plus récente couvre le même traitement', async () => {
+  it('ne marque jamais REPLACED automatiquement, même quand une ordonnance plus récente couvre le même traitement', async () => {
     const { database, treatmentId } = await setup();
     const oldId = await createPrescription(database, {
       label: 'Ordo ancienne',
@@ -181,8 +183,63 @@ describe('Prescription (ticket 45)', () => {
 
     const old = await getPrescription(database, oldId, '2026-08-14');
     const recent = await getPrescription(database, newId, '2026-08-14');
+    expect(old?.status).toBe('ACTIVE');
+    expect(recent?.status).toBe('ACTIVE');
+  });
+
+  it('calcule le statut REPLACED seulement après confirmation explicite du remplacement', async () => {
+    const { database, treatmentId } = await setup();
+    const oldId = await createPrescription(database, {
+      label: 'Ordo ancienne',
+      issueDate: '2026-01-01',
+      validUntil: '2026-12-01',
+    });
+    const newId = await createPrescription(database, {
+      label: 'Ordo récente',
+      issueDate: '2026-06-01',
+      validUntil: '2026-12-01',
+    });
+    await createPrescriptionItem(
+      database,
+      fractionalItemDraft(treatmentId, oldId),
+    );
+    await createPrescriptionItem(
+      database,
+      fractionalItemDraft(treatmentId, newId),
+    );
+
+    await confirmPrescriptionReplacement(database, oldId, newId);
+
+    const old = await getPrescription(database, oldId, '2026-08-14');
+    const recent = await getPrescription(database, newId, '2026-08-14');
     expect(old?.status).toBe('REPLACED');
     expect(recent?.status).toBe('ACTIVE');
+  });
+
+  it('rejette une ordonnance qui se remplacerait elle-même', async () => {
+    const { database } = await setup();
+    const id = await createPrescription(database, {
+      label: 'Ordo',
+      issueDate: '2026-01-01',
+      validUntil: '2026-12-01',
+    });
+
+    await expect(
+      confirmPrescriptionReplacement(database, id, id),
+    ).rejects.toThrow('elle-même');
+  });
+
+  it('rejette la confirmation d’une ordonnance introuvable', async () => {
+    const { database } = await setup();
+    const id = await createPrescription(database, {
+      label: 'Ordo',
+      issueDate: '2026-01-01',
+      validUntil: '2026-12-01',
+    });
+
+    await expect(
+      confirmPrescriptionReplacement(database, 999, id),
+    ).rejects.toThrow('introuvable');
   });
 
   it('rejette un intitulé vide', async () => {
@@ -276,6 +333,111 @@ describe('Prescription (ticket 45)', () => {
     await expect(deletePrescription(database, id)).rejects.toThrow(
       'historique',
     );
+  });
+});
+
+describe('listActivePrescriptionsCoveringTreatments (ticket 48)', () => {
+  it('retourne une ordonnance active couvrant l’un des traitements donnés', async () => {
+    const { database, treatmentId } = await setup();
+    const id = await createPrescription(database, {
+      label: 'Ordo ancienne',
+      issueDate: '2026-01-01',
+      validUntil: '2026-12-01',
+    });
+    await createPrescriptionItem(
+      database,
+      fractionalItemDraft(treatmentId, id),
+    );
+
+    const overlaps = await listActivePrescriptionsCoveringTreatments(
+      database,
+      [treatmentId],
+      '2026-08-14',
+    );
+
+    expect(overlaps).toHaveLength(1);
+    expect(overlaps[0]).toMatchObject({ id, label: 'Ordo ancienne' });
+  });
+
+  it('exclut une ordonnance déjà EXPIRED', async () => {
+    const { database, treatmentId } = await setup();
+    const id = await createPrescription(database, {
+      label: 'Ordo expirée',
+      issueDate: '2026-01-01',
+      validUntil: '2026-02-01',
+    });
+    await createPrescriptionItem(
+      database,
+      fractionalItemDraft(treatmentId, id),
+    );
+
+    expect(
+      await listActivePrescriptionsCoveringTreatments(
+        database,
+        [treatmentId],
+        '2026-08-14',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('exclut une ordonnance déjà REPLACED', async () => {
+    const { database, treatmentId } = await setup();
+    const oldId = await createPrescription(database, {
+      label: 'Ordo ancienne',
+      issueDate: '2026-01-01',
+      validUntil: '2026-12-01',
+    });
+    const newId = await createPrescription(database, {
+      label: 'Ordo récente',
+      issueDate: '2026-06-01',
+      validUntil: '2026-12-01',
+    });
+    await createPrescriptionItem(
+      database,
+      fractionalItemDraft(treatmentId, oldId),
+    );
+    await confirmPrescriptionReplacement(database, oldId, newId);
+
+    expect(
+      await listActivePrescriptionsCoveringTreatments(
+        database,
+        [treatmentId],
+        '2026-08-14',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('exclut l’ordonnance en cours d’édition d’elle-même', async () => {
+    const { database, treatmentId } = await setup();
+    const id = await createPrescription(database, {
+      label: 'Ordo',
+      issueDate: '2026-01-01',
+      validUntil: '2026-12-01',
+    });
+    await createPrescriptionItem(
+      database,
+      fractionalItemDraft(treatmentId, id),
+    );
+
+    expect(
+      await listActivePrescriptionsCoveringTreatments(
+        database,
+        [treatmentId],
+        '2026-08-14',
+        id,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('ne retourne rien sans traitement demandé', async () => {
+    const { database } = await setup();
+    expect(
+      await listActivePrescriptionsCoveringTreatments(
+        database,
+        [],
+        '2026-08-14',
+      ),
+    ).toEqual([]);
   });
 });
 

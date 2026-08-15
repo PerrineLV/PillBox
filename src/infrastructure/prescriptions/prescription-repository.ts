@@ -19,7 +19,7 @@ type PrescriptionRow = {
   label: string;
   issue_date: string;
   valid_until: string | null;
-  is_replaced: number;
+  replaced_by_prescription_id: number | null;
 };
 
 type PrescriptionItemRow = {
@@ -37,22 +37,14 @@ type PrescriptionItemRow = {
 };
 
 const PRESCRIPTION_SELECT = `
-  SELECT p.id, p.label, p.issue_date, p.valid_until,
-    EXISTS(
-      SELECT 1 FROM prescription_items pi
-      JOIN prescription_items pi2 ON pi2.treatment_id = pi.treatment_id
-      JOIN prescriptions p2 ON p2.id = pi2.prescription_id
-      WHERE pi.prescription_id = p.id
-        AND p2.id <> p.id
-        AND (p2.issue_date > p.issue_date OR (p2.issue_date = p.issue_date AND p2.id > p.id))
-    ) AS is_replaced
+  SELECT p.id, p.label, p.issue_date, p.valid_until, p.replaced_by_prescription_id
   FROM prescriptions p`;
 
 /**
  * Une ordonnance est « active » un instant donné si son statut, dérivé de
- * `validUntil` et de la présence d'une ordonnance plus récente couvrant au
- * moins un même traitement, vaut ACTIVE à cette date (voir
- * `computePrescriptionStatus`). Purement informatif, jamais bloquant.
+ * `validUntil` et d'un remplacement explicitement confirmé (ticket 48),
+ * vaut ACTIVE à cette date (voir `computePrescriptionStatus`). Purement
+ * informatif, jamais bloquant.
  */
 export async function listPrescriptions(
   database: SQLiteDatabase,
@@ -127,6 +119,75 @@ export async function deletePrescription(
   const result = await database.runAsync(
     'DELETE FROM prescriptions WHERE id = ?',
     id,
+  );
+  if (result.changes !== 1) throw new Error('Ordonnance introuvable.');
+}
+
+type OverlapRow = {
+  id: number;
+  label: string;
+  issue_date: string;
+  valid_until: string | null;
+  replaced_by_prescription_id: number | null;
+};
+
+/**
+ * Ordonnances actives couvrant déjà au moins un des traitements donnés
+ * (ticket 48) : sert uniquement à proposer une confirmation explicite de
+ * remplacement avant la création d'une nouvelle ordonnance, jamais à en
+ * déduire automatiquement un statut. `excludePrescriptionId` écarte
+ * l'ordonnance en cours d'édition d'elle-même.
+ */
+export async function listActivePrescriptionsCoveringTreatments(
+  database: SQLiteDatabase,
+  treatmentIds: readonly number[],
+  today: string,
+  excludePrescriptionId: number | null = null,
+): Promise<Prescription[]> {
+  const uniqueIds = [...new Set(treatmentIds)];
+  if (uniqueIds.length === 0) return [];
+  const placeholders = uniqueIds.map(() => '?').join(', ');
+  const rows = await database.getAllAsync<OverlapRow>(
+    `SELECT DISTINCT p.id, p.label, p.issue_date, p.valid_until, p.replaced_by_prescription_id
+     FROM prescriptions p
+     JOIN prescription_items pi ON pi.prescription_id = p.id
+     WHERE pi.treatment_id IN (${placeholders})
+       ${excludePrescriptionId !== null ? 'AND p.id != ?' : ''}`,
+    ...uniqueIds,
+    ...(excludePrescriptionId !== null ? [excludePrescriptionId] : []),
+  );
+  return rows
+    .map((row): Prescription => ({
+      id: row.id,
+      label: row.label,
+      issueDate: row.issue_date,
+      validUntil: row.valid_until,
+      status: computePrescriptionStatus(
+        { validUntil: row.valid_until },
+        row.replaced_by_prescription_id !== null,
+        today,
+      ),
+    }))
+    .filter((prescription) => prescription.status === 'ACTIVE');
+}
+
+/**
+ * Seule façon de marquer une ordonnance REPLACED (ticket 48) : toujours à la
+ * suite d'une confirmation explicite de l'utilisatrice, jamais déduite
+ * automatiquement de la seule existence d'une ordonnance plus récente.
+ */
+export async function confirmPrescriptionReplacement(
+  database: SQLiteDatabase,
+  replacedPrescriptionId: number,
+  replacedByPrescriptionId: number,
+): Promise<void> {
+  if (replacedPrescriptionId === replacedByPrescriptionId)
+    throw new Error('Une ordonnance ne peut pas remplacer elle-même.');
+  const result = await database.runAsync(
+    `UPDATE prescriptions SET replaced_by_prescription_id = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    replacedByPrescriptionId,
+    replacedPrescriptionId,
   );
   if (result.changes !== 1) throw new Error('Ordonnance introuvable.');
 }
@@ -260,7 +321,7 @@ function hydratePrescription(
     validUntil: row.valid_until,
     status: computePrescriptionStatus(
       { validUntil: row.valid_until },
-      row.is_replaced === 1,
+      row.replaced_by_prescription_id !== null,
       today,
     ),
   };

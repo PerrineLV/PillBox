@@ -138,4 +138,17 @@ describe('AttentionItemContent', () => {
     });
     expect(rendered).toContain('Aucune prise enregistrée');
   });
+
+  it('affiche l’approche de fin de validité d’une ordonnance, distincte du renouvellement pharmacie', () => {
+    const rendered = render({
+      type: 'PRESCRIPTION_EXPIRY',
+      id: 'prescription-expiry:4',
+      prescriptionId: 4,
+      label: 'Ordo généraliste',
+      validUntil: '2026-08-20',
+    });
+    expect(rendered).toContain('Ordo généraliste');
+    expect(rendered).toContain('20 août 2026');
+    expect(rendered).toContain('consulter');
+  });
 });
