@@ -90,6 +90,8 @@ export function AttentionItemContent({
       return ExpirationContent({ item });
     case 'AS_NEEDED_INFO':
       return AsNeededContent({ item });
+    case 'PRESCRIPTION_EXPIRY':
+      return PrescriptionExpiryContent({ item });
   }
 }
 
@@ -200,6 +202,23 @@ function AsNeededContent({
         {item.lastIntake
           ? `Dernière prise : ${formatFrenchDateTime(item.lastIntake.takenAt)} · ${formatHalfUnits(item.lastIntake.quantityHalfUnits)} unité(s)`
           : 'Aucune prise enregistrée pour l’instant.'}
+      </Text>
+    </>
+  );
+}
+
+function PrescriptionExpiryContent({
+  item,
+}: Readonly<{
+  item: Extract<AttentionItem, { type: 'PRESCRIPTION_EXPIRY' }>;
+}>) {
+  return (
+    <>
+      <Text style={typography.heading}>{item.label}</Text>
+      <Badge label="Fin de validité proche" tone="warning" />
+      <Text style={typography.body}>
+        Valide jusqu’au {formatLongFrenchCivilDate(item.validUntil)} : pensez à
+        consulter pour une nouvelle ordonnance.
       </Text>
     </>
   );

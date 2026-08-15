@@ -194,6 +194,21 @@ export default function BoxDetailScreen() {
         section : deux `SQLiteProvider` distincts ouverts en parallèle avec
         `forceOverwrite` sur le même fichier entrent en course et font
         planter l'import (constaté en combinant deux providers séparés ici).
+        `useSuspense` volontairement omis : son mode s'appuie sur un cache
+        global partagé entre tous les `SQLiteProvider` du même nom de base,
+        quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
+        `medication-reference.db` en mode suspense ferme alors cette
+        connexion pendant qu'elle est encore utilisée ici (constaté : crash
+        « unable to close due to unfinalized statements »).
+        `OrphanBoxGenericMatch` est monté sans condition (plutôt que gardé
+        par `orphan`, calculé dans ce parent) : `SQLiteProvider` (expo-sqlite)
+        est un `React.memo` dont le comparateur ignore `children`, ce qui
+        gèlerait silencieusement l'apparition ou la disparition du composant
+        si elle dépendait d'un re-rendu de ce parent après le premier
+        montage. `OrphanBoxGenericMatch` redétecte lui-même, en interne, s'il
+        a quelque chose à proposer, et ne rend rien sinon (comportement
+        identique pour une boîte jamais orpheline, qui ne détecte jamais
+        rien).
       */}
       <SQLiteProvider
         databaseName="medication-reference.db"
@@ -203,20 +218,18 @@ export default function BoxDetailScreen() {
         }}
         options={{ useNewConnection: true }}
       >
-        {orphan ? (
-          <OrphanBoxGenericMatch
-            personalDatabase={database}
-            specialtyCis={box.specialtyCis}
-            specialtyName={box.specialtyName}
-            onConfirmed={() => {
-              void load();
-              showToast(
-                'Équivalence générique confirmée pour ce traitement.',
-                'success',
-              );
-            }}
-          />
-        ) : null}
+        <OrphanBoxGenericMatch
+          personalDatabase={database}
+          specialtyCis={box.specialtyCis}
+          specialtyName={box.specialtyName}
+          onConfirmed={() => {
+            void load();
+            showToast(
+              'Équivalence générique confirmée pour ce traitement.',
+              'success',
+            );
+          }}
+        />
         <GenericGroupSection cis={box.specialtyCis} />
       </SQLiteProvider>
 

@@ -402,19 +402,20 @@ export async function completePreparation(
     );
 
     for (const requirement of requirements) {
-      // Un traitement à délivrance encadrée active (ticket 30) tolère une
-      // couverture partielle ou nulle ; tout autre traitement conserve
-      // l'exigence historique de couverture exacte. Un même CIS partagé par
-      // plusieurs traitements est relâché dès qu'au moins l'un d'eux a
-      // l'indicateur actif.
+      // Un traitement couvert par une ligne d'ordonnance en mode FRACTIONAL
+      // (ticket 45, anciennement `controlledDispensing` sur Treatment)
+      // tolère une couverture partielle ou nulle ; tout autre traitement
+      // conserve l'exigence historique de couverture exacte. Un même CIS
+      // partagé par plusieurs traitements est relâché dès que l'un d'eux a
+      // au moins une ligne FRACTIONAL.
       const controlledDispensingRow = await transaction.getFirstAsync<{
         active: number;
       }>(
         `SELECT EXISTS(
            SELECT 1 FROM preparation_items pi
-           JOIN treatments t ON t.id = pi.source_treatment_id
+           JOIN prescription_items presc ON presc.treatment_id = pi.source_treatment_id
            WHERE pi.preparation_id = ? AND pi.specialty_cis = ?
-             AND t.controlled_dispensing_enabled = 1
+             AND presc.dispensing_mode = 'FRACTIONAL'
          ) AS active`,
         preparationId,
         requirement.specialty_cis,
@@ -701,19 +702,26 @@ export async function getPendingCompletionCases(
 
   const treatmentIds = [...new Set(rows.map((row) => row.source_treatment_id))];
   const placeholders = treatmentIds.map(() => '?').join(', ');
+  // La date théorique retenue par traitement est celle de la ligne
+  // d'ordonnance FRACTIONAL la plus récemment émise (ticket 45) : au plus
+  // une ligne « active » par traitement a du sens fonctionnellement, sans
+  // être contraint en base — voir `listPrescriptionItems`.
   const treatments = await database.getAllAsync<{
     id: number;
-    controlled_dispensing_theoretical_renewal_date: string | null;
+    theoretical_renewal_date: string | null;
   }>(
-    `SELECT id, controlled_dispensing_theoretical_renewal_date
-     FROM treatments WHERE id IN (${placeholders})`,
+    `SELECT t.id,
+      (SELECT presc.theoretical_renewal_date
+       FROM prescription_items presc
+       JOIN prescriptions p ON p.id = presc.prescription_id
+       WHERE presc.treatment_id = t.id AND presc.dispensing_mode = 'FRACTIONAL'
+       ORDER BY p.issue_date DESC, presc.id DESC
+       LIMIT 1) AS theoretical_renewal_date
+     FROM treatments t WHERE t.id IN (${placeholders})`,
     ...treatmentIds,
   );
   const theoreticalDateByTreatmentId = new Map(
-    treatments.map((row) => [
-      row.id,
-      row.controlled_dispensing_theoretical_renewal_date,
-    ]),
+    treatments.map((row) => [row.id, row.theoretical_renewal_date]),
   );
 
   type MutableCase = {

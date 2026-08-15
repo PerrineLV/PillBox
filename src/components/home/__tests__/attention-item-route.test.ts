@@ -38,6 +38,9 @@ const RENEWAL: AttentionItem = {
     ruptureDate: '2026-08-15',
     ruptureCause: 'CONSUMED',
     theoreticalRenewalDate: null,
+    theoreticalRenewalWindow: null,
+    runsOutBeforeRenewalWindow: false,
+    usableBoxCount: null,
   },
 };
 
@@ -57,6 +60,14 @@ const AS_NEEDED: AttentionItem = {
   treatmentId: 3,
   specialtyName: 'Gamma',
   lastIntake: null,
+};
+
+const PRESCRIPTION_EXPIRY: AttentionItem = {
+  type: 'PRESCRIPTION_EXPIRY',
+  id: 'prescription-expiry:4',
+  prescriptionId: 4,
+  label: 'Ordo généraliste',
+  validUntil: '2026-08-20',
 };
 
 describe('attentionItemHref', () => {
@@ -100,6 +111,13 @@ describe('attentionItemHref', () => {
       params: { id: '3' },
     });
   });
+
+  it('ouvre l’ordonnance concernée par l’approche de sa fin de validité', () => {
+    expect(attentionItemHref(PRESCRIPTION_EXPIRY)).toEqual({
+      pathname: '/prescriptions/[id]',
+      params: { id: '4' },
+    });
+  });
 });
 
 describe('attentionItemActionLabel', () => {
@@ -122,5 +140,8 @@ describe('attentionItemActionLabel', () => {
     expect(attentionItemActionLabel(RENEWAL)).toBe('Voir le stock');
     expect(attentionItemActionLabel(EXPIRATION)).toBe('Voir la boîte');
     expect(attentionItemActionLabel(AS_NEEDED)).toBe('Voir le traitement');
+    expect(attentionItemActionLabel(PRESCRIPTION_EXPIRY)).toBe(
+      'Voir l’ordonnance',
+    );
   });
 });

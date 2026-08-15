@@ -865,15 +865,29 @@ describe('délivrance encadrée : validation partielle (ticket 30b)', () => {
     cis: string,
     theoreticalRenewalDate: string | null,
   ): void {
+    // Ligne d'ordonnance en mode FRACTIONAL (ticket 45), remplace l'ancien
+    // `treatments.controlled_dispensing_enabled = 1`.
     raw
       .prepare(
-        `INSERT INTO treatments
-         (id, specialty_cis, specialty_name, controlled_dispensing_enabled,
-          controlled_dispensing_periodicity_days,
-          controlled_dispensing_theoretical_renewal_date)
-         VALUES (?, ?, ?, 1, 28, ?)`,
+        `INSERT INTO treatments (id, specialty_cis, specialty_name) VALUES (?, ?, ?)`,
       )
-      .run(id, cis, `Médicament ${cis}`, theoreticalRenewalDate);
+      .run(id, cis, `Médicament ${cis}`);
+    const prescriptionId = Number(
+      raw
+        .prepare(
+          `INSERT INTO prescriptions (label, issue_date, valid_until)
+           VALUES ('Ordo', '2026-08-01', '2026-12-01')`,
+        )
+        .run().lastInsertRowid,
+    );
+    raw
+      .prepare(
+        `INSERT INTO prescription_items
+         (prescription_id, treatment_id, quantity_kind, duration_days,
+          dispensing_mode, periodicity_days, theoretical_renewal_date)
+         VALUES (?, ?, 'DURATION', 28, 'FRACTIONAL', 28, ?)`,
+      )
+      .run(prescriptionId, id, theoreticalRenewalDate);
   }
 
   function threeDaySnapshot(
@@ -1093,15 +1107,29 @@ describe('complément ultérieur d’une case en attente (ticket 30b)', () => {
     cis: string,
     theoreticalRenewalDate: string | null,
   ): void {
+    // Ligne d'ordonnance en mode FRACTIONAL (ticket 45), remplace l'ancien
+    // `treatments.controlled_dispensing_enabled = 1`.
     raw
       .prepare(
-        `INSERT INTO treatments
-         (id, specialty_cis, specialty_name, controlled_dispensing_enabled,
-          controlled_dispensing_periodicity_days,
-          controlled_dispensing_theoretical_renewal_date)
-         VALUES (?, ?, ?, 1, 28, ?)`,
+        `INSERT INTO treatments (id, specialty_cis, specialty_name) VALUES (?, ?, ?)`,
       )
-      .run(id, cis, `Médicament ${cis}`, theoreticalRenewalDate);
+      .run(id, cis, `Médicament ${cis}`);
+    const prescriptionId = Number(
+      raw
+        .prepare(
+          `INSERT INTO prescriptions (label, issue_date, valid_until)
+           VALUES ('Ordo', '2026-08-01', '2026-12-01')`,
+        )
+        .run().lastInsertRowid,
+    );
+    raw
+      .prepare(
+        `INSERT INTO prescription_items
+         (prescription_id, treatment_id, quantity_kind, duration_days,
+          dispensing_mode, periodicity_days, theoretical_renewal_date)
+         VALUES (?, ?, 'DURATION', 28, 'FRACTIONAL', 28, ?)`,
+      )
+      .run(prescriptionId, id, theoreticalRenewalDate);
   }
 
   function threeDaySnapshot(

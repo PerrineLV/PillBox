@@ -256,6 +256,13 @@ describe('suivi local des prises', () => {
   it('préserve identité et snapshot après recalcul, recréation des phases et archivage', async () => {
     const { raw, database } = await setup();
     await materializeIntakeSnapshots(database, [snapshot]);
+    // Une prise UNSET (jamais prise ni ignorée) n'empêche plus la suppression
+    // définitive : ce n'est qu'un aide-mémoire de planification. On marque
+    // donc ici la prise comme réellement effectuée, pour vérifier que
+    // l'archivage (seule option restante) préserve bien le snapshot
+    // d'origine, comme la suppression le ferait pour une prise jamais prise.
+    await updateIntakeStatus(database, snapshot.key, 'TAKEN');
+    // Un recalcul après la décision explicite ne doit jamais la réécrire.
     await materializeIntakeSnapshots(database, [
       { ...snapshot, specialtyName: 'Nom modifié', quantityHalfUnits: 6 },
     ]);
@@ -280,14 +287,7 @@ describe('suivi local des prises', () => {
         maxQuantityPerDayHalfUnits: null,
         minIntervalHours: null,
       },
-      controlledDispensing: null,
     });
-    // Une prise UNSET (jamais prise ni ignorée) n'empêche plus la suppression
-    // définitive : ce n'est qu'un aide-mémoire de planification. On marque
-    // donc ici la prise comme réellement effectuée, pour vérifier que
-    // l'archivage (seule option restante) préserve bien le snapshot
-    // d'origine, comme la suppression le ferait pour une prise jamais prise.
-    await updateIntakeStatus(database, snapshot.key, 'TAKEN');
     expect(await getTreatmentRemovalAction(database, 1)).toBe('ARCHIVE');
     await archiveTreatment(database, 1);
     const record = (
@@ -306,6 +306,71 @@ describe('suivi local des prises', () => {
     expect(
       raw.prepare('SELECT COUNT(*) count FROM intake_records').get(),
     ).toEqual({ count: 1 });
+    raw.close();
+  });
+
+  it('répercute une posologie modifiée sur une prise future encore UNSET déjà matérialisée', async () => {
+    const { raw, database } = await setup();
+    await materializeIntakeSnapshots(database, [snapshot]);
+
+    await materializeIntakeSnapshots(database, [
+      {
+        ...snapshot,
+        specialtyName: 'Alpha modifié',
+        pharmaceuticalForm: 'gélule',
+        quantityHalfUnits: 4,
+      },
+    ]);
+
+    const record = (
+      await listIntakeHistory(database, {
+        startDate: null,
+        endDate: '2026-08-31',
+        treatmentId: null,
+      })
+    )[0];
+    expect(record).toMatchObject({
+      key: snapshot.key,
+      status: 'UNSET',
+      specialtyName: 'Alpha modifié',
+      pharmaceuticalForm: 'gélule',
+      quantityHalfUnits: 4,
+    });
+    raw.close();
+  });
+
+  it('ne modifie jamais une prise TAKEN ou SKIPPED déjà matérialisée, même si la posologie source a changé', async () => {
+    const { raw, database } = await setup();
+    await materializeIntakeSnapshots(database, [snapshot, beta]);
+    await updateIntakeStatus(database, snapshot.key, 'TAKEN');
+    await updateIntakeStatus(database, beta.key, 'SKIPPED');
+    raw.exec(`UPDATE intake_records SET updated_at = '2020-01-01 00:00:00'`);
+
+    await materializeIntakeSnapshots(database, [
+      { ...snapshot, specialtyName: 'Nom modifié', quantityHalfUnits: 6 },
+      { ...beta, specialtyName: 'Nom modifié', quantityHalfUnits: 6 },
+    ]);
+
+    const rows = raw
+      .prepare(
+        `SELECT specialty_name, quantity_half_units, status, updated_at
+         FROM intake_records ORDER BY specialty_name`,
+      )
+      .all();
+    expect(rows).toEqual([
+      {
+        specialty_name: 'Alpha',
+        quantity_half_units: 2,
+        status: 'TAKEN',
+        updated_at: '2020-01-01 00:00:00',
+      },
+      {
+        specialty_name: 'Beta',
+        quantity_half_units: 2,
+        status: 'SKIPPED',
+        updated_at: '2020-01-01 00:00:00',
+      },
+    ]);
     raw.close();
   });
 

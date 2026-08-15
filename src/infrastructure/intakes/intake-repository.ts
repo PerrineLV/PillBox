@@ -29,6 +29,15 @@ export type IntakeSnapshot = Omit<
   'status' | 'createdAt' | 'updatedAt'
 >;
 
+/**
+ * Matérialise les prochaines prises à partir de la posologie source.
+ *
+ * Une prise déjà matérialisée mais encore `UNSET` n'a fait l'objet d'aucune
+ * décision : si la posologie a changé depuis, ses champs dérivés sont mis à
+ * jour. Une prise `TAKEN` ou `SKIPPED` traduit une décision explicite de
+ * l'utilisatrice ; elle n'est jamais réécrite, quelle que soit la posologie
+ * source au moment du recalcul.
+ */
 export async function materializeIntakeSnapshots(
   database: SQLiteDatabase,
   snapshots: readonly IntakeSnapshot[],
@@ -36,10 +45,16 @@ export async function materializeIntakeSnapshots(
   await database.withExclusiveTransactionAsync(async (transaction) => {
     for (const snapshot of snapshots) {
       await transaction.runAsync(
-        `INSERT OR IGNORE INTO intake_records
+        `INSERT INTO intake_records
          (intake_key, source_treatment_id, intake_date, slot, specialty_cis,
           specialty_name, pharmaceutical_form, quantity_half_units)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(intake_key) DO UPDATE SET
+           specialty_name = excluded.specialty_name,
+           pharmaceutical_form = excluded.pharmaceutical_form,
+           quantity_half_units = excluded.quantity_half_units,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE intake_records.status = 'UNSET'`,
         snapshot.key,
         snapshot.treatmentId,
         snapshot.date,

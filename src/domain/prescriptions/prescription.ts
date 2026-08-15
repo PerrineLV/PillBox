@@ -1,0 +1,277 @@
+import { addCivilDays } from '@/domain/shared/dates';
+
+/**
+ * Une ordonnance (ticket 45) : période de validité purement informative,
+ * jamais bloquante. `status` n'est pas stocké : il est recalculé par le
+ * repository à partir de `validUntil` et d'une confirmation explicite de
+ * remplacement (ticket 48, jamais automatique — voir
+ * `computePrescriptionStatus` et `confirmPrescriptionReplacement`).
+ */
+export const PRESCRIPTION_STATUSES = ['ACTIVE', 'EXPIRED', 'REPLACED'] as const;
+export type PrescriptionStatus = (typeof PRESCRIPTION_STATUSES)[number];
+
+export type Prescription = {
+  id: number;
+  /** Texte libre court (ex. "ordo psychiatre") : jamais le nom du médecin. */
+  label: string;
+  issueDate: string;
+  /** `null` lorsque l'utilisatrice ne connaît pas encore la fin de validité. */
+  validUntil: string | null;
+  status: PrescriptionStatus;
+};
+
+export type PrescriptionDraft = Omit<Prescription, 'id' | 'status'>;
+
+/**
+ * Ordre d'affichage de la liste des ordonnances (ticket 46) : les actives
+ * d'abord, puis par fin de validité croissante — une fin inconnue (`null`)
+ * est traitée comme la plus lointaine, jamais mise en avant faute
+ * d'information.
+ */
+export function comparePrescriptionsForList(
+  left: Prescription,
+  right: Prescription,
+): number {
+  const leftActive = left.status === 'ACTIVE' ? 0 : 1;
+  const rightActive = right.status === 'ACTIVE' ? 0 : 1;
+  if (leftActive !== rightActive) return leftActive - rightActive;
+  if (left.validUntil === right.validUntil) return 0;
+  if (left.validUntil === null) return 1;
+  if (right.validUntil === null) return -1;
+  return left.validUntil.localeCompare(right.validUntil);
+}
+
+/**
+ * Ligne d'ordonnance reliant une `Prescription` à un `Treatment`. Un même
+ * traitement peut avoir plusieurs `PrescriptionItem` dans le temps (une par
+ * ordonnance qui l'a couvert) ; au plus un item « actif » par traitement a du
+ * sens fonctionnellement, mais ce n'est pas contraint en base (ticket 45).
+ */
+export const PRESCRIPTION_ITEM_QUANTITY_KINDS = [
+  'DURATION',
+  'BOX_COUNT',
+] as const;
+export type PrescriptionItemQuantityKind =
+  (typeof PRESCRIPTION_ITEM_QUANTITY_KINDS)[number];
+
+export const PRESCRIPTION_ITEM_DISPENSING_MODES = [
+  'FULL',
+  'FRACTIONAL',
+] as const;
+export type PrescriptionItemDispensingMode =
+  (typeof PRESCRIPTION_ITEM_DISPENSING_MODES)[number];
+
+export type PrescriptionItem = {
+  id: number;
+  prescriptionId: number;
+  treatmentId: number;
+  quantityKind: PrescriptionItemQuantityKind;
+  /** Nombre de jours couverts, uniquement pour `quantityKind: 'DURATION'`. */
+  durationDays: number | null;
+  /** Nombre de boîtes délivrées, uniquement pour `quantityKind: 'BOX_COUNT'`. */
+  boxCount: number | null;
+  dispensingMode: PrescriptionItemDispensingMode;
+  /** Nombre de jours entre deux délivrances, uniquement en mode `FRACTIONAL`. */
+  periodicityDays: number | null;
+  lastDispensedAt: string | null;
+  /**
+   * Recalculée automatiquement depuis `lastDispensedAt` + `periodicityDays`
+   * lorsque `lastDispensedAt` change, mais reste modifiable directement et
+   * indépendamment (chevauchement exceptionnel d'ordonnances).
+   */
+  theoreticalRenewalDate: string | null;
+  /**
+   * Marge en jours autour de `theoreticalRenewalDate`, uniquement
+   * significative en mode `FRACTIONAL`. `null`/0 pour une spécialité
+   * détectée stupéfiant par la BDPM (périodicité déjà encadrée côté
+   * pharmacie) ; une valeur raisonnable (ex. 3 jours) est suggérée par
+   * l'UI pour les autres, modifiable ligne par ligne.
+   */
+  toleranceDays: number | null;
+};
+
+export type PrescriptionItemDraft = Omit<PrescriptionItem, 'id'>;
+
+export const DEFAULT_FRACTIONAL_TOLERANCE_DAYS = 3;
+
+/**
+ * Suggestion affichée par l'UI de saisie (ticket 46), jamais appliquée
+ * silencieusement : `null` pour une spécialité détectée stupéfiant par la
+ * BDPM, une valeur raisonnable pour les autres, toujours modifiable.
+ */
+export function suggestedToleranceDays(
+  isControlledSubstance: boolean,
+): number | null {
+  return isControlledSubstance ? null : DEFAULT_FRACTIONAL_TOLERANCE_DAYS;
+}
+
+export function computeTheoreticalRenewalDate(
+  lastDispensedAt: string,
+  periodicityDays: number,
+): string {
+  assertCivilDate(
+    lastDispensedAt,
+    'La date de dernière délivrance est invalide.',
+  );
+  if (!Number.isSafeInteger(periodicityDays) || periodicityDays <= 0)
+    throw new Error(
+      'La périodicité de délivrance doit être un nombre de jours positif.',
+    );
+  const date = new Date(`${lastDispensedAt}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + periodicityDays);
+  return date.toISOString().slice(0, 10);
+}
+
+export type TheoreticalRenewalWindow = Readonly<{ start: string; end: string }>;
+
+/**
+ * Fenêtre de délivrance possible autour d'une date théorique de
+ * renouvellement (ticket 47). Sans tolérance (stupéfiants, `toleranceDays`
+ * nul), la fenêtre se réduit à la date théorique elle-même : comportement
+ * exact inchangé depuis le ticket 30.
+ */
+export function theoreticalRenewalWindow(
+  theoreticalRenewalDate: string,
+  toleranceDays: number | null,
+): TheoreticalRenewalWindow {
+  const tolerance =
+    toleranceDays !== null && toleranceDays > 0 ? toleranceDays : 0;
+  return Object.freeze({
+    start: addCivilDays(theoreticalRenewalDate, -tolerance),
+    end: addCivilDays(theoreticalRenewalDate, tolerance),
+  });
+}
+
+/**
+ * `isReplaced` est déterminé par l'appelant (repository) à partir d'une
+ * confirmation explicite de l'utilisatrice (ticket 48,
+ * `confirmPrescriptionReplacement`), jamais automatiquement à la seule
+ * présence d'une ordonnance plus récente. Purement informatif, jamais
+ * bloquant. Une fin de validité inconnue (`null`) ne rend jamais une
+ * ordonnance EXPIRED par elle-même : seul un remplacement confirmé la fait
+ * changer de statut.
+ */
+export function computePrescriptionStatus(
+  prescription: { validUntil: string | null },
+  isReplaced: boolean,
+  today: string,
+): PrescriptionStatus {
+  if (isReplaced) return 'REPLACED';
+  if (prescription.validUntil === null) return 'ACTIVE';
+  return prescription.validUntil >= today ? 'ACTIVE' : 'EXPIRED';
+}
+
+/**
+ * Fenêtre calendaire, date du jour incluse, avant `validUntil` où une
+ * ordonnance active est jugée proche de sa fin de validité (ticket 48) :
+ * même valeur que `EXPIRATION_WARNING_DAYS` (péremption des boîtes,
+ * `inventory-alerts.ts`), seul autre seuil d'approche du projet, pour rester
+ * cohérent sans dupliquer une règle pharmaceutique — c'est un choix de
+ * confort, jamais un délai médical.
+ */
+export const PRESCRIPTION_VALIDITY_WARNING_DAYS = 30;
+
+/**
+ * Une ordonnance déjà `EXPIRED` ou `REPLACED` ne redemande jamais de rendez-
+ * vous ici : cette alerte anticipe uniquement la fin de validité d'une
+ * ordonnance encore `ACTIVE`, distincte de l'alerte de renouvellement en
+ * pharmacie (ticket 47) qui concerne la délivrance, pas la validité de
+ * l'ordonnance.
+ */
+export function isPrescriptionValidityApproaching(
+  prescription: Readonly<{
+    status: PrescriptionStatus;
+    validUntil: string | null;
+  }>,
+  today: string,
+  warningDays: number = PRESCRIPTION_VALIDITY_WARNING_DAYS,
+): boolean {
+  if (prescription.status !== 'ACTIVE' || prescription.validUntil === null)
+    return false;
+  return addCivilDays(prescription.validUntil, -warningDays) <= today;
+}
+
+export function assertValidPrescriptionDraft(draft: PrescriptionDraft): void {
+  if (draft.label.trim() === '')
+    throw new Error('L’ordonnance doit avoir un intitulé.');
+  assertCivilDate(draft.issueDate, 'La date d’émission est invalide.');
+  if (draft.validUntil === null) return;
+  assertCivilDate(draft.validUntil, 'La date de fin de validité est invalide.');
+  if (draft.validUntil < draft.issueDate)
+    throw new Error('La fin de validité doit suivre la date d’émission.');
+}
+
+export function assertValidPrescriptionItemDraft(
+  draft: PrescriptionItemDraft,
+): void {
+  if (draft.quantityKind === 'DURATION') {
+    if (
+      !Number.isSafeInteger(draft.durationDays) ||
+      (draft.durationDays as number) <= 0
+    )
+      throw new Error(
+        'La durée couverte doit être un nombre de jours positif.',
+      );
+    if (draft.boxCount !== null)
+      throw new Error(
+        'Un nombre de boîtes n’a pas de sens pour une ligne exprimée en durée.',
+      );
+  } else {
+    if (
+      !Number.isSafeInteger(draft.boxCount) ||
+      (draft.boxCount as number) <= 0
+    )
+      throw new Error(
+        'Le nombre de boîtes délivrées doit être un entier positif.',
+      );
+    if (draft.durationDays !== null)
+      throw new Error(
+        'Une durée n’a pas de sens pour une ligne exprimée en nombre de boîtes.',
+      );
+  }
+
+  if (draft.dispensingMode === 'FULL') {
+    if (
+      draft.periodicityDays !== null ||
+      draft.lastDispensedAt !== null ||
+      draft.theoreticalRenewalDate !== null ||
+      draft.toleranceDays !== null
+    )
+      throw new Error(
+        'Une délivrance unique ne porte ni périodicité, ni date, ni tolérance.',
+      );
+    return;
+  }
+
+  if (
+    !Number.isSafeInteger(draft.periodicityDays) ||
+    (draft.periodicityDays as number) <= 0
+  )
+    throw new Error(
+      'La périodicité de délivrance doit être un nombre de jours positif.',
+    );
+  if (draft.lastDispensedAt !== null)
+    assertCivilDate(
+      draft.lastDispensedAt,
+      'La date de dernière délivrance est invalide.',
+    );
+  if (draft.theoreticalRenewalDate !== null)
+    assertCivilDate(
+      draft.theoreticalRenewalDate,
+      'La date de renouvellement théorique est invalide.',
+    );
+  if (
+    draft.toleranceDays !== null &&
+    (!Number.isSafeInteger(draft.toleranceDays) || draft.toleranceDays < 0)
+  )
+    throw new Error(
+      'La tolérance doit être un nombre de jours positif ou nul.',
+    );
+}
+
+function assertCivilDate(value: string, message: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error(message);
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value)
+    throw new Error(message);
+}

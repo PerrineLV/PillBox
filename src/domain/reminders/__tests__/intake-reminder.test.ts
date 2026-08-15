@@ -33,7 +33,6 @@ function treatment(
     archivedAt: null,
     phases: [scheduledPhase(id * 10, frequency)],
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
-    controlledDispensing: null,
     ...overrides,
   };
 }

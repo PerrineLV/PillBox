@@ -24,7 +24,6 @@ const treatment = (): Treatment => ({
     },
   ],
   asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
-  controlledDispensing: null,
 });
 
 const box = (overrides: Partial<MedicationBox> = {}): MedicationBox => ({

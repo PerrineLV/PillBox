@@ -27,6 +27,11 @@ export function attentionItemHref(item: AttentionItem): Href {
         pathname: '/treatments/[id]',
         params: { id: String(item.treatmentId) },
       };
+    case 'PRESCRIPTION_EXPIRY':
+      return {
+        pathname: '/prescriptions/[id]',
+        params: { id: String(item.prescriptionId) },
+      };
   }
 }
 
@@ -45,5 +50,7 @@ export function attentionItemActionLabel(item: AttentionItem): string {
       return 'Voir la boîte';
     case 'AS_NEEDED_INFO':
       return 'Voir le traitement';
+    case 'PRESCRIPTION_EXPIRY':
+      return 'Voir l’ordonnance';
   }
 }

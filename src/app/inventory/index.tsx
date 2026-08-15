@@ -13,9 +13,11 @@ import {
   usableQuantity,
   type MedicationBox,
 } from '@/domain/inventory/inventory';
+import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { listPreparationWeeks } from '@/infrastructure/preparations/preparation-repository';
+import { listPrescriptionItems } from '@/infrastructure/prescriptions/prescription-repository';
 import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import { buildInventoryAlerts } from '@/domain/alerts/inventory-alerts';
@@ -54,6 +56,9 @@ export default function InventoryScreen() {
     new Set(),
   );
   const [treatments, setTreatments] = useState<Treatment[]>([]);
+  const [prescriptionItems, setPrescriptionItems] = useState<
+    PrescriptionItem[]
+  >([]);
 
   // Une carte d'attention de l'accueil peut ouvrir directement l'onglet
   // « À renouveler » : le paramètre n'est appliqué qu'aux valeurs connues.
@@ -73,35 +78,45 @@ export default function InventoryScreen() {
         listTreatments(database),
         listPreparationWeeks(database),
         listAllGenericEquivalenceConfirmations(database),
+        listPrescriptionItems(database),
       ])
-        .then(([items, treatments, preparations, equivalenceConfirmations]) => {
-          if (active) {
-            setBoxes(items);
-            setTreatments(treatments);
-            const today = todayIso();
-            const equivalences = equivalenceConfirmations.map(
-              (confirmation) => ({
-                treatmentId: confirmation.treatmentId,
-                cis: confirmation.cis,
-              }),
-            );
-            const alerts = buildInventoryAlerts(treatments, items, today, {
-              equivalences,
-            });
-            setExpiringBoxIds(
-              new Set(alerts.expirations.map((item) => item.boxId)),
-            );
-            setForecast(
-              buildStockForecast(treatments, items, today, preparations, {
+        .then(
+          ([
+            items,
+            treatments,
+            preparations,
+            equivalenceConfirmations,
+            fetchedPrescriptionItems,
+          ]) => {
+            if (active) {
+              setBoxes(items);
+              setTreatments(treatments);
+              setPrescriptionItems(fetchedPrescriptionItems);
+              const today = todayIso();
+              const equivalences = equivalenceConfirmations.map(
+                (confirmation) => ({
+                  treatmentId: confirmation.treatmentId,
+                  cis: confirmation.cis,
+                }),
+              );
+              const alerts = buildInventoryAlerts(treatments, items, today, {
                 equivalences,
-              }),
-            );
-            setAttachedCis(
-              buildAttachedSpecialtyCisSet(treatments, equivalences),
-            );
-            setError(null);
-          }
-        })
+              });
+              setExpiringBoxIds(
+                new Set(alerts.expirations.map((item) => item.boxId)),
+              );
+              setForecast(
+                buildStockForecast(treatments, items, today, preparations, {
+                  equivalences,
+                }),
+              );
+              setAttachedCis(
+                buildAttachedSpecialtyCisSet(treatments, equivalences),
+              );
+              setError(null);
+            }
+          },
+        )
         .catch((reason: unknown) => {
           if (active)
             setError(
@@ -126,21 +141,38 @@ export default function InventoryScreen() {
       ),
     [forecast],
   );
+  // Une boîte épuisée n'a plus aucune utilité opérationnelle sur cet écran
+  // (ticket 49) : masquée de l'affichage (liste, regroupements, compteur),
+  // jamais supprimée — son historique reste consultable depuis la
+  // Chronologie, et la fiche boîte reste accessible par un lien direct.
+  const visibleBoxes = useMemo(
+    () => boxes.filter((box) => box.remainingQuantity > 0),
+    [boxes],
+  );
   const filteredBoxes = useMemo(
     () =>
-      boxes.filter(
+      visibleBoxes.filter(
         (box) =>
           filter === 'all' ||
           (filter === 'expiring' && expiringBoxIds.has(box.id)),
       ),
-    [boxes, expiringBoxIds, filter],
+    [visibleBoxes, expiringBoxIds, filter],
   );
   const groups = useMemo(() => groupBoxes(filteredBoxes), [filteredBoxes]);
-  const renewalList = useMemo(
-    () => (forecast ? buildRenewalList(forecast, treatments) : []),
-    [forecast, treatments],
-  );
   const today = todayIso();
+  const renewalList = useMemo(
+    () =>
+      forecast
+        ? buildRenewalList(
+            forecast,
+            treatments,
+            prescriptionItems,
+            boxes,
+            today,
+          )
+        : [],
+    [forecast, treatments, prescriptionItems, boxes, today],
+  );
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -150,8 +182,8 @@ export default function InventoryScreen() {
             Stock
           </Text>
           <Text style={typography.caption}>
-            {boxes.length} boîte{boxes.length > 1 ? 's' : ''} enregistrée
-            {boxes.length > 1 ? 's' : ''}
+            {visibleBoxes.length} boîte{visibleBoxes.length > 1 ? 's' : ''}{' '}
+            enregistrée{visibleBoxes.length > 1 ? 's' : ''}
           </Text>
         </View>
         <Link href="/inventory/new" style={styles.add}>
@@ -185,7 +217,7 @@ export default function InventoryScreen() {
       {!loading && !error && filter === 'renew' ? (
         <RenewalList items={renewalList} />
       ) : null}
-      {!loading && !error && filter !== 'renew' && boxes.length === 0 ? (
+      {!loading && !error && filter !== 'renew' && visibleBoxes.length === 0 ? (
         <EmptyState
           title="Aucune boîte enregistrée"
           description="Scannez le DataMatrix d’une boîte, ou ajoutez-la sans DataMatrix, pour suivre son lot, sa péremption et sa quantité."
@@ -194,7 +226,7 @@ export default function InventoryScreen() {
       {!loading &&
       !error &&
       filter !== 'renew' &&
-      boxes.length > 0 &&
+      visibleBoxes.length > 0 &&
       groups.length === 0 ? (
         <EmptyState
           title="Aucune boîte pour ce filtre"

@@ -15,6 +15,8 @@ import { listTreatments } from '@/infrastructure/treatments/treatment-repository
 export type TimelineQueryFilters = Readonly<{
   /** `null` charge la timeline de tous les traitements. */
   treatmentId: number | null;
+  /** Date civile `YYYY-MM-DD` ; `null` = pas de borne basse. */
+  startDate: string | null;
 }>;
 
 /**
@@ -36,6 +38,8 @@ export async function listTimelineEvents(
 
   const ids = relevantTreatments.map((treatment) => treatment.id);
   const placeholders = ids.map(() => '?').join(', ');
+  const startDate = filters.startDate;
+  const startDateParameters = startDate === null ? [] : [startDate];
 
   const createdAtRows = await database.getAllAsync<{
     id: number;
@@ -63,8 +67,11 @@ export async function listTimelineEvents(
     occurred_at: string;
   }>(
     `SELECT treatment_id, event_type, occurred_at FROM treatment_lifecycle_events
-     WHERE treatment_id IN (${placeholders}) ORDER BY occurred_at`,
+     WHERE treatment_id IN (${placeholders})
+     ${startDate === null ? '' : 'AND occurred_at >= ?'}
+     ORDER BY occurred_at`,
     ...ids,
+    ...startDateParameters,
   );
   const lifecycleEvents: TimelineLifecycleEventSource[] = lifecycleRows.map(
     (row) => {
@@ -109,8 +116,10 @@ export async function listTimelineEvents(
        ON usage.preparation_id = items.preparation_id
       AND usage.specialty_cis = items.specialty_cis
      WHERE items.source_treatment_id IN (${placeholders})
+     ${startDate === null ? '' : 'AND prep.completed_at >= ?'}
      ORDER BY prep.completed_at, usage.box_id`,
     ...ids,
+    ...startDateParameters,
   );
   const preparations: TimelinePreparationSource[] = preparationRows.map(
     (row) => ({
@@ -137,15 +146,20 @@ export async function listTimelineEvents(
     explanation: string;
     created_at: string;
     specialty_name: string;
+    lot: string | null;
+    expiration_date: string;
   }>(
     `SELECT t.id AS treatment_id, sm.id, sm.type, sm.quantity_delta,
-      sm.explanation, sm.created_at, box.specialty_name
+      sm.explanation, sm.created_at, box.specialty_name, box.lot,
+      box.expiration_date
      FROM stock_movements sm
      JOIN medication_boxes box ON box.id = sm.box_id
      JOIN treatments t ON t.specialty_cis = box.specialty_cis
      WHERE sm.type <> 'PILLBOX_PREPARATION' AND t.id IN (${placeholders})
+     ${startDate === null ? '' : 'AND sm.created_at >= ?'}
      ORDER BY sm.created_at`,
     ...ids,
+    ...startDateParameters,
   );
   const stockMovements: TimelineStockMovementSource[] = movementRows.map(
     (row) => {
@@ -165,6 +179,8 @@ export async function listTimelineEvents(
         explanation: row.explanation,
         createdAt: row.created_at,
         specialtyName: row.specialty_name,
+        lot: row.lot,
+        expirationDate: row.expiration_date,
       };
     },
   );
@@ -183,8 +199,10 @@ export async function listTimelineEvents(
       status, quantity_half_units, updated_at, specialty_name
      FROM intake_records
      WHERE status <> 'UNSET' AND source_treatment_id IN (${placeholders})
+     ${startDate === null ? '' : 'AND updated_at >= ?'}
      ORDER BY updated_at`,
     ...ids,
+    ...startDateParameters,
   );
   const intakeRecords: TimelineIntakeSource[] = intakeRows.map((row) => {
     if (!isIntakeSlot(row.slot))

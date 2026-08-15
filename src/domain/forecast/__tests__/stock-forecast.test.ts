@@ -38,7 +38,6 @@ const treatment = (overrides: Partial<Treatment> = {}): Treatment => ({
   archivedAt: null,
   phases: [phase()],
   asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
-  controlledDispensing: null,
   ...overrides,
 });
 

@@ -63,60 +63,6 @@ export type AsNeededInfo = {
   minIntervalHours: number | null;
 };
 
-/**
- * Suivi purement informatif d'une délivrance encadrée par la réglementation
- * (stupéfiants et assimilés, délivrance fractionnée — ticket 30). N'est
- * proposable que pour une spécialité repérée par la détection BDPM
- * (`CIS_CPD_bdpm`) ; ne conditionne jamais generatePreparationSnapshot,
- * buildStockForecast ni buildRenewalList : seul le stock réel autorise un
- * remplissage complet, quelle que soit `theoreticalRenewalDate`.
- */
-export type ControlledDispensingInfo = {
-  enabled: boolean;
-  /** Nombre de jours entre deux délivrances. */
-  periodicityDays: number;
-  lastDispensedAt: string | null;
-  /**
-   * Recalculée automatiquement depuis `lastDispensedAt` + `periodicityDays`
-   * lorsque `lastDispensedAt` change, mais reste modifiable directement et
-   * indépendamment (chevauchement exceptionnel d'ordonnances).
-   */
-  theoreticalRenewalDate: string | null;
-};
-
-export const DEFAULT_CONTROLLED_DISPENSING_PERIODICITY_DAYS = 28;
-
-/**
- * État initial proposé lorsque la détection BDPM repère la spécialité :
- * l'indicateur est pré-coché mais reste modifiable (jamais activé
- * silencieusement, jamais imposé).
- */
-export function defaultControlledDispensingInfo(): ControlledDispensingInfo {
-  return {
-    enabled: true,
-    periodicityDays: DEFAULT_CONTROLLED_DISPENSING_PERIODICITY_DAYS,
-    lastDispensedAt: null,
-    theoreticalRenewalDate: null,
-  };
-}
-
-export function computeTheoreticalRenewalDate(
-  lastDispensedAt: string,
-  periodicityDays: number,
-): string {
-  assertCivilDate(
-    lastDispensedAt,
-    'La date de dernière délivrance est invalide.',
-  );
-  if (!Number.isSafeInteger(periodicityDays) || periodicityDays <= 0)
-    throw new Error(
-      'La périodicité de délivrance doit être un nombre de jours positif.',
-    );
-  const date = new Date(`${lastDispensedAt}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + periodicityDays);
-  return date.toISOString().slice(0, 10);
-}
-
 export type Treatment = {
   id: number;
   specialtyCis: string;
@@ -127,8 +73,6 @@ export type Treatment = {
   archivedAt: string | null;
   phases: TreatmentPhase[];
   asNeededInfo: AsNeededInfo;
-  /** `null` lorsque la détection BDPM n'a jamais repéré cette spécialité. */
-  controlledDispensing: ControlledDispensingInfo | null;
 };
 
 export type TreatmentDraft = Omit<Treatment, 'id' | 'archivedAt'>;
@@ -271,26 +215,6 @@ function assertValidDosage(
     if (keys.has(key)) throw new Error('Une prise est définie plusieurs fois.');
     keys.add(key);
   }
-}
-
-export function assertValidControlledDispensingInfo(
-  info: ControlledDispensingInfo | null,
-): void {
-  if (info === null) return;
-  if (!Number.isSafeInteger(info.periodicityDays) || info.periodicityDays <= 0)
-    throw new Error(
-      'La périodicité de délivrance doit être un nombre de jours positif.',
-    );
-  if (info.lastDispensedAt !== null)
-    assertCivilDate(
-      info.lastDispensedAt,
-      'La date de dernière délivrance est invalide.',
-    );
-  if (info.theoreticalRenewalDate !== null)
-    assertCivilDate(
-      info.theoreticalRenewalDate,
-      'La date de renouvellement théorique est invalide.',
-    );
 }
 
 function assertCivilDate(value: string, message: string): void {

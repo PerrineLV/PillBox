@@ -2,6 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import {
   renewalAvailabilityLabel,
+  renewalRunsOutBeforeWindowLabel,
   renewalRuptureLabel,
   renewalTheoreticalRenewalLabel,
   renewalUrgencyTone,
@@ -12,6 +13,7 @@ import {
   Card,
   EmptyState,
   RENEWAL_URGENCY_LABELS,
+  colors,
   spacing,
   typography,
 } from '@/ui';
@@ -48,6 +50,11 @@ export function RenewalList({
               {renewalTheoreticalRenewalLabel(item)}
             </Text>
           ) : null}
+          {renewalRunsOutBeforeWindowLabel(item) !== null ? (
+            <Text style={[typography.caption, styles.alert]}>
+              {renewalRunsOutBeforeWindowLabel(item)}
+            </Text>
+          ) : null}
         </Card>
       ))}
     </View>
@@ -55,6 +62,7 @@ export function RenewalList({
 }
 
 const styles = StyleSheet.create({
+  alert: { color: colors.danger },
   card: { gap: spacing.sm },
   list: { gap: spacing.md },
 });

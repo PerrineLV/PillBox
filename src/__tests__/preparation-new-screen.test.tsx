@@ -4,10 +4,8 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { generatePreparationSnapshot } from '@/domain/preparations/preparation';
 import type { MedicationBox } from '@/domain/inventory/inventory';
-import {
-  defaultControlledDispensingInfo,
-  type Treatment,
-} from '@/domain/treatments/treatment';
+import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
+import type { Treatment } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { getGenericGroupMembers } from '@/infrastructure/medications/medication-reference';
 import {
@@ -18,6 +16,7 @@ import {
   savePreparationProgress,
   type SavedPreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
+import { listPrescriptionItems } from '@/infrastructure/prescriptions/prescription-repository';
 import { schedulePendingCompletionReminderFor } from '@/infrastructure/reminders/pending-completion-reminder-scheduler';
 import {
   confirmGenericEquivalence,
@@ -62,6 +61,9 @@ jest.mock('@/infrastructure/preparations/preparation-repository', () => ({
   listPreparationWeeks: jest.fn(),
   savePreparationProgress: jest.fn(),
 }));
+jest.mock('@/infrastructure/prescriptions/prescription-repository', () => ({
+  listPrescriptionItems: jest.fn(),
+}));
 jest.mock(
   '@/infrastructure/reminders/pending-completion-reminder-scheduler',
   () => ({
@@ -92,6 +94,7 @@ const mockedIsGenericEquivalenceConfirmed =
 const mockedListAllGenericEquivalenceConfirmations =
   listAllGenericEquivalenceConfirmations as jest.Mock;
 const mockedListTreatments = listTreatments as jest.Mock;
+const mockedListPrescriptionItems = listPrescriptionItems as jest.Mock;
 
 function treatment(overrides: Partial<Treatment> = {}): Treatment {
   return {
@@ -112,7 +115,25 @@ function treatment(overrides: Partial<Treatment> = {}): Treatment {
       },
     ],
     asNeededInfo: { maxQuantityPerDayHalfUnits: null, minIntervalHours: null },
-    controlledDispensing: null,
+    ...overrides,
+  };
+}
+
+function fractionalPrescriptionItem(
+  overrides: Partial<PrescriptionItem> = {},
+): PrescriptionItem {
+  return {
+    id: 1,
+    prescriptionId: 1,
+    treatmentId: 1,
+    quantityKind: 'DURATION',
+    durationDays: 28,
+    boxCount: null,
+    dispensingMode: 'FRACTIONAL',
+    periodicityDays: 28,
+    lastDispensedAt: null,
+    theoreticalRenewalDate: null,
+    toleranceDays: null,
     ...overrides,
   };
 }
@@ -206,6 +227,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockedListAllGenericEquivalenceConfirmations.mockResolvedValue([]);
   mockedGetGenericGroupMembers.mockResolvedValue([]);
+  mockedListPrescriptionItems.mockResolvedValue([]);
 });
 
 describe('validation finale d’une préparation', () => {
@@ -256,9 +278,7 @@ describe('validation finale d’une préparation', () => {
 
 describe('délivrance encadrée : passage en attente de complément', () => {
   it('permet de laisser un médicament à délivrance encadrée active en attente de complément', async () => {
-    const controlled = treatment({
-      controlledDispensing: defaultControlledDispensingInfo(),
-    });
+    const controlled = treatment();
     const snapshot = generatePreparationSnapshot(
       [controlled],
       [],
@@ -274,6 +294,9 @@ describe('délivrance encadrée : passage en attente de complément', () => {
     mockedListMedicationBoxes.mockResolvedValue([]);
     mockedListPreparationWeeks.mockResolvedValue([]);
     mockedListTreatments.mockResolvedValue([controlled]);
+    mockedListPrescriptionItems.mockResolvedValue([
+      fractionalPrescriptionItem({ treatmentId: controlled.id }),
+    ]);
 
     const renderer = await renderScreen();
 
@@ -314,7 +337,6 @@ describe('délivrance encadrée : passage en attente de complément', () => {
       id: 2,
       specialtyCis: '60000002',
       specialtyName: 'Beta',
-      controlledDispensing: defaultControlledDispensingInfo(),
     });
     // Seul « ordinary » a un besoin dans cette semaine : « controlledElsewhere »
     // n'apparaît pas dans le snapshot mais reste dans les traitements chargés.
@@ -333,6 +355,9 @@ describe('délivrance encadrée : passage en attente de complément', () => {
     mockedListMedicationBoxes.mockResolvedValue([]);
     mockedListPreparationWeeks.mockResolvedValue([]);
     mockedListTreatments.mockResolvedValue([ordinary, controlledElsewhere]);
+    mockedListPrescriptionItems.mockResolvedValue([
+      fractionalPrescriptionItem({ treatmentId: controlledElsewhere.id }),
+    ]);
 
     const renderer = await renderScreen();
 

@@ -28,6 +28,7 @@ import {
   listPreparationWeeks,
   type PreparationHistoryEntry,
 } from '@/infrastructure/preparations/preparation-repository';
+import { listPrescriptions } from '@/infrastructure/prescriptions/prescription-repository';
 import {
   getGlobalIntakeReminderSettings,
   isIntakeRemindersEnabled,
@@ -77,6 +78,7 @@ export default function HomeScreen() {
           localCivilDate(lookaheadEnd),
         ),
         listAllGenericEquivalenceConfirmations(database),
+        listPrescriptions(database, today),
       ])
         .then(
           async ([
@@ -89,6 +91,7 @@ export default function HomeScreen() {
             slotTimes,
             pendingIntakeCounts,
             equivalenceConfirmations,
+            prescriptions,
           ]) => {
             const asNeededTreatments = treatments.filter(
               (treatment) =>
@@ -149,6 +152,7 @@ export default function HomeScreen() {
                   equivalences,
                 }).expirations,
                 asNeededTreatments: asNeededInputs,
+                prescriptions,
               }),
             );
             setLastPreparation(history[0] ?? null);
