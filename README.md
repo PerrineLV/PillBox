@@ -1,90 +1,60 @@
 # PillBox
 
-Application mobile personnelle pour faciliter la préparation hebdomadaire d’un pilulier.
+Application Android d'aide à la préparation d'un pilulier hebdomadaire.
 
-L’objectif est de réduire les erreurs pendant le remplissage en combinant :
+[Découvrir l'application](https://perrinelv.github.io/PillBox-landing/) · [Télécharger la dernière version Android](https://github.com/PerrineLV/PillBox/releases/latest/download/pillbox-latest.apk)
 
-* un référentiel réel de médicaments français ;
-* la gestion des traitements et posologies ;
-* le scan du DataMatrix des boîtes, ou leur ajout manuel lorsqu’il est absent ou illisible ;
-* la vérification du lot et de la date de péremption ;
-* le suivi des stocks ;
-* un assistant de préparation du pilulier ;
-* un rappel hebdomadaire local.
+## Pourquoi ce projet ?
 
-## Statut
+PillBox est né d'un besoin personnel : rendre la préparation d'un pilulier plus simple et limiter les erreurs de boîte, de lot ou de date de péremption.
 
-🚧 Projet en cours de développement.
+Mon expérience passée comme préparatrice en pharmacie m'a permis d'identifier les points de vigilance métier. L'application reste toutefois un outil d'organisation : elle ne détermine jamais une posologie et ne fournit aucun conseil médical.
 
-Le projet est développé avant tout pour un usage personnel.
+## Périmètre fonctionnel
 
-## Télécharger l’application
+- Recherche dans la Base de données publique des médicaments
+- Gestion des traitements et des posologies
+- Scan du DataMatrix des boîtes ou ajout manuel depuis le référentiel
+- Identification du médicament, du lot et de la date de péremption
+- Suivi des stocks par boîte et par lot
+- Calcul du contenu d'un pilulier sur sept jours
+- Assistant de remplissage médicament par médicament
+- Vérification de la boîte utilisée pendant la préparation
+- Décrémentation automatique des stocks après validation
+- Historique des préparations et des lots utilisés
+- Rappel hebdomadaire local
+- Alertes de stock faible et de péremption
 
-[Télécharger la dernière version Android de PillBox](https://github.com/PerrineLV/PillBox/releases/latest/download/pillbox-latest.apk)
+## Choix techniques
 
-Lors de l’installation, Android peut demander d’autoriser l’installation d’applications
-provenant du navigateur ou de GitHub.
+| Domaine | Technologies |
+| --- | --- |
+| Application | React Native, Expo, TypeScript, Expo Router |
+| Données locales | SQLite |
+| Scan | Expo Camera |
+| Notifications | Expo Notifications |
+| Tests | Jest |
+| Qualité et livraison | ESLint, Prettier, TypeScript, GitHub Actions |
 
-PillBox vérifie discrètement, au lancement et au retour au premier plan, si une version
-plus récente a été publiée. Le cas échéant, l’accueil affiche une carte proposant
-« Télécharger » et « Plus tard ». Cette information ne bloque jamais l’application : hors
-ligne ou en cas de panne de GitHub, elle n’apparaît simplement pas. Le téléchargement et
-l’installation restent des actions explicites : PillBox ouvre le lien GitHub dans le
-navigateur et n’installe jamais rien elle-même. La version installée est rappelée en bas
-de l’onglet « Plus ».
+PillBox suit une approche **local-first** : les données personnelles de traitement restent sur le téléphone et aucun serveur applicatif n'est nécessaire.
 
-## Fonctionnalités prévues
+## Principes de sécurité
 
-* Recherche de médicaments à partir de la Base de données publique des médicaments
-* Gestion des traitements et posologies
-* Scan DataMatrix des boîtes de médicaments, ou ajout manuel depuis le référentiel
-* Identification du produit, du lot et de la péremption
-* Suivi du stock par boîte et par lot
-* Calcul automatique du contenu d’un pilulier sur 7 jours
-* Choix de la semaine préparée, sans doublon possible pour une semaine déjà validée
-* Assistance au remplissage médicament par médicament
-* Annulation d’une préparation en cours, sans aucun effet sur le stock
-* Vérification de la boîte utilisée pendant la préparation
-* Décrémentation automatique des stocks
-* Historique des préparations et des lots utilisés
-* Notification locale hebdomadaire pour penser à préparer le pilulier
-* Alertes de stock faible et de péremption
+L'application ne doit jamais :
 
-## Stack
+- déterminer ou recommander une posologie
+- remplacer une ordonnance
+- fournir un conseil médical
+- supposer qu'un médicament est équivalent à un autre
+- inventer une information absente du DataMatrix ou du référentiel
 
-* React Native
-* Expo
-* TypeScript
-* Expo Router
-* SQLite
-* Expo Camera
-* Notifications locales Expo
+En cas d'incertitude, PillBox demande une confirmation ou refuse l'automatisation.
 
-Le projet suit une approche **local-first** : les données personnelles de traitement sont destinées à rester sur le téléphone.
+## Règles métier importantes
 
-## Principes
+Le besoin en médicaments est calculé sur les sept jours du prochain pilulier. Les lots périmés sont exclus du stock utilisable. Les alertes distinguent le stock insuffisant, le stock proche du besoin et les lots proches de leur date de péremption.
 
-L’application ne doit jamais :
-
-* déterminer ou recommander une posologie ;
-* remplacer une ordonnance ;
-* fournir un conseil médical ;
-* supposer qu’un médicament est équivalent à un autre ;
-* inventer une information absente du DataMatrix ou du référentiel.
-
-En cas d’incertitude, l’application doit demander confirmation ou refuser l’automatisation.
-
-## Règles des alertes de stock
-
-L’accueil calcule le besoin exact des traitements inclus dans le prochain pilulier,
-sur les sept jours commençant le lendemain. Le stock est « proche du besoin » lorsqu’il
-est suffisant mais ne dépasse pas le besoin de plus de 25 %. Ce pourcentage est défini
-par `LOW_STOCK_MARGIN_PERCENT`.
-
-Un lot non vide est signalé comme proche de sa péremption pendant les 30 jours civils
-qui la précèdent, date du jour comprise. Cette fenêtre est définie par
-`EXPIRATION_WARNING_DAYS`. Un lot déjà périmé n’apparaît pas dans cette alerte et reste
-toujours exclu du stock utilisable.
+Une préparation en cours peut être annulée sans modifier le stock. La décrémentation n'a lieu qu'après validation de la préparation.
 
 ## Développement
 
@@ -94,13 +64,13 @@ Installer les dépendances :
 npm ci
 ```
 
-Lancer l’application :
+Lancer l'application :
 
 ```bash
 npx expo start
 ```
 
-Vérifications :
+Exécuter les vérifications :
 
 ```bash
 npx expo install --check
@@ -111,41 +81,36 @@ npm test
 npm run build:android:check
 ```
 
-## CI et release
+## CI et publication Android
 
-La CI vérifie le formatage, le lint, le typage, les tests et le bundle Android à chaque
-push sur `dev` et à chaque pull request
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+À chaque push sur `dev` et à chaque pull request, la CI vérifie :
 
-Un push sur `main` déclenche en plus la release : les contrôles sont rejoués, un APK
-Android signé est construit, puis publié dans une GitHub Release dont l’asset garde
-toujours le même nom — c’est ce qui rend permanent le lien de téléchargement ci-dessus.
-La version publiée est composée automatiquement à partir de `app.json` et du numéro de
-run. → voir [docs/RELEASE.md](docs/RELEASE.md) pour la procédure complète.
+- la compatibilité des dépendances Expo
+- le formatage
+- le lint
+- le typage TypeScript
+- les tests unitaires
+- la génération du bundle Android
+
+Un push sur `main` relance les contrôles, construit un APK Android signé et le publie dans une GitHub Release. Le nom stable de l'asset permet de conserver un lien de téléchargement permanent.
+
+La procédure complète est décrite dans [`docs/RELEASE.md`](docs/RELEASE.md).
+
+## Référentiel des médicaments
+
+PillBox utilise la Base de données publique des médicaments française comme référentiel.
+
+- Le code CIS identifie une spécialité pharmaceutique
+- Le code CIP13 identifie une présentation commercialisée
+- Les données personnelles de l'utilisateur sont stockées séparément du référentiel national
 
 ## Documentation
 
-* `PROJECT.md` décrit le produit, les règles métier et le périmètre.
-* `AGENTS.md` contient les règles à respecter par les agents de développement utilisés
-  sur le projet.
-* [`docs/RELEASE.md`](docs/RELEASE.md) documente la convention de version, la CI, la
-  publication de l’APK Android signé et les réglages de sécurité GitHub.
-* [`docs/`](docs/) rassemble les autres notes techniques, dont les scénarios de test des
-  rappels locaux sur téléphone.
+- `PROJECT.md` décrit le produit, les règles métier et le périmètre
+- `AGENTS.md` contient les règles suivies par les agents de développement utilisés sur le projet
+- [`docs/RELEASE.md`](docs/RELEASE.md) décrit la publication de l'APK signé
+- [`docs/`](docs/) rassemble les autres notes techniques et scénarios de test
 
-## Données médicaments
+## Avertissement
 
-Le projet prévoit d’utiliser la Base de Données Publique des Médicaments française comme référentiel.
-
-Les médicaments et présentations sont distingués notamment via :
-
-* CIS : spécialité ;
-* CIP13 : présentation.
-
-Les données utilisateur sont stockées séparément du référentiel national.
-
-## Disclaimer
-
-Cette application est un outil personnel d’aide à l’organisation.
-
-Elle ne constitue pas un dispositif de diagnostic ou de conseil médical et ne remplace pas les recommandations d’un médecin ou d’un pharmacien.
+PillBox est un outil personnel d'aide à l'organisation. L'application ne constitue pas un dispositif de diagnostic ou de conseil médical et ne remplace pas les recommandations d'un médecin ou d'un pharmacien.
