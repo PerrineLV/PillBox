@@ -6,7 +6,7 @@ Application Android d'aide à la préparation d'un pilulier hebdomadaire.
 
 ## Pourquoi ce projet ?
 
-PillBox est né d'un besoin personnel : rendre la préparation d'un pilulier plus simple et limiter les erreurs de boîte, de lot ou de date de péremption.
+PillBox est né d'un besoin personnel : rendre la préparation d'un pilulier plus simple, centraliser le suivi des ordonnances et limiter les erreurs de boîte, de lot ou de date de péremption.
 
 Mon expérience passée comme préparatrice en pharmacie m'a permis d'identifier les points de vigilance métier. L'application reste toutefois un outil d'organisation : elle ne détermine jamais une posologie et ne fournit aucun conseil médical.
 
@@ -14,6 +14,11 @@ Mon expérience passée comme préparatrice en pharmacie m'a permis d'identifier
 
 - Recherche dans la Base de données publique des médicaments
 - Gestion des traitements et des posologies
+- Saisie et consultation des ordonnances
+- Rattachement des traitements couverts à chaque ordonnance
+- Suivi des ordonnances actives, expirées ou remplacées
+- Gestion des délivrances complètes ou fractionnées
+- Alertes de renouvellement en pharmacie et d'expiration d'ordonnance
 - Scan du DataMatrix des boîtes ou ajout manuel depuis le référentiel
 - Identification du médicament, du lot et de la date de péremption
 - Suivi des stocks par boîte et par lot
@@ -24,6 +29,23 @@ Mon expérience passée comme préparatrice en pharmacie m'a permis d'identifier
 - Historique des préparations et des lots utilisés
 - Rappel hebdomadaire local
 - Alertes de stock faible et de péremption
+
+## Suivi des ordonnances
+
+Les ordonnances sont enregistrées sous forme de données structurées : libellé, date d'émission, date de fin de validité et traitements couverts.
+
+Pour chaque traitement, PillBox peut mémoriser :
+
+- une quantité exprimée en durée ou en nombre de boîtes
+- une délivrance complète ou fractionnée
+- la périodicité d'une délivrance fractionnée
+- la dernière délivrance et la date théorique de renouvellement
+
+L'application distingue les ordonnances actives, expirées et remplacées. Une ordonnance utilisée reste consultable dans l'historique. Lorsqu'une nouvelle ordonnance couvre un traitement déjà associé à une ordonnance active, son remplacement nécessite une confirmation explicite.
+
+Les informations enregistrées alimentent deux types d'alertes : le renouvellement de délivrance auprès de la pharmacie et l'expiration de l'ordonnance lorsqu'une nouvelle prescription doit être obtenue.
+
+PillBox ne photographie, ne téléverse et ne lit pas automatiquement les ordonnances. Il n'utilise ni OCR ni interprétation automatisée : les informations sont saisies manuellement et restent stockées localement dans SQLite.
 
 ## Choix techniques
 
@@ -47,6 +69,7 @@ L'application ne doit jamais :
 - fournir un conseil médical
 - supposer qu'un médicament est équivalent à un autre
 - inventer une information absente du DataMatrix ou du référentiel
+- lire, interpréter ou compléter automatiquement une ordonnance
 
 En cas d'incertitude, PillBox demande une confirmation ou refuse l'automatisation.
 
@@ -55,6 +78,8 @@ En cas d'incertitude, PillBox demande une confirmation ou refuse l'automatisatio
 Le besoin en médicaments est calculé sur les sept jours du prochain pilulier. Les lots périmés sont exclus du stock utilisable. Les alertes distinguent le stock insuffisant, le stock proche du besoin et les lots proches de leur date de péremption.
 
 Une préparation en cours peut être annulée sans modifier le stock. La décrémentation n'a lieu qu'après validation de la préparation.
+
+Les dates de renouvellement issues d'une ordonnance sont des échéances de suivi. Elles ne déclenchent jamais une modification automatique du traitement ou de la posologie.
 
 ## Développement
 
