@@ -74,7 +74,7 @@ describe('disparition d’une notification après une action rapide', () => {
   });
 });
 
-describe('réponses qui ouvrent l’application', () => {
+describe('réponses qui demandent une navigation applicative', () => {
   it('reconnaît l’appui standard sur le corps de la notification', () => {
     expect(notificationOpening(response(DEFAULT_ACTION))).toBe('tap');
   });
@@ -85,10 +85,8 @@ describe('réponses qui ouvrent l’application', () => {
     );
   });
 
-  it('reconnaît le bouton de validation, qui ramène PillBox au premier plan', () => {
-    expect(notificationOpening(response(VALIDATE_INTAKES_ACTION))).toBe(
-      'action-button',
-    );
+  it('navigue jamais depuis le bouton de validation, même s’il réveille PillBox', () => {
+    expect(notificationOpening(response(VALIDATE_INTAKES_ACTION))).toBeNull();
   });
 
   it('n’ouvre rien depuis une action inconnue', () => {
