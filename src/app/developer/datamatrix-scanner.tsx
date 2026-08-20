@@ -1,7 +1,5 @@
-import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import type { BarcodeScanningResult } from 'expo-camera';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { Stack } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -12,27 +10,11 @@ import {
   findMedicationPresentationByCip13,
   type IdentifiedMedicationPresentation,
 } from '@/infrastructure/medications/medication-reference';
+import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 import { AppButton, LoadingState, colors, spacing, typography } from '@/ui';
 
 export default function DataMatrixScannerScreen() {
-  return (
-    // `useSuspense` volontairement omis : son mode s'appuie sur un cache
-    // global partagé entre tous les `SQLiteProvider` du même nom de base,
-    // quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
-    // `medication-reference.db` en mode suspense ferme alors cette connexion
-    // pendant qu'elle est encore utilisée ici (constaté : crash « unable to
-    // close due to unfinalized statements »).
-    <SQLiteProvider
-      databaseName="medication-reference.db"
-      assetSource={{
-        assetId: medicationReferenceAsset,
-        forceOverwrite: true,
-      }}
-      options={{ useNewConnection: true }}
-    >
-      <DataMatrixScanner />
-    </SQLiteProvider>
-  );
+  return <DataMatrixScanner />;
 }
 
 type IdentificationState =
@@ -40,7 +22,7 @@ type IdentificationState =
   | { status: 'identified'; presentation: IdentifiedMedicationPresentation };
 
 function DataMatrixScanner() {
-  const database = useSQLiteContext();
+  const database = useMedicationReferenceDatabase();
   const [permission, requestPermission] = useCameraPermissions();
   const [scan, setScan] = useState<BarcodeScanningResult | null>(null);
   const [identification, setIdentification] = useState<IdentificationState>({

@@ -1,6 +1,5 @@
-import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
+import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -189,49 +188,19 @@ export default function BoxDetailScreen() {
           participe à aucun calcul de besoin pour l’instant.
         </Message>
       ) : null}
-      {/*
-        Une seule connexion partagée vers medication-reference.db pour cette
-        section : deux `SQLiteProvider` distincts ouverts en parallèle avec
-        `forceOverwrite` sur le même fichier entrent en course et font
-        planter l'import (constaté en combinant deux providers séparés ici).
-        `useSuspense` volontairement omis : son mode s'appuie sur un cache
-        global partagé entre tous les `SQLiteProvider` du même nom de base,
-        quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
-        `medication-reference.db` en mode suspense ferme alors cette
-        connexion pendant qu'elle est encore utilisée ici (constaté : crash
-        « unable to close due to unfinalized statements »).
-        `OrphanBoxGenericMatch` est monté sans condition (plutôt que gardé
-        par `orphan`, calculé dans ce parent) : `SQLiteProvider` (expo-sqlite)
-        est un `React.memo` dont le comparateur ignore `children`, ce qui
-        gèlerait silencieusement l'apparition ou la disparition du composant
-        si elle dépendait d'un re-rendu de ce parent après le premier
-        montage. `OrphanBoxGenericMatch` redétecte lui-même, en interne, s'il
-        a quelque chose à proposer, et ne rend rien sinon (comportement
-        identique pour une boîte jamais orpheline, qui ne détecte jamais
-        rien).
-      */}
-      <SQLiteProvider
-        databaseName="medication-reference.db"
-        assetSource={{
-          assetId: medicationReferenceAsset,
-          forceOverwrite: true,
+      <OrphanBoxGenericMatch
+        personalDatabase={database}
+        specialtyCis={box.specialtyCis}
+        specialtyName={box.specialtyName}
+        onConfirmed={() => {
+          void load();
+          showToast(
+            'Équivalence générique confirmée pour ce traitement.',
+            'success',
+          );
         }}
-        options={{ useNewConnection: true }}
-      >
-        <OrphanBoxGenericMatch
-          personalDatabase={database}
-          specialtyCis={box.specialtyCis}
-          specialtyName={box.specialtyName}
-          onConfirmed={() => {
-            void load();
-            showToast(
-              'Équivalence générique confirmée pour ce traitement.',
-              'success',
-            );
-          }}
-        />
-        <GenericGroupSection cis={box.specialtyCis} />
-      </SQLiteProvider>
+      />
+      <GenericGroupSection cis={box.specialtyCis} />
 
       <Text style={styles.section}>Ajuster le stock physique</Text>
       <AppField

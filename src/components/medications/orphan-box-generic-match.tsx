@@ -1,8 +1,9 @@
-import { useSQLiteContext, type SQLiteDatabase } from 'expo-sqlite';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect } from 'react';
 
 import { GenericMatchConfirmation } from './generic-match-confirmation';
 import { useGenericEquivalenceGate } from './use-generic-equivalence-gate';
+import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 
 /**
  * Depuis la fiche d'une boîte déjà orpheline (ticket 28), propose la même
@@ -12,12 +13,8 @@ import { useGenericEquivalenceGate } from './use-generic-equivalence-gate';
  * l'occasion de se déclencher. N'affiche rien si aucune correspondance de
  * groupe générique non confirmée n'est détectée pour ce médicament.
  *
- * Suppose que la connexion `medication-reference.db` est déjà fournie par un
- * `SQLiteProvider` ancêtre, partagé avec le reste de l'écran : deux
- * connexions distinctes ouvertes en parallèle avec `forceOverwrite` sur le
- * même fichier entrent en course et font planter l'import (constaté en
- * combinant ce composant avec `GenericGroupSectionWithDatabase` sur le même
- * écran).
+ * Le référentiel `medication-reference.db` est partagé avec le reste de
+ * l'application.
  */
 export function OrphanBoxGenericMatch({
   personalDatabase,
@@ -30,7 +27,7 @@ export function OrphanBoxGenericMatch({
   specialtyName: string;
   onConfirmed(): void;
 }>) {
-  const referenceDatabase = useSQLiteContext();
+  const referenceDatabase = useMedicationReferenceDatabase();
   const gate = useGenericEquivalenceGate(personalDatabase, referenceDatabase);
 
   useEffect(() => {

@@ -14,6 +14,7 @@ import {
   DatabaseProvider,
   useDatabaseTaskQueue,
 } from '@/infrastructure/database/database-provider';
+import { MedicationReferenceProvider } from '@/infrastructure/medications/medication-reference-provider';
 import { AppLockGate } from '@/components/privacy/app-lock-gate';
 import { BottomNavigation, colors, ToastProvider, typography } from '@/ui';
 import {
@@ -52,33 +53,35 @@ export default function RootLayout() {
     pathname,
   );
   return (
-    <DatabaseProvider>
-      <ToastProvider>
-        <ReminderCoordinator />
-        <IntakeActionCoordinator />
-        <AppLockGate>
-          <View style={{ flex: 1 }}>
-            <SafeAreaView
-              edges={rootScreen ? ['top'] : []}
-              style={styles.navigationContent}
-            >
-              <Stack
-                screenOptions={{
-                  contentStyle: { backgroundColor: colors.background },
-                  headerBackButtonDisplayMode: 'minimal',
-                  headerShadowVisible: false,
-                  headerStyle: { backgroundColor: colors.background },
-                  headerTintColor: colors.brand,
-                  headerTitleStyle: typography.heading,
-                  headerShown: false,
-                }}
-              />
-            </SafeAreaView>
-            <BottomNavigation />
-          </View>
-        </AppLockGate>
-      </ToastProvider>
-    </DatabaseProvider>
+    <MedicationReferenceProvider>
+      <DatabaseProvider>
+        <ToastProvider>
+          <ReminderCoordinator />
+          <IntakeActionCoordinator />
+          <AppLockGate>
+            <View style={{ flex: 1 }}>
+              <SafeAreaView
+                edges={rootScreen ? ['top'] : []}
+                style={styles.navigationContent}
+              >
+                <Stack
+                  screenOptions={{
+                    contentStyle: { backgroundColor: colors.background },
+                    headerBackButtonDisplayMode: 'minimal',
+                    headerShadowVisible: false,
+                    headerStyle: { backgroundColor: colors.background },
+                    headerTintColor: colors.brand,
+                    headerTitleStyle: typography.heading,
+                    headerShown: false,
+                  }}
+                />
+              </SafeAreaView>
+              <BottomNavigation />
+            </View>
+          </AppLockGate>
+        </ToastProvider>
+      </DatabaseProvider>
+    </MedicationReferenceProvider>
   );
 }
 

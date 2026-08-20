@@ -1,8 +1,7 @@
-import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import type { BarcodeScanningResult } from 'expo-camera';
 import { CameraView } from 'expo-camera';
 import { router, Stack } from 'expo-router';
-import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
+import { useSQLiteContext } from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
@@ -55,6 +54,7 @@ import {
   getGenericGroupMembers,
   type GenericGroupMember,
 } from '@/infrastructure/medications/medication-reference';
+import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 import {
   cancelPreparation,
   createPreparation,
@@ -93,31 +93,11 @@ type PendingGenericMatch = Readonly<{
 }>;
 
 /**
- * Ouvre une seconde connexion, vers le référentiel médicaments en lecture
- * seule (`medication-reference.db`, distinct de `pillbox.db`), nécessaire
- * pour reconnaître un autre membre du même groupe générique officiel (BDPM)
- * lors de la vérification d'une boîte.
+ * Vérifie une boîte avec le référentiel BDPM partagé, distinct de `pillbox.db`.
  */
 export default function NewPreparationScreen() {
   const personalDatabase = useSQLiteContext();
-  return (
-    // `useSuspense` volontairement omis : son mode s'appuie sur un cache
-    // global partagé entre tous les `SQLiteProvider` du même nom de base,
-    // quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
-    // `medication-reference.db` en mode suspense ferme alors cette connexion
-    // pendant qu'elle est encore utilisée ici (constaté : crash « unable to
-    // close due to unfinalized statements »).
-    <SQLiteProvider
-      databaseName="medication-reference.db"
-      assetSource={{
-        assetId: medicationReferenceAsset,
-        forceOverwrite: true,
-      }}
-      options={{ useNewConnection: true }}
-    >
-      <NewPreparationScreenContent personalDatabase={personalDatabase} />
-    </SQLiteProvider>
-  );
+  return <NewPreparationScreenContent personalDatabase={personalDatabase} />;
 }
 
 function NewPreparationScreenContent({
@@ -125,7 +105,7 @@ function NewPreparationScreenContent({
 }: {
   personalDatabase: SQLiteDatabase;
 }) {
-  const referenceDatabase = useSQLiteContext();
+  const referenceDatabase = useMedicationReferenceDatabase();
   const scanner = useBarcodeScanner();
   const [snapshot, setSnapshot] = useState<PreparationSnapshot | null>(null);
   const [preparationId, setPreparationId] = useState<number | null>(null);

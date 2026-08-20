@@ -45,11 +45,8 @@ import { DateField } from './date-field';
 
 type Props = {
   /**
-   * Reçue en prop plutôt que lue via `useSQLiteContext()` : cet écran ouvre
-   * aussi une connexion dédiée à `medication-reference.db` (pour la
-   * correspondance générique après création, ticket 29) et deux
-   * `SQLiteProvider` imbriqués rendraient ambigu le contexte SQLite actif
-   * pour ce composant.
+   * Reçue en prop pour distinguer explicitement la base personnelle du
+   * référentiel médicaments partagé utilisé lors des vérifications.
    */
   personalDatabase: SQLiteDatabase;
   initialValue: TreatmentDraft;

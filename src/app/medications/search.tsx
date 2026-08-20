@@ -1,5 +1,3 @@
-import medicationReferenceAsset from '../../../assets/medications/medications.db';
-import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { Link, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
@@ -9,6 +7,7 @@ import {
   searchMedicationReference,
   type MedicationSearchResult,
 } from '@/infrastructure/medications/medication-reference';
+import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 import {
   AppField,
   Card,
@@ -21,28 +20,11 @@ import {
 } from '@/ui';
 
 export default function MedicationSearchScreen() {
-  return (
-    // `useSuspense` volontairement omis : son mode s'appuie sur un cache
-    // global partagé entre tous les `SQLiteProvider` du même nom de base,
-    // quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
-    // `medication-reference.db` en mode suspense ferme alors cette connexion
-    // pendant qu'elle est encore utilisée ici (constaté : crash « unable to
-    // close due to unfinalized statements »).
-    <SQLiteProvider
-      databaseName="medication-reference.db"
-      assetSource={{
-        assetId: medicationReferenceAsset,
-        forceOverwrite: true,
-      }}
-      options={{ useNewConnection: true }}
-    >
-      <MedicationSearch />
-    </SQLiteProvider>
-  );
+  return <MedicationSearch />;
 }
 
 function MedicationSearch() {
-  const database = useSQLiteContext();
+  const database = useMedicationReferenceDatabase();
   /**
    * Présent lorsque la recherche est atteinte depuis la saisie d'une ligne
    * d'ordonnance (ticket 46) : transmis à `/treatments/new` pour qu'il

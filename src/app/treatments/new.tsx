@@ -1,4 +1,3 @@
-import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import {
   Stack,
   useFocusEffect,
@@ -6,7 +5,7 @@ import {
   useRouter,
   type Href,
 } from 'expo-router';
-import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
+import { useSQLiteContext } from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -100,35 +99,11 @@ export default function NewTreatmentScreen() {
           }}
         />
       ) : (
-        // Connexion partagée vers medication-reference.db pour la
-        // confirmation d'équivalence générique après création (ticket 29) :
-        // deux `SQLiteProvider` distincts avec `forceOverwrite` sur le même
-        // fichier entrent en course et font planter l'import. `useSuspense`
-        // volontairement omis : son mode s'appuie sur un cache global
-        // partagé entre tous les `SQLiteProvider` du même nom de base, quel
-        // que soit l'écran — naviguer vers un autre écran ouvrant aussi
-        // `medication-reference.db` en mode suspense ferme alors cette
-        // connexion pendant qu'elle est encore utilisée ici (constaté :
-        // crash « unable to close due to unfinalized statements »).
-        // `ScheduledTreatmentCreation` porte son propre état (équivalences
-        // en attente, traitement créé) plutôt que de le recevoir d'ici :
-        // `SQLiteProvider` (expo-sqlite) est aussi un `React.memo` dont le
-        // comparateur ignore `children`, ce qui gèle silencieusement toute
-        // mise à jour provenant d'un parent une fois monté.
-        <SQLiteProvider
-          databaseName="medication-reference.db"
-          assetSource={{
-            assetId: medicationReferenceAsset,
-            forceOverwrite: true,
-          }}
-          options={{ useNewConnection: true }}
-        >
-          <ScheduledTreatmentCreation
-            database={database}
-            base={base}
-            finishTreatmentCreation={finishTreatmentCreation}
-          />
-        </SQLiteProvider>
+        <ScheduledTreatmentCreation
+          database={database}
+          base={base}
+          finishTreatmentCreation={finishTreatmentCreation}
+        />
       )}
     </ScrollView>
   );
