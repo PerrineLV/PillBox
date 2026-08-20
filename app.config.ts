@@ -32,8 +32,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: appendPlugin(
       appendPlugin(
-        appendPlugin(config.plugins, 'expo-notifications'),
-        'expo-local-authentication',
+        appendPlugin(
+          appendPlugin(config.plugins, 'expo-notifications'),
+          'expo-local-authentication',
+        ),
+        'expo-mail-composer',
       ),
       [
         '@react-native-community/datetimepicker',

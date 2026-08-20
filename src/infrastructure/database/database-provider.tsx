@@ -14,6 +14,7 @@ import {
   type SerialTaskQueue,
 } from './serial-task-queue';
 import { initializeSQLiteDatabase } from './sqlite-connection';
+import { logCrash } from '@/infrastructure/logging/crash-logger';
 
 const DATABASE_NAME = 'pillbox.db';
 
@@ -67,8 +68,8 @@ class DatabaseErrorBoundary extends Component<
     return { error };
   }
 
-  componentDidCatch(_error: Error, _errorInfo: ErrorInfo): void {
-    // L’erreur est présentée localement. Aucun reset automatique n’est tenté.
+  componentDidCatch(error: Error, _errorInfo: ErrorInfo): void {
+    void logCrash(error);
   }
 
   render() {

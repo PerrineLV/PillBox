@@ -36,6 +36,38 @@ import { runNotificationCommand } from '@/domain/reminders/notification-actions'
 import { synchronizeIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
 import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 import { markPendingIntakesTakenForGroups } from '@/infrastructure/intakes/intake-repository';
+import { logCrash } from '@/infrastructure/logging/crash-logger';
+
+type ErrorUtilsLike = {
+  getGlobalHandler(): (error: Error, isFatal?: boolean) => void;
+  setGlobalHandler(handler: (error: Error, isFatal?: boolean) => void): void;
+};
+
+function installCrashHandler(): void {
+  const errorUtils = (
+    globalThis as typeof globalThis & {
+      ErrorUtils?: ErrorUtilsLike;
+    }
+  ).ErrorUtils;
+  if (errorUtils === undefined) return;
+  const defaultHandler = errorUtils.getGlobalHandler();
+  errorUtils.setGlobalHandler((error, isFatal) => {
+    void logCrash(error);
+    defaultHandler(error, isFatal);
+  });
+
+  const globalWithRejectionHandler = globalThis as typeof globalThis & {
+    onunhandledrejection?: (event: { reason: unknown }) => void;
+  };
+  const previousRejectionHandler =
+    globalWithRejectionHandler.onunhandledrejection;
+  globalWithRejectionHandler.onunhandledrejection = (event) => {
+    void logCrash(event.reason);
+    previousRejectionHandler?.(event);
+  };
+}
+
+installCrashHandler();
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
