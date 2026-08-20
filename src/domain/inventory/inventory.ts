@@ -61,16 +61,21 @@ export function parseGs1Expiration(value: string): string | null {
   const year = 2000 + Number(value.slice(0, 2));
   const month = Number(value.slice(2, 4));
   const day = Number(value.slice(4, 6));
-  if (month < 1 || month > 12 || day < 1) return null;
-  const date = new Date(Date.UTC(year, month - 1, day));
+  if (month < 1 || month > 12) return null;
+  // GS1 encode parfois une péremption au mois près avec le jour `00` : il
+  // représente alors le dernier jour de ce mois, sans modifier les autres
+  // dates réellement invalides.
+  const expirationDay =
+    day === 0 ? new Date(Date.UTC(year, month, 0)).getUTCDate() : day;
+  const date = new Date(Date.UTC(year, month - 1, expirationDay));
   if (
     date.getUTCFullYear() !== year ||
     date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
+    date.getUTCDate() !== expirationDay
   ) {
     return null;
   }
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return `${year}-${String(month).padStart(2, '0')}-${String(expirationDay).padStart(2, '0')}`;
 }
 
 export function assertValidBoxDraft(draft: MedicationBoxDraft): void {
