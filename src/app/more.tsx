@@ -1,6 +1,8 @@
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { UpdateNoticeCard } from '@/components/updates/update-notice-card';
+import { useUpdateNotice } from '@/components/updates/use-update-notice';
 import { installedAppVersion } from '@/infrastructure/updates/installed-version';
 import {
   Screen,
@@ -67,6 +69,7 @@ const ITEMS: readonly {
 ];
 
 export default function MoreScreen() {
+  const update = useUpdateNotice();
   return (
     <Screen
       fixedHeader={
@@ -80,6 +83,13 @@ export default function MoreScreen() {
       stickyFooter={<PrivacyCard />}
       stickyFooterStyle={styles.privacyFooter}
     >
+      {update.notice !== null ? (
+        <UpdateNoticeCard
+          notice={update.notice}
+          onDownload={update.download}
+          onPostpone={update.postpone}
+        />
+      ) : null}
       <View style={styles.menu}>
         {ITEMS.map((item) => (
           <MenuCard key={item.href} {...item} />
