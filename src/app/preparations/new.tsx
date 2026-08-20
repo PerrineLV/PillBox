@@ -819,14 +819,6 @@ function NewPreparationScreenContent({
       ) : null}
       {snapshot ? (
         <>
-          <Text style={styles.periodDetail}>
-            Du {formatLongFrenchCivilDate(snapshot.startDate)} au{' '}
-            {formatLongFrenchCivilDate(snapshot.endDate)}
-          </Text>
-          <Text accessibilityRole="header" style={styles.progress}>
-            {completedRequirementsCount + (current ? 1 : 0)} sur{' '}
-            {snapshot.requirements.length}
-          </Text>
           <Text style={typography.caption}>
             {completedRequirementsCount} médicament
             {completedRequirementsCount > 1 ? 's' : ''} déjà vérifié

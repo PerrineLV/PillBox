@@ -76,6 +76,13 @@ export const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 5,
   },
+  slotTotal: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+    marginLeft: spacing.sm,
+    marginTop: 8,
+  },
   total: { fontSize: 17, fontWeight: '700', marginTop: 8 },
   verified: {
     backgroundColor: colors.successSoft,
