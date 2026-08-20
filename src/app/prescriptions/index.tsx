@@ -1,4 +1,4 @@
-import { Link, useFocusEffect } from 'expo-router';
+import { Link, Stack, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
@@ -74,6 +74,7 @@ export default function PrescriptionsScreen() {
 
   return (
     <View style={styles.container}>
+      <Stack.Screen options={{ headerShown: true, title: 'Ordonnances' }} />
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text accessibilityRole="header" style={typography.title}>
