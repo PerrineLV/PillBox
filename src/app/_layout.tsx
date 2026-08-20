@@ -14,6 +14,7 @@ import {
   DatabaseProvider,
   useDatabaseTaskQueue,
 } from '@/infrastructure/database/database-provider';
+import { MedicationReferenceProvider } from '@/infrastructure/medications/medication-reference-provider';
 import { AppLockGate } from '@/components/privacy/app-lock-gate';
 import { BottomNavigation, colors, ToastProvider, typography } from '@/ui';
 import {
@@ -35,6 +36,38 @@ import { runNotificationCommand } from '@/domain/reminders/notification-actions'
 import { synchronizeIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
 import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 import { markPendingIntakesTakenForGroups } from '@/infrastructure/intakes/intake-repository';
+import { logCrash } from '@/infrastructure/logging/crash-logger';
+
+type ErrorUtilsLike = {
+  getGlobalHandler(): (error: Error, isFatal?: boolean) => void;
+  setGlobalHandler(handler: (error: Error, isFatal?: boolean) => void): void;
+};
+
+function installCrashHandler(): void {
+  const errorUtils = (
+    globalThis as typeof globalThis & {
+      ErrorUtils?: ErrorUtilsLike;
+    }
+  ).ErrorUtils;
+  if (errorUtils === undefined) return;
+  const defaultHandler = errorUtils.getGlobalHandler();
+  errorUtils.setGlobalHandler((error, isFatal) => {
+    void logCrash(error);
+    defaultHandler(error, isFatal);
+  });
+
+  const globalWithRejectionHandler = globalThis as typeof globalThis & {
+    onunhandledrejection?: (event: { reason: unknown }) => void;
+  };
+  const previousRejectionHandler =
+    globalWithRejectionHandler.onunhandledrejection;
+  globalWithRejectionHandler.onunhandledrejection = (event) => {
+    void logCrash(event.reason);
+    previousRejectionHandler?.(event);
+  };
+}
+
+installCrashHandler();
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -52,33 +85,35 @@ export default function RootLayout() {
     pathname,
   );
   return (
-    <DatabaseProvider>
-      <ToastProvider>
-        <ReminderCoordinator />
-        <IntakeActionCoordinator />
-        <AppLockGate>
-          <View style={{ flex: 1 }}>
-            <SafeAreaView
-              edges={rootScreen ? ['top'] : []}
-              style={styles.navigationContent}
-            >
-              <Stack
-                screenOptions={{
-                  contentStyle: { backgroundColor: colors.background },
-                  headerBackButtonDisplayMode: 'minimal',
-                  headerShadowVisible: false,
-                  headerStyle: { backgroundColor: colors.background },
-                  headerTintColor: colors.brand,
-                  headerTitleStyle: typography.heading,
-                  headerShown: false,
-                }}
-              />
-            </SafeAreaView>
-            <BottomNavigation />
-          </View>
-        </AppLockGate>
-      </ToastProvider>
-    </DatabaseProvider>
+    <MedicationReferenceProvider>
+      <DatabaseProvider>
+        <ToastProvider>
+          <ReminderCoordinator />
+          <IntakeActionCoordinator />
+          <AppLockGate>
+            <View style={{ flex: 1 }}>
+              <SafeAreaView
+                edges={rootScreen ? ['top'] : []}
+                style={styles.navigationContent}
+              >
+                <Stack
+                  screenOptions={{
+                    contentStyle: { backgroundColor: colors.background },
+                    headerBackButtonDisplayMode: 'minimal',
+                    headerShadowVisible: false,
+                    headerStyle: { backgroundColor: colors.background },
+                    headerTintColor: colors.brand,
+                    headerTitleStyle: typography.heading,
+                    headerShown: false,
+                  }}
+                />
+              </SafeAreaView>
+              <BottomNavigation />
+            </View>
+          </AppLockGate>
+        </ToastProvider>
+      </DatabaseProvider>
+    </MedicationReferenceProvider>
   );
 }
 
@@ -116,9 +151,9 @@ function ReminderCoordinator() {
  *
  * Le composant est monté à l’intérieur de `DatabaseProvider` mais en dehors de
  * `AppLockGate` : l’écriture doit aboutir sans attendre l’authentification du
- * verrou, qui ne concerne que l’affichage. Le bouton de validation ramène par
- * ailleurs PillBox au premier plan (voir `notification-actions.ts`), mais
- * cette écriture reste indépendante de la navigation qui s’ensuit.
+ * verrou, qui ne concerne que l’affichage. Le bouton de validation ramène
+ * PillBox au premier plan (voir `notification-actions.ts`) pour que son
+ * JavaScript soit exécuté par Android, sans demander de navigation interne.
  *
  * L’écriture est idempotente : seules les prises encore en attente changent
  * d’état. Une réponse reçue deux fois, ou rejouée au démarrage suivant, ne crée
@@ -212,8 +247,11 @@ function openNotificationTarget(target: NotificationTarget): void {
 
 /**
  * Ouvre l’écran correspondant à la notification touchée, que l’appui vienne du
- * corps de la notification ou de son bouton « Ouvrir PillBox » : les deux gestes
- * partagent la même navigation différée, aucune prise n’est validée au passage.
+ * corps de la notification ou de son bouton « Ouvrir PillBox » : ces deux
+ * gestes partagent la même navigation différée, aucune prise n’est validée au
+ * passage. Le bouton de validation est volontairement exclu : il est traité
+ * uniquement par `IntakeActionCoordinator` pour éviter une lecture concurrente
+ * de la base pendant son écriture.
  *
  * L’appui est enregistré dès le premier rendu, mais la navigation n’a lieu
  * qu’une fois l’arbre de navigation monté. Sur un démarrage à froid déclenché
@@ -231,9 +269,10 @@ function useNotificationNavigation(): void {
     });
 
     function handle(response: Notifications.NotificationResponse): void {
-      // Deux gestes ouvrent PillBox et mènent au même écran : l’appui standard
-      // sur la notification et le bouton « Ouvrir PillBox ». Le bouton de
-      // validation, lui, n’ouvre rien et ne navigue donc jamais.
+      // Seuls l’appui standard sur la notification et le bouton « Ouvrir
+      // PillBox » demandent une navigation. Le bouton de validation peut
+      // ramener Android au premier plan, mais ne produit volontairement aucune
+      // cible de navigation applicative.
       const opening = notificationOpening(response);
       if (opening === null) return;
       const target = notificationTargetOf(response.notification);

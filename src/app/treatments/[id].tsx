@@ -1,11 +1,9 @@
-import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
+import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 
 import { GenericGroupSection } from '@/components/medications/generic-group-section';
-import { AsNeededIntakeLog } from '@/components/treatments/as-needed-intake-log';
 import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
 import { GenericEquivalenceList } from '@/components/treatments/generic-equivalence-list';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
@@ -111,24 +109,7 @@ export default function EditTreatmentScreen() {
         <LoadingState label="Chargement du traitement…" />
       ) : null}
       {treatment ? (
-        // Une seule connexion partagée vers medication-reference.db pour
-        // cette section : GenericGroupSection a besoin du référentiel, et
-        // deux `SQLiteProvider` distincts avec `forceOverwrite` sur le même
-        // fichier entrent en course et font planter l'import. `useSuspense`
-        // volontairement omis : son mode s'appuie sur un cache global
-        // partagé entre tous les `SQLiteProvider` du même nom de base, quel
-        // que soit l'écran — naviguer vers un autre écran ouvrant aussi
-        // `medication-reference.db` en mode suspense ferme alors cette
-        // connexion pendant qu'elle est encore utilisée ici (constaté :
-        // crash « unable to close due to unfinalized statements »).
-        <SQLiteProvider
-          databaseName="medication-reference.db"
-          assetSource={{
-            assetId: medicationReferenceAsset,
-            forceOverwrite: true,
-          }}
-          options={{ useNewConnection: true }}
-        >
+        <>
           {treatment.archivedAt === null ? (
             treatment.dosageKind === 'AS_NEEDED' ? (
               <AsNeededTreatmentForm
@@ -170,7 +151,7 @@ export default function EditTreatmentScreen() {
             </Message>
           ) : null}
           <GenericGroupSection cis={treatment.specialtyCis} />
-        </SQLiteProvider>
+        </>
       ) : null}
       <GenericEquivalenceList
         confirmations={genericEquivalences}
@@ -186,12 +167,6 @@ export default function EditTreatmentScreen() {
               params: { treatmentId: String(treatment.id) },
             })
           }
-        />
-      ) : null}
-      {treatment?.dosageKind === 'AS_NEEDED' ? (
-        <AsNeededIntakeLog
-          treatmentId={treatment.id}
-          canRecord={treatment.archivedAt === null}
         />
       ) : null}
       {treatment && removalAction ? (

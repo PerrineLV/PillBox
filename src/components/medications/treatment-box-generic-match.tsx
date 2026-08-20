@@ -1,15 +1,11 @@
-import medicationReferenceAsset from '../../../assets/medications/medications.db';
-import {
-  SQLiteProvider,
-  useSQLiteContext,
-  type SQLiteDatabase,
-} from 'expo-sqlite';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 
 import {
   findGenericEquivalenceBoxCandidates,
   type GenericEquivalenceBoxCandidate,
 } from '@/infrastructure/treatments/generic-equivalence-candidates';
+import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 import { confirmGenericEquivalence } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { LoadingState } from '@/ui';
 
@@ -33,10 +29,7 @@ type Props = Readonly<{
  * n'en reste aucune à traiter, y compris s'il n'y en avait aucune dès le
  * départ.
  *
- * Ouvre sa propre connexion à `medication-reference.db` : suppose qu'aucune
- * autre connexion `forceOverwrite` vers ce même fichier n'est ouverte en
- * parallèle sur cet écran (sinon, utiliser `TreatmentBoxGenericMatch` sous
- * un `SQLiteProvider` ancêtre partagé).
+ * La connexion `medication-reference.db` est partagée par toute l'application.
  */
 export function TreatmentBoxGenericMatchWithDatabase({
   personalDatabase,
@@ -46,32 +39,17 @@ export function TreatmentBoxGenericMatchWithDatabase({
   onDone,
 }: Props) {
   return (
-    // `useSuspense` volontairement omis : son mode s'appuie sur un cache
-    // global partagé entre tous les `SQLiteProvider` du même nom de base,
-    // quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
-    // `medication-reference.db` en mode suspense ferme alors cette connexion
-    // pendant qu'elle est encore utilisée ici (constaté : crash « unable to
-    // close due to unfinalized statements »).
-    <SQLiteProvider
-      databaseName="medication-reference.db"
-      assetSource={{
-        assetId: medicationReferenceAsset,
-        forceOverwrite: true,
-      }}
-      options={{ useNewConnection: true }}
-    >
-      <TreatmentBoxGenericMatch
-        personalDatabase={personalDatabase}
-        treatmentId={treatmentId}
-        specialtyCis={specialtyCis}
-        specialtyName={specialtyName}
-        onDone={onDone}
-      />
-    </SQLiteProvider>
+    <TreatmentBoxGenericMatch
+      personalDatabase={personalDatabase}
+      treatmentId={treatmentId}
+      specialtyCis={specialtyCis}
+      specialtyName={specialtyName}
+      onDone={onDone}
+    />
   );
 }
 
-/** Suppose que la connexion `medication-reference.db` est déjà fournie par un `SQLiteProvider` ancêtre. */
+/** Consomme la connexion `medication-reference.db` partagée. */
 export function TreatmentBoxGenericMatch({
   personalDatabase,
   treatmentId,
@@ -79,7 +57,7 @@ export function TreatmentBoxGenericMatch({
   specialtyName,
   onDone,
 }: Props) {
-  const referenceDatabase = useSQLiteContext();
+  const referenceDatabase = useMedicationReferenceDatabase();
   const [queue, setQueue] = useState<
     readonly GenericEquivalenceBoxCandidate[] | null
   >(null);

@@ -1,11 +1,51 @@
+import { Fragment } from 'react';
 import { Text, View } from 'react-native';
 
-import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
-import type { PreparationSnapshot } from '@/domain/preparations/preparation';
+import { formatFrenchWeekdayAndDate } from '@/components/treatments/civil-date';
+import type {
+  PreparationItemSnapshot,
+  PreparationSnapshot,
+} from '@/domain/preparations/preparation';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
 
 import { SLOT_LABELS } from './labels';
 import { styles } from './styles';
+
+export type DailySlotCheck = Readonly<{
+  slot: PreparationItemSnapshot['slot'];
+  quantityHalfUnits: number;
+  items: readonly PreparationItemSnapshot[];
+}>;
+
+export function dailySlotChecks(
+  items: readonly PreparationItemSnapshot[],
+  date: string,
+): readonly DailySlotCheck[] {
+  const bySlot = new Map<
+    PreparationItemSnapshot['slot'],
+    { quantityHalfUnits: number; items: PreparationItemSnapshot[] }
+  >();
+  for (const item of items) {
+    if (item.date !== date) continue;
+    const check = bySlot.get(item.slot) ?? {
+      quantityHalfUnits: 0,
+      items: [],
+    };
+    check.quantityHalfUnits += item.quantityHalfUnits;
+    check.items.push(item);
+    bySlot.set(item.slot, check);
+  }
+  return [...bySlot].map(([slot, check]) => ({ slot, ...check }));
+}
+
+function tabletLabel(quantityHalfUnits: number): string {
+  return quantityHalfUnits === 2 ? 'comprimé' : 'comprimés';
+}
+
+function slotLabel(slot: PreparationItemSnapshot['slot']): string {
+  const label = SLOT_LABELS[slot];
+  return `${label[0].toUpperCase()}${label.slice(1)}`;
+}
 
 export function DailyFinalCheck({
   snapshot,
@@ -21,19 +61,29 @@ export function DailyFinalCheck({
     <View style={styles.finalCheck}>
       {dates.map((date) => (
         <View key={date} style={styles.day}>
-          <Text style={styles.dayTitle}>{formatLongFrenchCivilDate(date)}</Text>
-          {snapshot.items
-            .filter((item) => item.date === date)
-            .map((item, index) => (
-              <Text
-                key={`${item.slot}-${item.specialtyCis}-${index}`}
-                style={styles.case}
-              >
-                • {SLOT_LABELS[item.slot]} · {item.specialtyName} :{' '}
-                {formatHalfUnits(item.quantityHalfUnits)}
+          <Text style={styles.dayTitle}>
+            {formatFrenchWeekdayAndDate(date)}
+          </Text>
+          {dailySlotChecks(snapshot.items, date).map((check) => (
+            <Fragment key={check.slot}>
+              <Text style={styles.slotTotal}>
+                {slotLabel(check.slot)} :{' '}
+                {formatHalfUnits(check.quantityHalfUnits)}{' '}
+                {tabletLabel(check.quantityHalfUnits)}
               </Text>
-            ))}
-          {snapshot.items.every((item) => item.date !== date) ? (
+              {check.items.map((item, index) => (
+                <Text
+                  key={`${check.slot}-${item.specialtyCis}-${index}`}
+                  style={styles.case}
+                >
+                  • {item.specialtyName} :{' '}
+                  {formatHalfUnits(item.quantityHalfUnits)}{' '}
+                  {tabletLabel(item.quantityHalfUnits)}
+                </Text>
+              ))}
+            </Fragment>
+          ))}
+          {dailySlotChecks(snapshot.items, date).length === 0 ? (
             <Text style={styles.case}>Aucune prise</Text>
           ) : null}
         </View>

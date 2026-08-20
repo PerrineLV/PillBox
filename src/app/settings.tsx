@@ -1,7 +1,7 @@
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import {
@@ -714,6 +714,17 @@ export default function SettingsScreen() {
           <Text style={styles.linkText}>Ouvrir les réglages Android</Text>
         </Pressable>
       ) : null}
+
+      <Divider />
+      <SectionTitle>Journal des erreurs</SectionTitle>
+      <Text style={styles.help}>
+        Consultez et envoyez les rapports techniques des crashs JavaScript.
+      </Text>
+      <AppButton
+        label="Consulter le journal des erreurs"
+        variant="secondary"
+        onPress={() => router.push('/settings/error-log')}
+      />
 
       <Divider />
       <SectionTitle>Sauvegarde des données</SectionTitle>

@@ -23,10 +23,15 @@ const box: MedicationBox = {
 };
 
 describe('inventaire', () => {
-  it('convertit uniquement une péremption GS1 calendaire valide', () => {
+  it('convertit une péremption GS1 calendaire valide', () => {
     expect(parseGs1Expiration('271231')).toBe('2027-12-31');
     expect(parseGs1Expiration('270231')).toBeNull();
-    expect(parseGs1Expiration('271200')).toBeNull();
+  });
+
+  it('interprète le jour GS1 00 comme le dernier jour du mois', () => {
+    expect(parseGs1Expiration('271200')).toBe('2027-12-31');
+    expect(parseGs1Expiration('270200')).toBe('2027-02-28');
+    expect(parseGs1Expiration('280200')).toBe('2028-02-29');
   });
 
   it('considère une boîte périmée seulement après sa date de péremption', () => {

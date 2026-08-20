@@ -1,6 +1,7 @@
 import {
   civilDateToPickerDate,
   formatFrenchCivilPeriod,
+  formatFrenchWeekdayAndDate,
   formatFullFrenchCivilDate,
   formatFrenchCivilDate,
   formatLongFrenchCivilDate,
@@ -22,6 +23,11 @@ describe('dates civiles du formulaire', () => {
     expect(formatFullFrenchCivilDate('2026-08-09')).toBe(
       'dimanche 9 août 2026',
     );
+  });
+
+  it('affiche le jour capitalisé et la date sans année pour le contrôle hebdomadaire', () => {
+    expect(formatFrenchWeekdayAndDate('2026-08-17')).toBe('Lundi 17 août');
+    expect(formatFrenchWeekdayAndDate('inconnue')).toBe('inconnue');
   });
 
   it('préserve le jour civil lors du passage par le calendrier', () => {

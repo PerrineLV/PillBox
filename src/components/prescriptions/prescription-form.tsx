@@ -1,10 +1,5 @@
-import medicationReferenceAsset from '../../../assets/medications/medications.db';
 import { router, usePathname, useFocusEffect } from 'expo-router';
-import {
-  SQLiteProvider,
-  useSQLiteContext,
-  type SQLiteDatabase,
-} from 'expo-sqlite';
+import type { SQLiteDatabase } from 'expo-sqlite';
 import {
   forwardRef,
   useCallback,
@@ -25,6 +20,7 @@ import type { Treatment } from '@/domain/treatments/treatment';
 import { drainCreatedTreatmentForPrescription } from '@/infrastructure/prescriptions/pending-new-treatment-for-prescription';
 import { listActivePrescriptionsCoveringTreatments } from '@/infrastructure/prescriptions/prescription-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
+import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 import { AppButton, AppField, Message, spacing, typography } from '@/ui';
 
 import { DateField } from '../treatments/date-field';
@@ -237,36 +233,10 @@ export function PrescriptionForm({
       <Text style={styles.heading}>
         {existingItems.length > 0 ? 'Nouvelles lignes' : 'Traitements'}
       </Text>
-      {/*
-        Connexion dédiée, propre à cette section, qui possède elle-même l'état
-        de ses lignes (voir PrescriptionLinesSection) : `SQLiteProvider`
-        (expo-sqlite) est un `React.memo` dont le comparateur ne tient pas
-        compte de `children`, ce qui gèle silencieusement toute mise à jour
-        provenant d'un parent une fois monté. En laissant cette section gérer
-        ses propres lignes en interne (et en les exposant au parent via une
-        ref plutôt que des props), ses mises à jour proviennent toujours de
-        l'intérieur du sous-arbre, jamais d'un re-rendu du parent — donc
-        jamais gelées par ce memo.
-        `useSuspense` volontairement omis : son mode s'appuie sur un cache
-        global partagé entre tous les `SQLiteProvider` du même nom de base,
-        quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
-        `medication-reference.db` en mode suspense ferme alors cette
-        connexion pendant qu'elle est encore utilisée ici (constaté : crash
-        « unable to close due to unfinalized statements »).
-      */}
-      <SQLiteProvider
-        databaseName="medication-reference.db"
-        assetSource={{
-          assetId: medicationReferenceAsset,
-          forceOverwrite: true,
-        }}
-        options={{ useNewConnection: true }}
-      >
-        <PrescriptionLinesSection
-          ref={linesSectionRef}
-          personalDatabase={personalDatabase}
-        />
-      </SQLiteProvider>
+      <PrescriptionLinesSection
+        ref={linesSectionRef}
+        personalDatabase={personalDatabase}
+      />
       {error ? (
         <Message tone="error" title="Ordonnance non enregistrée">
           {error}
@@ -293,16 +263,14 @@ type PrescriptionLinesSectionHandle = {
 };
 
 /**
- * Suppose que la connexion `medication-reference.db` est déjà fournie par un
- * `SQLiteProvider` ancêtre. Possède son propre état (lignes, traitements
- * disponibles) plutôt que de le recevoir en props du parent : voir le
- * commentaire dans `PrescriptionForm` sur le memo de `SQLiteProvider`.
+ * Consomme la connexion BDPM partagée et conserve son propre état pour que le
+ * retour depuis la création d'un traitement préserve le formulaire.
  */
 const PrescriptionLinesSection = forwardRef<
   PrescriptionLinesSectionHandle,
   { personalDatabase: SQLiteDatabase }
 >(function PrescriptionLinesSection({ personalDatabase }, ref) {
-  const referenceDatabase = useSQLiteContext();
+  const referenceDatabase = useMedicationReferenceDatabase();
   const pathname = usePathname();
   const [treatments, setTreatments] = useState<Treatment[]>([]);
   const [lines, setLines] = useState<PrescriptionLineDraft[]>([]);

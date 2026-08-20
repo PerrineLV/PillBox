@@ -1,5 +1,3 @@
-import medicationReferenceAsset from '../../../assets/medications/medications.db';
-import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -8,6 +6,7 @@ import {
   getGenericGroupMembers,
   type GenericGroupMember,
 } from '@/infrastructure/medications/medication-reference';
+import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 import { Card, colors, spacing, typography } from '@/ui';
 
 /**
@@ -16,11 +15,10 @@ import { Card, colors, spacing, typography } from '@/ui';
  * rien si la spécialité n'appartient à aucun groupe. Ne propose aucune
  * action de remplacement de médicament, de boîte ou de ligne de stock.
  *
- * Suppose que la connexion `medication-reference.db` est déjà fournie par
- * un `SQLiteProvider` ancêtre (voir `GenericGroupSectionWithDatabase` sinon).
+ * Consomme la connexion `medication-reference.db` partagée par l'application.
  */
 export function GenericGroupSection({ cis }: { cis: string }) {
-  const database = useSQLiteContext();
+  const database = useMedicationReferenceDatabase();
   const [members, setMembers] = useState<GenericGroupMember[]>([]);
   const [expanded, setExpanded] = useState(false);
 
@@ -93,29 +91,11 @@ export function GenericGroupSection({ cis }: { cis: string }) {
 }
 
 /**
- * Variante autonome pour les écrans qui n'ont pas déjà de connexion ouverte
- * vers `medication-reference.db` (le référentiel médicaments, distinct de
- * `pillbox.db`). Ouvre sa propre connexion, scoped à cette sous-arborescence.
+ * Alias conservé pour les appelants existants : il utilise aussi la connexion
+ * unique vers le référentiel médicaments.
  */
 export function GenericGroupSectionWithDatabase({ cis }: { cis: string }) {
-  return (
-    // `useSuspense` volontairement omis : son mode s'appuie sur un cache
-    // global partagé entre tous les `SQLiteProvider` du même nom de base,
-    // quel que soit l'écran — naviguer vers un autre écran ouvrant aussi
-    // `medication-reference.db` en mode suspense ferme alors cette connexion
-    // pendant qu'elle est encore utilisée ici (constaté : crash « unable to
-    // close due to unfinalized statements »).
-    <SQLiteProvider
-      databaseName="medication-reference.db"
-      assetSource={{
-        assetId: medicationReferenceAsset,
-        forceOverwrite: true,
-      }}
-      options={{ useNewConnection: true }}
-    >
-      <GenericGroupSection cis={cis} />
-    </SQLiteProvider>
-  );
+  return <GenericGroupSection cis={cis} />;
 }
 
 const styles = StyleSheet.create({

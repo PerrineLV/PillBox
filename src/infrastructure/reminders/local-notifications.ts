@@ -6,7 +6,6 @@ import {
   intakeActionCategory,
   notificationCommand,
   OPEN_APP_ACTION,
-  VALIDATE_INTAKES_ACTION,
   type NotificationCommand,
 } from '@/domain/reminders/notification-actions';
 import {
@@ -133,10 +132,7 @@ export function notificationOpening(
 ): NotificationOpening | null {
   if (response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER)
     return 'tap';
-  return response.actionIdentifier === OPEN_APP_ACTION ||
-    response.actionIdentifier === VALIDATE_INTAKES_ACTION
-    ? 'action-button'
-    : null;
+  return response.actionIdentifier === OPEN_APP_ACTION ? 'action-button' : null;
 }
 
 /** Commande demandée par un bouton d’action, ou `null` pour toute autre réponse. */

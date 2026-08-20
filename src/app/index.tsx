@@ -4,8 +4,6 @@ import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AttentionItemCard } from '@/components/home/attention-item-card';
-import { UpdateNoticeCard } from '@/components/updates/update-notice-card';
-import { useUpdateNotice } from '@/components/updates/use-update-notice';
 import { buildInventoryAlerts } from '@/domain/alerts/inventory-alerts';
 import { buildStockForecast } from '@/domain/forecast/stock-forecast';
 import {
@@ -18,7 +16,6 @@ import {
 import { todayIso } from '@/domain/inventory/inventory';
 import { localCivilDate } from '@/domain/reminders/intake-reminder';
 import { buildRenewalList } from '@/domain/renewal/renewal-list';
-import type { UpdateNotice } from '@/domain/updates/update-notice';
 import { getLastAsNeededIntake } from '@/infrastructure/intakes/as-needed-intake-repository';
 import { listPendingIntakeCounts } from '@/infrastructure/intakes/intake-repository';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
@@ -54,8 +51,6 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [lastPreparation, setLastPreparation] =
     useState<PreparationHistoryEntry | null>(null);
-  const update = useUpdateNotice();
-
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -182,9 +177,6 @@ export default function HomeScreen() {
       loading={loading}
       error={error}
       lastPreparation={lastPreparation}
-      updateNotice={update.notice}
-      onDownloadUpdate={update.download}
-      onPostponeUpdate={update.postpone}
     />
   );
 }
@@ -194,17 +186,11 @@ export function HomeContent({
   loading,
   error,
   lastPreparation = null,
-  updateNotice = null,
-  onDownloadUpdate,
-  onPostponeUpdate,
 }: Readonly<{
   items: AttentionItem[] | null;
   loading: boolean;
   error: string | null;
   lastPreparation?: PreparationHistoryEntry | null;
-  updateNotice?: UpdateNotice | null;
-  onDownloadUpdate?: () => void;
-  onPostponeUpdate?: () => void;
 }>) {
   const calm =
     items !== null &&
@@ -250,15 +236,6 @@ export function HomeContent({
       {lastPreparation ? (
         <LastPreparationCard
           detail={`Validée le ${formatDateTime(lastPreparation.completedAt)} · semaine du ${formatDate(lastPreparation.startDate)}`}
-        />
-      ) : null}
-      {updateNotice !== null &&
-      onDownloadUpdate !== undefined &&
-      onPostponeUpdate !== undefined ? (
-        <UpdateNoticeCard
-          notice={updateNotice}
-          onDownload={onDownloadUpdate}
-          onPostpone={onPostponeUpdate}
         />
       ) : null}
     </Screen>
