@@ -1,6 +1,6 @@
 import { Text, View } from 'react-native';
 
-import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
+import { formatFrenchWeekdayAndDate } from '@/components/treatments/civil-date';
 import type { PreparationSnapshot } from '@/domain/preparations/preparation';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
 
@@ -21,7 +21,9 @@ export function DailyFinalCheck({
     <View style={styles.finalCheck}>
       {dates.map((date) => (
         <View key={date} style={styles.day}>
-          <Text style={styles.dayTitle}>{formatLongFrenchCivilDate(date)}</Text>
+          <Text style={styles.dayTitle}>
+            {formatFrenchWeekdayAndDate(date)}
+          </Text>
           {snapshot.items
             .filter((item) => item.date === date)
             .map((item, index) => (

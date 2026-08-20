@@ -16,6 +16,18 @@ export function formatLongFrenchCivilDate(value: string): string {
   }).format(date);
 }
 
+/** Affiche le jour et la date civile, sans année, pour un contrôle hebdomadaire. */
+export function formatFrenchWeekdayAndDate(value: string): string {
+  const date = civilDateToPickerDate(value);
+  if (date === null) return value;
+  const formatted = new Intl.DateTimeFormat('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(date);
+  return `${formatted[0].toUpperCase()}${formatted.slice(1)}`;
+}
+
 /**
  * Affiche une période civile de façon compacte, par exemple « du 17 au 23 août ».
  * Le mois n'est répété que lorsque la période le traverse, et l'année seulement
