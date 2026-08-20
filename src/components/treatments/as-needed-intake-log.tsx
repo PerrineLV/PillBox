@@ -3,7 +3,7 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { AsNeededIntakeRecord } from '@/domain/intakes/as-needed-intake';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
@@ -20,8 +20,12 @@ import {
   LoadingState,
   Message,
   SectionTitle,
+  colors,
+  radii,
+  sizes,
   spacing,
   typography,
+  useToast,
 } from '@/ui';
 
 const RECENT_HISTORY_LIMIT = 5;
@@ -42,9 +46,10 @@ export function AsNeededIntakeLog({
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [quantityText, setQuantityText] = useState('1');
-  const [note, setNote] = useState('');
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const load = useCallback(async () => {
     const [lastIntake, records] = await Promise.all([
@@ -79,21 +84,25 @@ export function AsNeededIntakeLog({
     });
   }
 
-  async function submit(): Promise<void> {
+  async function submit({
+    takenAt: nextTakenAt,
+    quantityHalfUnits,
+  }: {
+    takenAt: Date;
+    quantityHalfUnits: number;
+  }): Promise<void> {
     try {
       setSaving(true);
       setError(null);
-      const normalized = quantityText.trim().replace(',', '.');
-      const quantityHalfUnits = Math.round(Number(normalized) * 2);
       await recordAsNeededIntake(database, {
         treatmentId,
-        takenAt: takenAt.toISOString(),
+        takenAt: nextTakenAt.toISOString(),
         quantityHalfUnits,
-        note: note.trim() === '' ? null : note.trim(),
+        note: null,
       });
-      setNote('');
       setTakenAt(new Date());
       await load();
+      showToast('Prise enregistrée.', 'success');
     } catch (reason: unknown) {
       setError(
         reason instanceof Error ? reason.message : 'Enregistrement impossible.',
@@ -101,6 +110,18 @@ export function AsNeededIntakeLog({
     } finally {
       setSaving(false);
     }
+  }
+
+  function saveImmediate(): void {
+    void submit({ takenAt: new Date(), quantityHalfUnits: 2 });
+  }
+
+  function saveDetails(): void {
+    const normalized = quantityText.trim().replace(',', '.');
+    void submit({
+      takenAt,
+      quantityHalfUnits: Math.round(Number(normalized) * 2),
+    });
   }
 
   return (
@@ -128,55 +149,75 @@ export function AsNeededIntakeLog({
       ) : null}
       {canRecord ? (
         <View style={styles.recorder}>
-          <Text style={styles.label}>Enregistrer une prise</Text>
-          <View style={styles.row}>
-            <AppButton
-              label={`Date : ${takenAt.toLocaleDateString('fr-FR')}`}
-              variant="secondary"
-              onPress={() => setDatePickerVisible(true)}
-            />
-            <AppButton
-              label={`Heure : ${takenAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`}
-              variant="secondary"
-              onPress={() => setTimePickerVisible(true)}
-            />
-          </View>
-          {datePickerVisible ? (
-            <DateTimePicker
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              locale="fr-FR"
-              mode="date"
-              maximumDate={new Date()}
-              onChange={chooseDate}
-              value={takenAt}
-            />
-          ) : null}
-          {timePickerVisible ? (
-            <DateTimePicker
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              is24Hour
-              mode="time"
-              onChange={chooseTime}
-              value={takenAt}
-            />
-          ) : null}
-          <AppField
-            label="Quantité prise"
-            inputMode="decimal"
-            value={quantityText}
-            onChangeText={setQuantityText}
-          />
-          <AppField
-            label="Note (optionnel)"
-            value={note}
-            onChangeText={setNote}
+          <AppButton
+            label="Prise maintenant"
+            loading={saving}
+            onPress={saveImmediate}
           />
           {error ? <Message tone="error">{error}</Message> : null}
-          <AppButton
-            label="Enregistrer la prise"
-            loading={saving}
-            onPress={() => void submit()}
-          />
+          <Pressable
+            accessibilityLabel={
+              detailsExpanded
+                ? 'Masquer les options de prise personnalisée'
+                : 'Modifier la date, l’heure ou la quantité'
+            }
+            accessibilityRole="button"
+            accessibilityState={{ expanded: detailsExpanded }}
+            onPress={() => setDetailsExpanded((current) => !current)}
+            style={styles.detailsButton}
+          >
+            <Text style={styles.detailsTitle}>
+              {detailsExpanded
+                ? 'Masquer les options de prise personnalisée'
+                : 'Modifier la date, l’heure ou la quantité'}
+            </Text>
+          </Pressable>
+          {detailsExpanded ? (
+            <View style={styles.details}>
+              <View style={styles.row}>
+                <AppButton
+                  label={`Date : ${takenAt.toLocaleDateString('fr-FR')}`}
+                  variant="secondary"
+                  onPress={() => setDatePickerVisible(true)}
+                />
+                <AppButton
+                  label={`Heure : ${takenAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`}
+                  variant="secondary"
+                  onPress={() => setTimePickerVisible(true)}
+                />
+              </View>
+              {datePickerVisible ? (
+                <DateTimePicker
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  locale="fr-FR"
+                  mode="date"
+                  maximumDate={new Date()}
+                  onChange={chooseDate}
+                  value={takenAt}
+                />
+              ) : null}
+              {timePickerVisible ? (
+                <DateTimePicker
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  is24Hour
+                  mode="time"
+                  onChange={chooseTime}
+                  value={takenAt}
+                />
+              ) : null}
+              <AppField
+                label="Quantité prise"
+                inputMode="decimal"
+                value={quantityText}
+                onChangeText={setQuantityText}
+              />
+              <AppButton
+                label="Enregistrer"
+                loading={saving}
+                onPress={saveDetails}
+              />
+            </View>
+          ) : null}
         </View>
       ) : null}
       {history.length > 1 ? (
@@ -198,6 +239,18 @@ export function AsNeededIntakeLog({
 const styles = StyleSheet.create({
   section: { gap: spacing.md },
   recorder: { gap: spacing.sm },
+  details: { gap: spacing.sm },
+  detailsButton: {
+    alignItems: 'center',
+    backgroundColor: colors.brandSoft,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: sizes.touch,
+    paddingHorizontal: spacing.md,
+  },
+  detailsTitle: { ...typography.label, textAlign: 'center' },
   recent: { gap: spacing.xs },
   row: { flexDirection: 'row', gap: spacing.sm },
   label: { fontWeight: '600' },

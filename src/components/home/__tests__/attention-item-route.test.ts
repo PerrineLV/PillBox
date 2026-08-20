@@ -105,9 +105,9 @@ describe('attentionItemHref', () => {
     });
   });
 
-  it('ouvre le traitement si besoin concerné', () => {
+  it('ouvre l’enregistrement de prise si besoin concerné', () => {
     expect(attentionItemHref(AS_NEEDED)).toEqual({
-      pathname: '/treatments/[id]',
+      pathname: '/intakes/as-needed/[id]',
       params: { id: '3' },
     });
   });
@@ -139,7 +139,7 @@ describe('attentionItemActionLabel', () => {
     );
     expect(attentionItemActionLabel(RENEWAL)).toBe('Voir le stock');
     expect(attentionItemActionLabel(EXPIRATION)).toBe('Voir la boîte');
-    expect(attentionItemActionLabel(AS_NEEDED)).toBe('Voir le traitement');
+    expect(attentionItemActionLabel(AS_NEEDED)).toBe('Enregistrer une prise');
     expect(attentionItemActionLabel(PRESCRIPTION_EXPIRY)).toBe(
       'Voir l’ordonnance',
     );

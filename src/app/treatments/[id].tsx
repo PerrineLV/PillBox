@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 
 import { GenericGroupSection } from '@/components/medications/generic-group-section';
-import { AsNeededIntakeLog } from '@/components/treatments/as-needed-intake-log';
 import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
 import { GenericEquivalenceList } from '@/components/treatments/generic-equivalence-list';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
@@ -168,12 +167,6 @@ export default function EditTreatmentScreen() {
               params: { treatmentId: String(treatment.id) },
             })
           }
-        />
-      ) : null}
-      {treatment?.dosageKind === 'AS_NEEDED' ? (
-        <AsNeededIntakeLog
-          treatmentId={treatment.id}
-          canRecord={treatment.archivedAt === null}
         />
       ) : null}
       {treatment && removalAction ? (
