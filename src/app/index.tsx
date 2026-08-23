@@ -30,6 +30,7 @@ import {
   getGlobalIntakeReminderSettings,
   isIntakeRemindersEnabled,
 } from '@/infrastructure/reminders/intake-reminder-repository';
+import { getPreparationReminderSettings } from '@/infrastructure/reminders/preparation-reminder-repository';
 import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
@@ -43,6 +44,8 @@ import {
   spacing,
   typography,
 } from '@/ui';
+
+const MAX_WATCH_ITEMS = 3;
 
 export default function HomeScreen() {
   const database = useSQLiteContext();
@@ -67,6 +70,7 @@ export default function HomeScreen() {
         listPreparationWeeks(database),
         isIntakeRemindersEnabled(database),
         getGlobalIntakeReminderSettings(database),
+        getPreparationReminderSettings(database),
         listPendingIntakeCounts(
           database,
           localCivilDate(now),
@@ -84,6 +88,7 @@ export default function HomeScreen() {
             weeks,
             remindersEnabled,
             slotTimes,
+            preparationReminder,
             pendingIntakeCounts,
             equivalenceConfirmations,
             prescriptions,
@@ -130,6 +135,7 @@ export default function HomeScreen() {
                 referenceDate: today,
                 now,
                 intakeRemindersEnabled: remindersEnabled,
+                preparationReminder,
                 treatments,
                 intakeSlotTimes: slotTimes,
                 pendingIntakeCounts,
@@ -192,9 +198,29 @@ export function HomeContent({
   error: string | null;
   lastPreparation?: PreparationHistoryEntry | null;
 }>) {
+  const preparation = items?.find(
+    (item): item is Extract<AttentionItem, { type: 'PREPARATION' }> =>
+      item.type === 'PREPARATION',
+  );
+  const nextIntake = items?.filter((item) => item.type === 'NEXT_INTAKE_GROUP');
+  const nowItems = [
+    ...(preparation ? [preparation] : []),
+    ...(nextIntake ?? []),
+  ];
+  const watchItems =
+    items?.filter(
+      (item) =>
+        item.type === 'STOCK_RENEWAL' ||
+        item.type === 'EXPIRATION' ||
+        item.type === 'PRESCRIPTION_EXPIRY',
+    ) ?? [];
+  const visibleWatchItems = watchItems.slice(0, MAX_WATCH_ITEMS);
+  const asNeededItems =
+    items?.filter((item) => item.type === 'AS_NEEDED_INFO') ?? [];
   const calm =
     items !== null &&
-    !items.some((item) => isAttentionItemActionRequired(item));
+    watchItems.length === 0 &&
+    !nowItems.some((item) => isAttentionItemActionRequired(item));
   return (
     <Screen
       fixedHeader={
@@ -206,9 +232,6 @@ export function HomeContent({
           <View style={styles.heroText}>
             <Text accessibilityRole="header" style={styles.title}>
               PillBox
-            </Text>
-            <Text style={styles.subtitle}>
-              Votre pilulier, simplement et sûrement.
             </Text>
           </View>
         </View>
@@ -223,20 +246,59 @@ export function HomeContent({
       {!loading && !error && items ? (
         <>
           {calm ? (
-            <Message tone="success" title="Tout est en ordre">
+            <Message tone="success" title="Tout va bien">
               Aucune action urgente pour l’instant.
             </Message>
           ) : null}
-          <SectionTitle>À faire</SectionTitle>
-          {items.map((item) => (
-            <AttentionItemCard key={item.id} item={item} />
-          ))}
+          {nowItems.length > 0 ? (
+            <>
+              <SectionTitle>Maintenant</SectionTitle>
+              {nowItems.map((item) => (
+                <AttentionItemCard key={item.id} item={item} />
+              ))}
+            </>
+          ) : null}
+          {visibleWatchItems.length > 0 ? (
+            <>
+              <SectionTitle>À surveiller</SectionTitle>
+              {visibleWatchItems.map((item) => (
+                <AttentionItemCard compact key={item.id} item={item} />
+              ))}
+              {watchItems.length > MAX_WATCH_ITEMS ? (
+                <Link href="/more" asChild>
+                  <Pressable
+                    accessibilityLabel="Voir le suivi détaillé"
+                    accessibilityRole="button"
+                    style={({ pressed }) => [
+                      styles.watchMore,
+                      pressed && styles.lastPreparationPressed,
+                    ]}
+                  >
+                    <Text style={styles.watchMoreText}>
+                      Voir le suivi détaillé
+                    </Text>
+                  </Pressable>
+                </Link>
+              ) : null}
+            </>
+          ) : null}
+          {asNeededItems.length > 0 ? (
+            <>
+              <SectionTitle>Si besoin</SectionTitle>
+              {asNeededItems.map((item) => (
+                <AttentionItemCard compact key={item.id} item={item} />
+              ))}
+            </>
+          ) : null}
         </>
       ) : null}
-      {lastPreparation ? (
-        <LastPreparationCard
-          detail={`Validée le ${formatDateTime(lastPreparation.completedAt)} · semaine du ${formatDate(lastPreparation.startDate)}`}
-        />
+      {!loading && !error && lastPreparation ? (
+        <>
+          <SectionTitle>Activité récente</SectionTitle>
+          <LastPreparationCard
+            detail={`Validée le ${formatDateTime(lastPreparation.completedAt)} · semaine du ${formatDate(lastPreparation.startDate)}`}
+          />
+        </>
       ) : null}
     </Screen>
   );
@@ -267,7 +329,7 @@ function LastPreparationCard({ detail }: { detail: string }) {
             <View style={styles.homeLinkText}>
               <Badge label="Historique" tone="neutral" />
               <Text style={styles.homeLinkTitle}>Dernière préparation</Text>
-              <Text style={styles.subtitle}>{detail}</Text>
+              <Text style={typography.caption}>{detail}</Text>
             </View>
             <Text
               accessibilityElementsHidden
@@ -323,6 +385,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 15,
     height: 24,
   },
-  subtitle: typography.caption,
   title: typography.display,
+  watchMore: { alignSelf: 'flex-start', paddingVertical: spacing.xs },
+  watchMoreText: { color: colors.brand, fontWeight: '700' },
 });

@@ -45,14 +45,14 @@ describe('HomeScreen', () => {
         error: null,
       }),
     );
-    expect(rendered).toContain('Tout est en ordre');
+    expect(rendered).toContain('Tout va bien');
   });
 
   it('ne montre pas l’état calme quand une préparation reste à faire', () => {
     const rendered = JSON.stringify(
       HomeContent({ items: [PREPARATION_START], loading: false, error: null }),
     );
-    expect(rendered).not.toContain('Tout est en ordre');
+    expect(rendered).not.toContain('Tout va bien');
   });
 
   it('ne montre pas l’état calme quand un renouvellement ou une péremption reste à traiter', () => {
@@ -71,10 +71,10 @@ describe('HomeScreen', () => {
     const rendered = JSON.stringify(
       HomeContent({ items, loading: false, error: null }),
     );
-    expect(rendered).not.toContain('Tout est en ordre');
+    expect(rendered).not.toContain('Tout va bien');
   });
 
-  it('respecte la priorité : prochaine prise, préparation, renouvellement, péremption, si besoin', () => {
+  it('place la préparation avant les autres actions dans Maintenant, puis sépare les alertes et les prises si besoin', () => {
     const items: AttentionItem[] = [
       {
         type: 'NEXT_INTAKE_GROUP',
@@ -123,8 +123,8 @@ describe('HomeScreen', () => {
       HomeContent({ items, loading: false, error: null }),
     );
     const order = [
-      'next-intake:1',
       'preparation:next',
+      'next-intake:1',
       'stock-renewal:1',
       'expiration:2',
       'as-needed:3',
@@ -133,6 +133,29 @@ describe('HomeScreen', () => {
     for (let index = 1; index < order.length; index += 1) {
       expect(order[index]).toBeGreaterThan(order[index - 1]);
     }
+  });
+
+  it('n’affiche le bloc Si besoin que lorsqu’un traitement concerné existe', () => {
+    const empty = JSON.stringify(
+      HomeContent({ items: [], loading: false, error: null }),
+    );
+    const withAsNeeded = JSON.stringify(
+      HomeContent({
+        items: [
+          {
+            type: 'AS_NEEDED_INFO',
+            id: 'as-needed:3',
+            treatmentId: 3,
+            specialtyName: 'Gamma',
+            lastIntake: null,
+          },
+        ],
+        loading: false,
+        error: null,
+      }),
+    );
+    expect(empty).not.toContain('Si besoin');
+    expect(withAsNeeded).toContain('Si besoin');
   });
 
   it('n’affiche aucune information de mise à jour quand l’app est à jour', () => {

@@ -28,7 +28,10 @@ import {
   typography,
 } from '@/ui';
 
-export function AttentionItemCard({ item }: Readonly<{ item: AttentionItem }>) {
+export function AttentionItemCard({
+  item,
+  compact = false,
+}: Readonly<{ item: AttentionItem; compact?: boolean }>) {
   const actionLabel = attentionItemActionLabel(item);
   return (
     <Link href={attentionItemHref(item)} asChild>
@@ -37,7 +40,7 @@ export function AttentionItemCard({ item }: Readonly<{ item: AttentionItem }>) {
         accessibilityLabel={actionLabel}
         style={({ pressed }) => pressed && styles.pressed}
       >
-        <Card style={cardStyleFor(item)}>
+        <Card style={[cardStyleFor(item), compact ? styles.compactCard : null]}>
           {AttentionItemContent({ item })}
           <View style={styles.actionRow}>
             <Text
@@ -233,6 +236,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   chevron: { color: colors.brand, flexShrink: 0, fontSize: 22 },
+  compactCard: { gap: spacing.sm, padding: spacing.md },
   onBrand: { color: colors.surface },
   preparationCard: {
     backgroundColor: colors.brand,

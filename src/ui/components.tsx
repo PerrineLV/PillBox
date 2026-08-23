@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   type TextInputProps,
+  type StyleProp,
   type TextStyle,
   View,
   type ViewStyle,
@@ -113,7 +114,7 @@ export function Card({
 }: {
   children: ReactNode;
   tone?: 'default' | 'muted';
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
     <View style={[styles.card, tone === 'muted' && styles.cardMuted, style]}>
