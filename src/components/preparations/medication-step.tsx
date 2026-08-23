@@ -1,6 +1,6 @@
 import { Text } from 'react-native';
 
-import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
+import { formatFrenchWeekdayAndDate } from '@/components/treatments/civil-date';
 import type { MedicationBox } from '@/domain/inventory/inventory';
 import type {
   MedicationRequirement,
@@ -67,7 +67,7 @@ export function MedicationStep({
       <Text style={styles.casesTitle}>Cases concernées</Text>
       {cases.map((item, index) => (
         <Text key={`${item.date}-${item.slot}-${index}`} style={styles.case}>
-          • {formatLongFrenchCivilDate(item.date)} · {SLOT_LABELS[item.slot]} :{' '}
+          • {formatFrenchWeekdayAndDate(item.date)} · {SLOT_LABELS[item.slot]} :{' '}
           {formatHalfUnits(item.quantityHalfUnits)}
         </Text>
       ))}

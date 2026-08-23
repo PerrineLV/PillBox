@@ -1,5 +1,8 @@
-import { dailySlotChecks } from '../daily-final-check';
-import type { PreparationItemSnapshot } from '@/domain/preparations/preparation';
+import { DailyFinalCheck, dailySlotChecks } from '../daily-final-check';
+import type {
+  PreparationItemSnapshot,
+  PreparationSnapshot,
+} from '@/domain/preparations/preparation';
 
 const items: readonly PreparationItemSnapshot[] = [
   {
@@ -54,5 +57,20 @@ describe('dailySlotChecks', () => {
         items: [items[3]],
       },
     ]);
+  });
+
+  it('rend le jour comme repère principal, avec la date pour chaque case', () => {
+    const snapshot: PreparationSnapshot = {
+      startDate: '2026-08-31',
+      endDate: '2026-09-06',
+      items,
+      requirements: [],
+      hasShortages: false,
+    };
+    const rendered = JSON.stringify(DailyFinalCheck({ snapshot }));
+    expect(rendered).toContain('Lundi');
+    expect(rendered).toContain('31 août');
+    expect(rendered).toContain('Mardi');
+    expect(rendered).toContain('1 septembre');
   });
 });
