@@ -18,8 +18,8 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import com.facebook.react.bridge.ReactPackage
 import com.facebook.react.bridge.NativeModule
+import com.facebook.react.ReactPackage
 import com.facebook.react.uimanager.ViewManager
 
 class PillBoxTodayWidgetModule(private val context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
@@ -61,7 +61,7 @@ class PillBoxTodayWidgetProvider : AppWidgetProvider() {
         val slots = snapshot?.optJSONArray("slots")
         val first = if (slots != null && slots.length() > 0) slots.optJSONObject(0) else null
         views.setTextViewText(R.id.widget_title, if (preparation) "Préparer mon pilulier" else "PillBox aujourd’hui")
-        val detail = if (preparation) "Votre préparation est à faire aujourd’hui." else when (first?.optString("state")) { "VALIDATED" -> "Prochaine prise validée"; "DUE" -> "Prise à prendre · \${first.optInt('medicationCount')} médicament(s)"; else -> if (first == null) "Aucune prise prévue aujourd’hui" else "Prochaine prise · \${first.optInt('medicationCount')} médicament(s)" }
+        val detail = if (preparation) "Votre préparation est à faire aujourd’hui." else when (first?.optString("state")) { "VALIDATED" -> "Prochaine prise validée"; "DUE" -> "Prise à prendre · \${first.optInt(\"medicationCount\")} médicament(s)"; else -> if (first == null) "Aucune prise prévue aujourd’hui" else "Prochaine prise · \${first.optInt(\"medicationCount\")} médicament(s)" }
         views.setTextViewText(R.id.widget_detail, detail)
         if (medium) views.setTextViewText(R.id.widget_slots, slots?.let { "\${it.length()} créneau(x) aujourd’hui" } ?: "")
         val target = if (preparation) "pillbox://preparations/new" else first?.optString("target") ?: "pillbox://"
