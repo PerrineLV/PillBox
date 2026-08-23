@@ -97,4 +97,55 @@ describe('MedicationStep', () => {
     expect(rendered).not.toContain('Stock insuffisant pour toute la semaine');
     expect(rendered).not.toContain('ne garantit pas une délivrance');
   });
+
+  it('guide le passage entre les boîtes déjà retenues sans masquer le stock projeté', () => {
+    const rendered = JSON.stringify(
+      MedicationStep({
+        snapshot,
+        current: {
+          ...current(0),
+          remainingHalfUnits: 2,
+          contributions: [
+            {
+              specialtyCis: 'A',
+              boxId: 12,
+              quantityHalfUnits: 4,
+              verification: 'MANUAL',
+              scanRaw: null,
+              nonFefoAcknowledged: false,
+              matchedCis: null,
+              matchedSpecialtyName: null,
+            },
+          ],
+        },
+        boxes: [
+          {
+            id: 12,
+            specialtyCis: 'A',
+            specialtyName: 'Alpha',
+            pharmaceuticalForm: 'comprimé',
+            presentationCip13: '3400000000012',
+            presentationLabel: 'Boîte',
+            lot: 'A-12',
+            expirationDate: '2027-01-01',
+            initialQuantity: 2,
+            remainingQuantity: 2,
+            origin: 'SCAN',
+            scanRaw: 'raw',
+          },
+        ],
+        theoreticalRenewalDate: null,
+        pendingComplementEnabled: false,
+      }),
+    );
+
+    expect(rendered).toContain('Guidage de remplissage');
+    expect(rendered).toContain('A-12');
+    expect(rendered).toContain('Lundi 17 août');
+    expect(rendered).toContain('Mardi 18 août');
+    expect(rendered).toContain(
+      'Après validation, il restera 0 dans cette boîte',
+    );
+    expect(rendered).toContain('Passez maintenant à une autre boîte');
+  });
 });

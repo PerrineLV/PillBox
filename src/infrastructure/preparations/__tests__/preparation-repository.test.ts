@@ -715,15 +715,15 @@ describe('fin d’une boîte et relais par une seconde pour un même médicament
     );
     // Besoin de 7 demi-unités pour 60000001 (twoMedicationSnapshot) : la
     // première boîte n'en couvre qu'une partie, la seconde complète le reste.
-    const almostEmptyBoxId = insertBox(raw, {
-      specialtyCis: '60000001',
-      lot: 'PRESQUE-VIDE',
-      remainingQuantity: 1,
-    });
     const freshBoxId = insertBox(raw, {
       specialtyCis: '60000001',
       lot: 'FRAICHE',
       remainingQuantity: 10,
+    });
+    const almostEmptyBoxId = insertBox(raw, {
+      specialtyCis: '60000001',
+      lot: 'PRESQUE-VIDE',
+      remainingQuantity: 1,
     });
     const otherBoxId = insertBox(raw, {
       specialtyCis: '60000002',
@@ -765,8 +765,10 @@ describe('fin d’une boîte et relais par une seconde pour un même médicament
     // doivent toutes deux être retrouvées, sans que l'une efface l'autre.
     const reopened = await getLatestDraftPreparation(database);
     expect(
-      reopened?.progress.filter((item) => item.specialtyCis === '60000001'),
-    ).toHaveLength(2);
+      reopened?.progress
+        .filter((item) => item.specialtyCis === '60000001')
+        .map((item) => item.boxId),
+    ).toEqual([almostEmptyBoxId, freshBoxId]);
 
     await completePreparation(database, id, '2026-08-16');
 

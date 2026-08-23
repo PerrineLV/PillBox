@@ -34,7 +34,9 @@ export function StockBoxChoice({
       <Text style={typography.caption}>
         Aucune lecture de DataMatrix ne sera enregistrée : les contrôles de
         médicament, de lot et de péremption restent appliqués. Un autre membre
-        du même groupe générique officiel exige une confirmation explicite.
+        du même groupe générique officiel exige une confirmation explicite. La
+        liste privilégie les boîtes qui couvrent le besoin puis la péremption la
+        plus proche ; la boîte que vous confirmez est celle retenue.
       </Text>
       {boxes.length === 0 ? (
         <Text style={styles.case}>
