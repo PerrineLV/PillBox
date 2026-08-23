@@ -33,51 +33,54 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     plugins: appendPlugin(
       appendPlugin(
         appendPlugin(
-          appendPlugin(config.plugins, 'expo-notifications'),
-          'expo-local-authentication',
+          appendPlugin(
+            appendPlugin(config.plugins, 'expo-notifications'),
+            'expo-local-authentication',
+          ),
+          'expo-mail-composer',
         ),
-        'expo-mail-composer',
-      ),
-      [
-        '@react-native-community/datetimepicker',
-        {
-          android: {
-            datePicker: {
-              colorAccent: {
-                light: DATE_TIME_PICKER_ACCENT_COLOR,
-                dark: DATE_TIME_PICKER_ACCENT_COLOR,
+        [
+          '@react-native-community/datetimepicker',
+          {
+            android: {
+              datePicker: {
+                colorAccent: {
+                  light: DATE_TIME_PICKER_ACCENT_COLOR,
+                  dark: DATE_TIME_PICKER_ACCENT_COLOR,
+                },
               },
-            },
-            timePicker: {
-              numbersSelectorColor: {
-                light: DATE_TIME_PICKER_ACCENT_COLOR,
-                dark: DATE_TIME_PICKER_ACCENT_COLOR,
-              },
-              headerBackground: {
-                light: DATE_TIME_PICKER_ACCENT_COLOR,
-                dark: DATE_TIME_PICKER_ACCENT_COLOR,
-              },
-              // Sans ces trois attributs, le cadran hérite du style AOSP par
-              // défaut, dont le contraste des chiffres non sélectionnés varie
-              // fortement selon la version d'Android et la surcouche du
-              // fabricant (ticket 43). Valeurs choisies à la main, à valider
-              // visuellement sur un appareil réel.
-              background: {
-                light: '#FFFDF9',
-                dark: '#1E1E1E',
-              },
-              numbersBackgroundColor: {
-                light: '#F3EFE6',
-                dark: '#2A2A2A',
-              },
-              numbersTextColor: {
-                light: '#24322D',
-                dark: '#F2F0EA',
+              timePicker: {
+                numbersSelectorColor: {
+                  light: DATE_TIME_PICKER_ACCENT_COLOR,
+                  dark: DATE_TIME_PICKER_ACCENT_COLOR,
+                },
+                headerBackground: {
+                  light: DATE_TIME_PICKER_ACCENT_COLOR,
+                  dark: DATE_TIME_PICKER_ACCENT_COLOR,
+                },
+                // Sans ces trois attributs, le cadran hérite du style AOSP par
+                // défaut, dont le contraste des chiffres non sélectionnés varie
+                // fortement selon la version d'Android et la surcouche du
+                // fabricant (ticket 43). Valeurs choisies à la main, à valider
+                // visuellement sur un appareil réel.
+                background: {
+                  light: '#FFFDF9',
+                  dark: '#1E1E1E',
+                },
+                numbersBackgroundColor: {
+                  light: '#F3EFE6',
+                  dark: '#2A2A2A',
+                },
+                numbersTextColor: {
+                  light: '#24322D',
+                  dark: '#F2F0EA',
+                },
               },
             },
           },
-        },
-      ],
+        ],
+      ),
+      './plugins/withPillBoxTodayWidget',
     ),
   };
 };
