@@ -20,7 +20,11 @@ import {
   type PlannedIntakeReminder,
 } from '@/domain/reminders/intake-reminder';
 import type { RenewalItem } from '@/domain/renewal/renewal-list';
-import type { IntakeSlot, Treatment } from '@/domain/treatments/treatment';
+import type {
+  IntakeSlot,
+  Treatment,
+  Weekday,
+} from '@/domain/treatments/treatment';
 
 /**
  * Au-delà d'une semaine, « la prochaine prise » n'aiderait plus à répondre à
@@ -135,6 +139,12 @@ export type AttentionItemsInput = Readonly<{
   referenceDate: string;
   now: Date;
   intakeRemindersEnabled: boolean;
+  /**
+   * Le rappel de préparation pilote uniquement la proposition de démarrer une
+   * nouvelle préparation depuis l'accueil. Une préparation déjà entamée reste
+   * toujours accessible, quel que soit ce réglage.
+   */
+  preparationReminder: Readonly<{ enabled: boolean; weekday: Weekday }>;
   treatments: readonly Treatment[];
   intakeSlotTimes: IntakeSlotTimes;
   /** Prises encore en attente sur l'horizon de recherche (ticket 13b). */
@@ -162,7 +172,7 @@ export function buildAttentionItems(
 ): AttentionItem[] {
   return [
     ...buildNextIntakeGroupItems(input),
-    buildPreparationItem(input),
+    ...buildPreparationItems(input),
     ...input.renewalItems.map((item): StockRenewalAttentionItem => ({
       type: 'STOCK_RENEWAL',
       id: `stock-renewal:${item.specialtyCis}`,
@@ -240,41 +250,62 @@ function toNextIntakeGroupItem(
 }
 
 /**
- * Toujours présente : la préparation du pilulier reste le parcours
- * prioritaire de PillBox (ticket 11f), qu'elle reste à démarrer, à reprendre
- * ou qu'elle soit déjà prête. Une préparation en cours (DRAFT) est par
- * construction la préparation incomplète à reprendre : le modèle métier
- * n'autorise qu'une seule préparation active à la fois, donc ce même item
- * couvre à la fois « prochaine préparation » et « préparation incomplète ».
+ * Une préparation en cours est toujours visible, car elle demande une reprise
+ * explicite. En revanche, la proposition de démarrer la suivante appartient
+ * exclusivement au jour du rappel hebdomadaire configuré : l'accueil ne doit
+ * pas annoncer la prochaine préparation la veille ou les jours suivants.
  */
-function buildPreparationItem(
+function buildPreparationItems(
   input: AttentionItemsInput,
-): PreparationAttentionItem {
+): readonly PreparationAttentionItem[] {
   if (input.draftPreparation) {
-    return {
-      type: 'PREPARATION',
-      id: 'preparation:draft',
-      mode: 'RESUME',
-      startDate: input.draftPreparation.startDate,
-      endDate: input.draftPreparation.endDate,
-      completedCount: input.draftPreparation.completedCount,
-      totalCount: input.draftPreparation.totalCount,
-    };
+    return [
+      {
+        type: 'PREPARATION',
+        id: 'preparation:draft',
+        mode: 'RESUME',
+        startDate: input.draftPreparation.startDate,
+        endDate: input.draftPreparation.endDate,
+        completedCount: input.draftPreparation.completedCount,
+        totalCount: input.draftPreparation.totalCount,
+      },
+    ];
   }
+  if (
+    !input.preparationReminder.enabled ||
+    weekdayForDate(input.referenceDate) !== input.preparationReminder.weekday
+  )
+    return [];
   const nextWeek = preparationWeeks(input.referenceDate)[0];
   const state = preparationWeekState(
     nextWeek.startDate,
     input.knownPreparationWeeks,
   );
-  return {
-    type: 'PREPARATION',
-    id: 'preparation:next',
-    mode: state === 'ALREADY_PREPARED' ? 'READY' : 'START',
-    startDate: nextWeek.startDate,
-    endDate: nextWeek.endDate,
-    completedCount: 0,
-    totalCount: 0,
-  };
+  if (state === 'ALREADY_PREPARED') return [];
+  return [
+    {
+      type: 'PREPARATION',
+      id: 'preparation:next',
+      mode: 'START',
+      startDate: nextWeek.startDate,
+      endDate: nextWeek.endDate,
+      completedCount: 0,
+      totalCount: 0,
+    },
+  ];
+}
+
+function weekdayForDate(isoDate: string): Weekday {
+  const weekdayByNumber: readonly Weekday[] = [
+    'sunday',
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+  ];
+  return weekdayByNumber[new Date(`${isoDate}T12:00:00`).getDay()];
 }
 
 /**

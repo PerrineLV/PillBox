@@ -23,6 +23,8 @@ export const styles = StyleSheet.create({
   footerActions: { gap: 10 },
   day: { borderTopColor: colors.border, borderTopWidth: 1, paddingTop: 8 },
   dayTitle: { fontSize: 16, fontWeight: '800' },
+  dayWeekday: { color: colors.text, fontSize: 18, fontWeight: '800' },
+  dayDate: { color: colors.textMuted, fontSize: 15, fontWeight: '600' },
   stockOption: {
     borderColor: colors.border,
     borderRadius: radii.md,

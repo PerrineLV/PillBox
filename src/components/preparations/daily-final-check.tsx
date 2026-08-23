@@ -1,7 +1,10 @@
 import { Fragment } from 'react';
 import { Text, View } from 'react-native';
 
-import { formatFrenchWeekdayAndDate } from '@/components/treatments/civil-date';
+import {
+  formatFrenchDayAndMonth,
+  formatFrenchWeekday,
+} from '@/components/treatments/civil-date';
 import type {
   PreparationItemSnapshot,
   PreparationSnapshot,
@@ -62,7 +65,8 @@ export function DailyFinalCheck({
       {dates.map((date) => (
         <View key={date} style={styles.day}>
           <Text style={styles.dayTitle}>
-            {formatFrenchWeekdayAndDate(date)}
+            <Text style={styles.dayWeekday}>{formatFrenchWeekday(date)}</Text>{' '}
+            <Text style={styles.dayDate}>{formatFrenchDayAndMonth(date)}</Text>
           </Text>
           {dailySlotChecks(snapshot.items, date).map((check) => (
             <Fragment key={check.slot}>

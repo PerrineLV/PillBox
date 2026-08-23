@@ -113,6 +113,12 @@ export function BoxConfirmation({
           pouvez continuer en confirmant cet avertissement.
         </Text>
       ) : null}
+      {isFefo ? (
+        <Text>
+          Cette boîte couvre toutes les prises restantes. Aucune autre boîte
+          n’est nécessaire.
+        </Text>
+      ) : null}
       <AppButton
         loading={saving}
         label={

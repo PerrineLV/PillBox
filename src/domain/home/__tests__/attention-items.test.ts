@@ -109,6 +109,7 @@ function baseInput(
     referenceDate: '2026-03-02',
     now: new Date(2026, 2, 2, 7),
     intakeRemindersEnabled: false,
+    preparationReminder: { enabled: true, weekday: 'monday' },
     treatments: [],
     intakeSlotTimes: SLOT_TIMES,
     pendingIntakeCounts: [],
@@ -299,14 +300,68 @@ describe('buildAttentionItems', () => {
       });
     });
 
-    it('indique un état prêt quand la semaine à venir est déjà validée', () => {
+    it('ne propose rien lorsque la semaine à venir est déjà validée', () => {
       const known: KnownPreparation[] = [
         { id: 1, startDate: '2026-03-03', status: 'COMPLETED' },
       ];
-      const [item] = buildAttentionItems(
+      const items = buildAttentionItems(
         baseInput({ knownPreparationWeeks: known }),
       );
-      expect(item).toMatchObject({ type: 'PREPARATION', mode: 'READY' });
+      expect(items.some((item) => item.type === 'PREPARATION')).toBe(false);
+    });
+
+    it('propose de commencer uniquement le jour configuré pour le rappel', () => {
+      const built = buildAttentionItems(
+        baseInput({
+          preparationReminder: { enabled: true, weekday: 'monday' },
+        }),
+      );
+      expect(built).toContainEqual(
+        expect.objectContaining({ type: 'PREPARATION', mode: 'START' }),
+      );
+    });
+
+    it('ne propose pas de commencer la veille ou le lendemain du jour configuré', () => {
+      const before = buildAttentionItems(
+        baseInput({
+          referenceDate: '2026-03-01',
+          preparationReminder: { enabled: true, weekday: 'monday' },
+        }),
+      );
+      const after = buildAttentionItems(
+        baseInput({
+          referenceDate: '2026-03-03',
+          preparationReminder: { enabled: true, weekday: 'monday' },
+        }),
+      );
+      expect(before.some((item) => item.type === 'PREPARATION')).toBe(false);
+      expect(after.some((item) => item.type === 'PREPARATION')).toBe(false);
+    });
+
+    it('ne propose pas de commencer lorsque le rappel de préparation est désactivé', () => {
+      const built = buildAttentionItems(
+        baseInput({
+          preparationReminder: { enabled: false, weekday: 'monday' },
+        }),
+      );
+      expect(built.some((item) => item.type === 'PREPARATION')).toBe(false);
+    });
+
+    it('laisse toujours reprendre une préparation déjà en cours', () => {
+      const built = buildAttentionItems(
+        baseInput({
+          preparationReminder: { enabled: false, weekday: 'monday' },
+          draftPreparation: {
+            startDate: '2026-03-03',
+            endDate: '2026-03-09',
+            completedCount: 1,
+            totalCount: 2,
+          },
+        }),
+      );
+      expect(built).toContainEqual(
+        expect.objectContaining({ type: 'PREPARATION', mode: 'RESUME' }),
+      );
     });
   });
 

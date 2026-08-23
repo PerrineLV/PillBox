@@ -18,14 +18,30 @@ export function formatLongFrenchCivilDate(value: string): string {
 
 /** Affiche le jour et la date civile, sans année, pour un contrôle hebdomadaire. */
 export function formatFrenchWeekdayAndDate(value: string): string {
+  const weekday = formatFrenchWeekday(value);
+  const date = formatFrenchDayAndMonth(value);
+  if (weekday === value || date === value) return value;
+  return `${weekday} ${date}`;
+}
+
+/** Jour civil capitalisé, destiné à devenir le repère principal d'une case. */
+export function formatFrenchWeekday(value: string): string {
   const date = civilDateToPickerDate(value);
   if (date === null) return value;
   const formatted = new Intl.DateTimeFormat('fr-FR', {
     weekday: 'long',
+  }).format(date);
+  return `${formatted[0].toUpperCase()}${formatted.slice(1)}`;
+}
+
+/** Date civile complémentaire, sans retransformer le fuseau de l'appareil. */
+export function formatFrenchDayAndMonth(value: string): string {
+  const date = civilDateToPickerDate(value);
+  if (date === null) return value;
+  return new Intl.DateTimeFormat('fr-FR', {
     day: 'numeric',
     month: 'long',
   }).format(date);
-  return `${formatted[0].toUpperCase()}${formatted.slice(1)}`;
 }
 
 /**

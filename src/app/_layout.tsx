@@ -37,6 +37,7 @@ import { synchronizeIntakeReminders } from '@/infrastructure/reminders/intake-re
 import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 import { markPendingIntakesTakenForGroups } from '@/infrastructure/intakes/intake-repository';
 import { logCrash } from '@/infrastructure/logging/crash-logger';
+import { refreshTodayWidget } from '@/infrastructure/widget/today-widget';
 
 type ErrorUtilsLike = {
   getGlobalHandler(): (error: Error, isFatal?: boolean) => void;
@@ -89,6 +90,7 @@ export default function RootLayout() {
       <DatabaseProvider>
         <ToastProvider>
           <ReminderCoordinator />
+          <TodayWidgetCoordinator />
           <IntakeActionCoordinator />
           <AppLockGate>
             <View style={{ flex: 1 }}>
@@ -143,6 +145,24 @@ function ReminderCoordinator() {
     });
     return () => subscription.remove();
   }, [database, queue]);
+  return null;
+}
+
+/** Rafraîchit la projection native à chaque ouverture/retour de l'app. */
+function TodayWidgetCoordinator() {
+  const database = useSQLiteContext();
+  const pathname = usePathname();
+  useEffect(() => {
+    void refreshTodayWidget(database).catch(() => {
+      // Le widget est un confort local : son absence ne bloque jamais PillBox.
+    });
+  }, [database, pathname]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refreshTodayWidget(database).catch(() => {});
+    });
+    return () => subscription.remove();
+  }, [database]);
   return null;
 }
 

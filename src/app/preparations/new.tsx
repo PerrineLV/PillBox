@@ -843,7 +843,18 @@ function NewPreparationScreenContent({
         <Text>Aucune prise prévue pour cette période.</Text>
       ) : null}
       {current ? (
-        <MedicationStep snapshot={snapshot!} current={current} boxes={boxes} />
+        <MedicationStep
+          snapshot={snapshot!}
+          current={current}
+          boxes={boxes}
+          theoreticalRenewalDate={
+            theoreticalRenewalDateBySpecialtyCis.get(current.specialtyCis) ??
+            null
+          }
+          pendingComplementEnabled={controlledDispensingActiveCis.has(
+            current.specialtyCis,
+          )}
+        />
       ) : null}
       {choosing && current && !pending ? (
         <StockBoxChoice

@@ -200,7 +200,7 @@ export async function getLatestDraftPreparation(
   }>(
     `SELECT specialty_cis, box_id, quantity_half_units, verification,
       scan_raw, non_fefo_acknowledged, matched_cis, matched_specialty_name
-     FROM preparation_progress WHERE preparation_id = ? ORDER BY box_id`,
+     FROM preparation_progress WHERE preparation_id = ? ORDER BY rowid`,
     preparation.id,
   );
   const hydratedRequirements = requirements.map((row) => ({
