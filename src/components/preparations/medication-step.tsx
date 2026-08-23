@@ -1,6 +1,10 @@
 import { Text } from 'react-native';
 
-import { formatFrenchWeekdayAndDate } from '@/components/treatments/civil-date';
+import {
+  formatFrenchWeekdayAndDate,
+  formatLongFrenchCivilDate,
+} from '@/components/treatments/civil-date';
+import { allocateItemCompletion } from '@/domain/preparations/pending-completion';
 import type { MedicationBox } from '@/domain/inventory/inventory';
 import type {
   MedicationRequirement,
@@ -27,14 +31,39 @@ export function MedicationStep({
   snapshot,
   current,
   boxes,
+  theoreticalRenewalDate,
+  pendingComplementEnabled,
 }: {
   snapshot: PreparationSnapshot;
   current: CurrentRequirement;
   boxes: readonly MedicationBox[];
+  theoreticalRenewalDate: string | null;
+  /** État ticket 30b : réservé aux délivrances encadrées/fractionnées. */
+  pendingComplementEnabled: boolean;
 }) {
   const cases = snapshot.items.filter(
     (item) => item.specialtyCis === current.specialtyCis,
   );
+  const expectedCoverage = allocateItemCompletion(
+    cases,
+    current.requiredHalfUnits - current.missingHalfUnits,
+  );
+  const pendingCases = expectedCoverage.filter(
+    (item) => item.status === 'PENDING_COMPLEMENT',
+  );
+  const coveredCaseCount = expectedCoverage.length - pendingCases.length;
+  const coverageLabel = `${coveredCaseCount} prise${coveredCaseCount > 1 ? 's' : ''} couverte${coveredCaseCount > 1 ? 's' : ''} sur ${cases.length}.`;
+  const pendingCasesLabel = pendingCases
+    .map(
+      (item) =>
+        `${formatFrenchWeekdayAndDate(item.date)} · ${SLOT_LABELS[item.slot]}`,
+    )
+    .join(' ; ');
+  const shortageDescription = `${coverageLabel} Restent en attente de complément : ${pendingCasesLabel}.${
+    theoreticalRenewalDate
+      ? ` Selon l’ordonnance, un complément pourrait être demandé à partir du ${formatLongFrenchCivilDate(theoreticalRenewalDate)}. Cette date est indicative et ne garantit pas une délivrance.`
+      : ''
+  }`;
   return (
     <Card style={styles.card}>
       <Text style={styles.name}>{current.specialtyName}</Text>
@@ -44,6 +73,11 @@ export function MedicationStep({
       <Text style={styles.total}>
         Quantité totale : {formatHalfUnits(current.requiredHalfUnits)}
       </Text>
+      {pendingComplementEnabled && pendingCases.length > 0 ? (
+        <Message tone="warning" title="Stock insuffisant pour toute la semaine">
+          {shortageDescription}
+        </Message>
+      ) : null}
       {current.contributions.length > 0 ? (
         <Message
           tone="warning"
