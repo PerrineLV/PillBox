@@ -81,6 +81,7 @@ export async function synchronizeIntakeReminders(
           reminder.scheduledAt,
           reminder.groups,
           pendingIntakeCountForGroups(pending, reminder.groups),
+          ...(reminderNeedsBoxSelection(reminder, treatments) ? [true] : []),
         ),
         scheduledAt: reminder.scheduledAt.toISOString(),
         treatmentIds: reminder.treatmentIds,
@@ -154,12 +155,28 @@ export async function synchronizeTreatmentIntakeReminders(
         reminder.scheduledAt,
         reminder.groups,
         pendingIntakeCountForGroups(pending, reminder.groups),
+        ...(reminderNeedsBoxSelection(reminder, treatments) ? [true] : []),
       ),
       scheduledAt: reminder.scheduledAt.toISOString(),
       treatmentIds: reminder.treatmentIds,
     });
   await replaceScheduledReminderManifest(database, manifest);
   return manifest.length;
+}
+
+function reminderNeedsBoxSelection(
+  reminder: PlannedIntakeReminder,
+  treatments: readonly Treatment[],
+): boolean {
+  const byId = new Map(
+    treatments.map((treatment) => [treatment.id, treatment]),
+  );
+  return reminder.treatmentIds.some((id) => {
+    const treatment = byId.get(id);
+    return (
+      treatment?.dosageKind === 'SCHEDULED' && !treatment.includedInPillbox
+    );
+  });
 }
 
 async function materializePlannedIntakes(

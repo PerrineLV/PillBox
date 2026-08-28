@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 27;
+export const LATEST_SCHEMA_VERSION = 28;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -874,6 +874,48 @@ export const SCHEMA_MIGRATIONS = [
         ALTER TABLE prescriptions
           ADD COLUMN replaced_by_prescription_id INTEGER
             REFERENCES prescriptions(id) ON DELETE SET NULL;
+      `);
+    },
+  },
+  {
+    version: 28,
+    name: 'consommation de stock des prises hors pilulier',
+    async up(transaction) {
+      // Une prise hors pilulier doit conserver le lot réellement désigné. La
+      // contrainte d'unicité rend l'opération idempotente : une prise ne peut
+      // jamais décrémenter deux fois le stock, y compris après un rejet ou un
+      // rejeu de l'action.
+      await transaction.execute(`
+        DROP INDEX stock_movements_box_idx;
+        DROP INDEX stock_movements_preparation_idx;
+        ALTER TABLE stock_movements RENAME TO stock_movements_v28;
+        CREATE TABLE stock_movements (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          box_id INTEGER NOT NULL REFERENCES medication_boxes(id) ON DELETE RESTRICT,
+          preparation_id INTEGER REFERENCES preparations(id) ON DELETE RESTRICT,
+          intake_key TEXT UNIQUE REFERENCES intake_records(intake_key) ON DELETE RESTRICT,
+          type TEXT NOT NULL CHECK (type IN ('BOX_ADDED', 'MANUAL_ADJUSTMENT', 'CORRECTION', 'PILLBOX_PREPARATION', 'OUTSIDE_PILLBOX_INTAKE')),
+          quantity_delta INTEGER NOT NULL,
+          quantity_after INTEGER NOT NULL CHECK (quantity_after >= 0),
+          explanation TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CHECK (
+            (type = 'PILLBOX_PREPARATION' AND preparation_id IS NOT NULL AND intake_key IS NULL) OR
+            (type = 'OUTSIDE_PILLBOX_INTAKE' AND preparation_id IS NULL AND intake_key IS NOT NULL) OR
+            (type NOT IN ('PILLBOX_PREPARATION', 'OUTSIDE_PILLBOX_INTAKE') AND preparation_id IS NULL AND intake_key IS NULL)
+          )
+        );
+        INSERT INTO stock_movements
+          (id, box_id, preparation_id, type, quantity_delta, quantity_after, explanation, created_at)
+        SELECT id, box_id, preparation_id, type, quantity_delta, quantity_after, explanation, created_at
+        FROM stock_movements_v28;
+        DROP TABLE stock_movements_v28;
+        CREATE INDEX stock_movements_box_idx
+          ON stock_movements(box_id, created_at);
+        CREATE INDEX stock_movements_preparation_idx
+          ON stock_movements(preparation_id);
+        CREATE INDEX stock_movements_intake_idx
+          ON stock_movements(intake_key);
       `);
     },
   },

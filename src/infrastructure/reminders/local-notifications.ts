@@ -88,13 +88,14 @@ export async function scheduleIntakeReminder(
   scheduledAt: Date,
   groups: readonly { date: string; slot: IntakeSlot }[],
   pendingCount: number,
+  requiresBoxSelection = false,
 ): Promise<string> {
   await ensureAndroidIntakeChannel();
   await ensureIntakeActionCategories();
   return Notifications.scheduleNotificationAsync({
     content: {
       ...intakeReminderContent(pendingCount),
-      ...intakeActionCategoryContent(pendingCount),
+      ...intakeActionCategoryContent(requiresBoxSelection ? 0 : pendingCount),
       data: {
         kind: INTAKE_REMINDER_KIND,
         scheduledAt: scheduledAt.toISOString(),

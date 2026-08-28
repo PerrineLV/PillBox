@@ -17,6 +17,7 @@ import {
   markPendingIntakesTakenForGroups,
   materializeIntakeSnapshots,
   saveIntakePostponement,
+  takeOutsidePillboxIntake,
   updateIntakeStatus,
 } from '../intake-repository';
 
@@ -87,6 +88,101 @@ const beta = {
 };
 
 describe('suivi local des prises', () => {
+  it('consomme une seule fois le lot explicitement choisi pour une prise hors pilulier', async () => {
+    const { raw, database } = await setup();
+    raw
+      .prepare('UPDATE treatments SET included_in_pillbox = 0 WHERE id = 1')
+      .run();
+    const boxId = Number(
+      raw
+        .prepare(
+          `INSERT INTO medication_boxes
+           (specialty_cis, specialty_name, presentation_cip13, presentation_label,
+            lot, expiration_date, initial_quantity, remaining_quantity, scan_raw)
+           VALUES ('cis-1', 'Alpha', '3400000000001', 'Boîte', 'LOT-1',
+             '2027-01-01', 10, 10, 'raw')`,
+        )
+        .run().lastInsertRowid,
+    );
+    await materializeIntakeSnapshots(database, [snapshot]);
+
+    await takeOutsidePillboxIntake(database, snapshot.key, boxId, '2026-08-10');
+
+    expect(
+      raw
+        .prepare('SELECT remaining_quantity FROM medication_boxes WHERE id = ?')
+        .get(boxId),
+    ).toEqual({ remaining_quantity: 9 });
+    expect(
+      raw
+        .prepare(
+          `SELECT type, intake_key, quantity_delta, quantity_after
+           FROM stock_movements WHERE intake_key = ?`,
+        )
+        .get(snapshot.key),
+    ).toEqual({
+      type: 'OUTSIDE_PILLBOX_INTAKE',
+      intake_key: snapshot.key,
+      quantity_delta: -1,
+      quantity_after: 9,
+    });
+    await expect(
+      takeOutsidePillboxIntake(database, snapshot.key, boxId, '2026-08-10'),
+    ).rejects.toThrow('déjà renseignée');
+    await expect(
+      updateIntakeStatus(database, snapshot.key, 'UNSET'),
+    ).rejects.toThrow('déjà décrémenté le stock');
+    raw.close();
+  });
+
+  it('refuse de valider directement une prise hors pilulier sans choisir de lot', async () => {
+    const { raw, database } = await setup();
+    raw
+      .prepare('UPDATE treatments SET included_in_pillbox = 0 WHERE id = 1')
+      .run();
+    await materializeIntakeSnapshots(database, [snapshot]);
+
+    await expect(
+      updateIntakeStatus(database, snapshot.key, 'TAKEN'),
+    ).rejects.toThrow('Choisissez la boîte utilisée');
+    expect(
+      await markPendingIntakesTaken(database, '2026-08-10', 'morning'),
+    ).toBe(0);
+    raw.close();
+  });
+
+  it('refuse une boîte périmée sans modifier la prise ni le stock hors pilulier', async () => {
+    const { raw, database } = await setup();
+    raw
+      .prepare('UPDATE treatments SET included_in_pillbox = 0 WHERE id = 1')
+      .run();
+    const boxId = Number(
+      raw
+        .prepare(
+          `INSERT INTO medication_boxes
+           (specialty_cis, specialty_name, presentation_cip13, presentation_label,
+            lot, expiration_date, initial_quantity, remaining_quantity, scan_raw)
+           VALUES ('cis-1', 'Alpha', '3400000000002', 'Boîte', 'LOT-PÉRIMÉ',
+             '2026-08-09', 10, 10, 'raw')`,
+        )
+        .run().lastInsertRowid,
+    );
+    await materializeIntakeSnapshots(database, [snapshot]);
+
+    await expect(
+      takeOutsidePillboxIntake(database, snapshot.key, boxId, '2026-08-10'),
+    ).rejects.toThrow('périmée');
+    expect(
+      raw
+        .prepare('SELECT remaining_quantity FROM medication_boxes WHERE id = ?')
+        .get(boxId),
+    ).toEqual({ remaining_quantity: 10 });
+    expect(raw.prepare('SELECT status FROM intake_records').get()).toEqual({
+      status: 'UNSET',
+    });
+    raw.close();
+  });
+
   it('distingue les trois statuts et permet une correction ultérieure sans toucher au stock', async () => {
     const { raw, database } = await setup();
     await materializeIntakeSnapshots(database, [snapshot]);

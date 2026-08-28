@@ -248,6 +248,13 @@ export default function BoxDetailScreen() {
           quantité restante à 0 ci-dessus.
         </Message>
       ) : null}
+      {removalAction === 'KEEP_USED_FOR_OUTSIDE_PILLBOX_INTAKE' ? (
+        <Message tone="warning" title="Suppression impossible">
+          Cette boîte a déjà servi à une prise hors pilulier : la supprimer
+          effacerait cet historique. Pour la retirer du stock utilisable,
+          ajustez sa quantité restante à 0 ci-dessus.
+        </Message>
+      ) : null}
       {removalAction === 'KEEP_IN_DRAFT_PREPARATION' ? (
         <Message tone="warning" title="Suppression impossible">
           Cette boîte est désignée dans une préparation en cours. Terminez ou

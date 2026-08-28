@@ -28,6 +28,8 @@ import {
   updateIntakeStatus,
   type IntakePostponement,
 } from '@/infrastructure/intakes/intake-repository';
+import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
+import { OutsidePillboxIntakeBoxChoice } from '@/components/intakes/outside-pillbox-intake-box-choice';
 import {
   cancelIntakePostponement,
   replaceIntakePostponement,
@@ -87,6 +89,11 @@ export default function PlannedIntakeScreen() {
     date: string;
     slot: IntakeSlot;
   } | null>(null);
+  const [outsidePillboxRecord, setOutsidePillboxRecord] =
+    useState<IntakeRecord | null>(null);
+  const [outsidePillboxTreatmentIds, setOutsidePillboxTreatmentIds] = useState<
+    ReadonlySet<number>
+  >(new Set());
   const groups = useMemo(
     () => resolveGroups({ groups: groupsParameter, date, slot }),
     [date, groupsParameter, slot],
@@ -111,12 +118,26 @@ export default function PlannedIntakeScreen() {
           ),
         )
       ).flat();
-      const reports = await Promise.all(
-        groups.map((group) =>
-          getIntakePostponement(database, group.date, group.slot),
+      const [reports, treatments] = await Promise.all([
+        Promise.all(
+          groups.map((group) =>
+            getIntakePostponement(database, group.date, group.slot),
+          ),
+        ),
+        listTreatments(database),
+      ]);
+      setRecords(loaded);
+      setOutsidePillboxTreatmentIds(
+        new Set(
+          treatments
+            .filter(
+              (treatment) =>
+                treatment.dosageKind === 'SCHEDULED' &&
+                !treatment.includedInPillbox,
+            )
+            .map((treatment) => treatment.id),
         ),
       );
-      setRecords(loaded);
       setPostponements(
         Object.fromEntries(
           groups.map((group, index) => [groupKey(group), reports[index]]),
@@ -129,6 +150,10 @@ export default function PlannedIntakeScreen() {
       );
     }
   }, [database, groups]);
+
+  function isOutsidePillbox(record: IntakeRecord): boolean {
+    return outsidePillboxTreatmentIds.has(record.treatmentId);
+  }
 
   useEffect(() => {
     void load();
@@ -270,7 +295,8 @@ export default function PlannedIntakeScreen() {
               {SLOT_LABELS[group.slot]} ·{' '}
               {formatFullFrenchCivilDate(group.date)}
             </SectionTitle>
-            {canValidateWholeGroup(items, group) ? (
+            {canValidateWholeGroup(items, group) &&
+            !items.some(isOutsidePillbox) ? (
               <AppButton
                 label="Tout valider"
                 disabled={busyKey !== null}
@@ -303,7 +329,11 @@ export default function PlannedIntakeScreen() {
                       record.status === 'TAKEN' ? 'primary' : 'secondary'
                     }
                     disabled={busyKey !== null}
-                    onPress={() => void changeStatus(record, 'TAKEN')}
+                    onPress={() =>
+                      isOutsidePillbox(record)
+                        ? setOutsidePillboxRecord(record)
+                        : void changeStatus(record, 'TAKEN')
+                    }
                   />
                   <AppButton
                     label="Marquer comme ignoré"
@@ -402,6 +432,15 @@ export default function PlannedIntakeScreen() {
           individuellement.
         </Text>
       </AppModal>
+      <OutsidePillboxIntakeBoxChoice
+        database={database}
+        record={outsidePillboxRecord}
+        onCancel={() => setOutsidePillboxRecord(null)}
+        onTaken={async () => {
+          setOutsidePillboxRecord(null);
+          await load();
+        }}
+      />
     </Screen>
   );
 }

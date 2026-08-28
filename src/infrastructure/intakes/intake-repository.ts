@@ -8,6 +8,7 @@ import {
   type IntakeStatus,
   type PendingIntakeCount,
 } from '@/domain/intakes/intake-tracking';
+import { isExpired } from '@/domain/inventory/inventory';
 import { isIntakeSlot, type IntakeSlot } from '@/domain/treatments/treatment';
 
 type IntakeRow = {
@@ -118,6 +119,36 @@ export async function updateIntakeStatus(
   status: IntakeStatus,
 ): Promise<void> {
   if (!isIntakeStatus(status)) throw new Error('Statut de prise invalide.');
+  const record = await database.getFirstAsync<{
+    dosage_kind: string;
+    included_in_pillbox: number;
+    has_stock_consumption: number;
+  }>(
+    `SELECT treatment.dosage_kind, treatment.included_in_pillbox,
+      EXISTS(
+        SELECT 1 FROM stock_movements
+        WHERE intake_key = intake_records.intake_key
+      ) AS has_stock_consumption
+     FROM intake_records
+     LEFT JOIN treatments treatment ON treatment.id = intake_records.source_treatment_id
+     WHERE intake_records.intake_key = ?`,
+    intakeKey,
+  );
+  if (record === null) throw new Error('Prise prévue introuvable.');
+  if (
+    status === 'TAKEN' &&
+    record.dosage_kind === 'SCHEDULED' &&
+    record.included_in_pillbox === 0
+  ) {
+    throw new Error(
+      'Choisissez la boîte utilisée avant de marquer cette prise comme prise.',
+    );
+  }
+  if (record.has_stock_consumption === 1 && status !== 'TAKEN') {
+    throw new Error(
+      'Cette prise a déjà décrémenté le stock : elle ne peut plus être modifiée.',
+    );
+  }
   const result = await database.runAsync(
     `UPDATE intake_records SET status = ?, updated_at = CURRENT_TIMESTAMP
      WHERE intake_key = ?`,
@@ -125,6 +156,100 @@ export async function updateIntakeStatus(
     intakeKey,
   );
   if (result.changes !== 1) throw new Error('Prise prévue introuvable.');
+}
+
+/**
+ * Valide une prise planifiée hors pilulier et consomme, dans la même
+ * transaction, le lot explicitement choisi. La relation unique entre le
+ * mouvement et la prise empêche toute double décrémentation.
+ */
+export async function takeOutsidePillboxIntake(
+  database: SQLiteDatabase,
+  intakeKey: string,
+  boxId: number,
+  today: string,
+): Promise<void> {
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const intake = await transaction.getFirstAsync<{
+      source_treatment_id: number;
+      specialty_cis: string;
+      specialty_name: string;
+      quantity_half_units: number;
+      status: string;
+      dosage_kind: string;
+      included_in_pillbox: number;
+    }>(
+      `SELECT intake.source_treatment_id, intake.specialty_cis, intake.specialty_name,
+        intake.quantity_half_units, intake.status, treatment.dosage_kind,
+        treatment.included_in_pillbox
+       FROM intake_records intake
+       JOIN treatments treatment ON treatment.id = intake.source_treatment_id
+       WHERE intake.intake_key = ?`,
+      intakeKey,
+    );
+    if (intake === null) throw new Error('Prise prévue introuvable.');
+    if (intake.dosage_kind !== 'SCHEDULED' || intake.included_in_pillbox !== 0)
+      throw new Error(
+        'Cette prise ne nécessite pas de consommation hors pilulier.',
+      );
+    if (intake.status !== 'UNSET')
+      throw new Error('Cette prise est déjà renseignée.');
+
+    const box = await transaction.getFirstAsync<{
+      specialty_cis: string;
+      expiration_date: string;
+      remaining_quantity: number;
+    }>(
+      `SELECT specialty_cis, expiration_date, remaining_quantity
+       FROM medication_boxes WHERE id = ?`,
+      boxId,
+    );
+    if (box === null) throw new Error('Boîte introuvable.');
+    const accepted =
+      box.specialty_cis === intake.specialty_cis ||
+      (await transaction.getFirstAsync<{ found: number }>(
+        `SELECT 1 AS found FROM generic_equivalence_confirmations
+         WHERE treatment_id = ? AND cis = ?`,
+        intake.source_treatment_id,
+        box.specialty_cis,
+      )) !== null;
+    if (!accepted)
+      throw new Error('Cette boîte ne correspond pas au traitement.');
+    if (isExpired(box.expiration_date, today))
+      throw new Error('Une boîte périmée ne peut pas être utilisée.');
+
+    const quantity = intake.quantity_half_units / 2;
+    if (box.remaining_quantity < quantity)
+      throw new Error('Le stock de cette boîte est insuffisant.');
+    const quantityAfter = box.remaining_quantity - quantity;
+    const updated = await transaction.runAsync(
+      `UPDATE medication_boxes
+       SET remaining_quantity = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND remaining_quantity = ?`,
+      quantityAfter,
+      boxId,
+      box.remaining_quantity,
+    );
+    if (updated.changes !== 1)
+      throw new Error('Le stock a changé. Rechargez puis réessayez.');
+    const status = await transaction.runAsync(
+      `UPDATE intake_records SET status = 'TAKEN', updated_at = CURRENT_TIMESTAMP
+       WHERE intake_key = ? AND status = 'UNSET'`,
+      intakeKey,
+    );
+    if (status.changes !== 1)
+      throw new Error('Cette prise est déjà renseignée.');
+    await transaction.runAsync(
+      `INSERT INTO stock_movements
+       (box_id, intake_key, type, quantity_delta, quantity_after, explanation)
+       VALUES (?, ?, 'OUTSIDE_PILLBOX_INTAKE', ?, ?, ?)`,
+      boxId,
+      intakeKey,
+      -quantity,
+      quantityAfter,
+      `Prise hors pilulier : ${intake.specialty_name}`,
+    );
+  });
 }
 
 /**
@@ -171,7 +296,13 @@ export async function markPendingIntakesTakenForGroups(
     for (const group of unique) {
       const result = await transaction.runAsync(
         `UPDATE intake_records SET status = 'TAKEN', updated_at = ?
-         WHERE intake_date = ? AND slot = ? AND status = ?`,
+         WHERE intake_date = ? AND slot = ? AND status = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM treatments
+             WHERE treatments.id = intake_records.source_treatment_id
+               AND treatments.dosage_kind = 'SCHEDULED'
+               AND treatments.included_in_pillbox = 0
+           )`,
         stamp.value,
         group.date,
         group.slot,
