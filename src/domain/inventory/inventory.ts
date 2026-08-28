@@ -3,6 +3,7 @@ export const STOCK_MOVEMENT_TYPES = [
   'MANUAL_ADJUSTMENT',
   'CORRECTION',
   'PILLBOX_PREPARATION',
+  'OUTSIDE_PILLBOX_INTAKE',
 ] as const;
 
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];

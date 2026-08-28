@@ -23,6 +23,7 @@ import {
   updateIntakeStatus,
 } from '@/infrastructure/intakes/intake-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
+import { OutsidePillboxIntakeBoxChoice } from '@/components/intakes/outside-pillbox-intake-box-choice';
 import {
   AppButton,
   Badge,
@@ -61,6 +62,8 @@ export default function IntakeHistoryScreen() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reports, setReports] = useState<Record<string, string>>({});
+  const [outsidePillboxRecord, setOutsidePillboxRecord] =
+    useState<IntakeRecord | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -107,6 +110,13 @@ export default function IntakeHistoryScreen() {
     } finally {
       setBusyKey(null);
     }
+  }
+
+  function isOutsidePillbox(record: IntakeRecord): boolean {
+    const treatment = treatments.find((item) => item.id === record.treatmentId);
+    return (
+      treatment?.dosageKind === 'SCHEDULED' && !treatment.includedInPillbox
+    );
   }
 
   return (
@@ -192,7 +202,11 @@ export default function IntakeHistoryScreen() {
               label="Pris"
               variant={record.status === 'TAKEN' ? 'primary' : 'secondary'}
               disabled={busyKey !== null}
-              onPress={() => void changeStatus(record, 'TAKEN')}
+              onPress={() =>
+                isOutsidePillbox(record)
+                  ? setOutsidePillboxRecord(record)
+                  : void changeStatus(record, 'TAKEN')
+              }
             />
             <AppButton
               label="Ignoré"
@@ -209,6 +223,15 @@ export default function IntakeHistoryScreen() {
           </View>
         </Card>
       ))}
+      <OutsidePillboxIntakeBoxChoice
+        database={database}
+        record={outsidePillboxRecord}
+        onCancel={() => setOutsidePillboxRecord(null)}
+        onTaken={async () => {
+          setOutsidePillboxRecord(null);
+          await load();
+        }}
+      />
     </Screen>
   );
 }

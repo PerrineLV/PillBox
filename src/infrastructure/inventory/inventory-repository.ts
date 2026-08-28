@@ -103,7 +103,10 @@ export async function addMedicationBox(
  * préparation en cours la désigne déjà.
  */
 export type MedicationBoxRemovalAction =
-  'DELETE' | 'KEEP_USED_IN_PREPARATION' | 'KEEP_IN_DRAFT_PREPARATION';
+  | 'DELETE'
+  | 'KEEP_USED_IN_PREPARATION'
+  | 'KEEP_USED_FOR_OUTSIDE_PILLBOX_INTAKE'
+  | 'KEEP_IN_DRAFT_PREPARATION';
 
 /**
  * Une boîte n'est supprimable que si elle n'a laissé aucune trace dans une
@@ -118,7 +121,8 @@ export async function getMedicationBoxRemovalAction(
   boxId: number,
 ): Promise<MedicationBoxRemovalAction> {
   const row = await database.getFirstAsync<{
-    used: number;
+    used_in_preparation: number;
+    used_for_outside_pillbox_intake: number;
     drafted: number;
   }>(
     `SELECT
@@ -127,8 +131,13 @@ export async function getMedicationBoxRemovalAction(
          UNION ALL
          SELECT 1 FROM stock_movements
            WHERE box_id = ? AND type = 'PILLBOX_PREPARATION'
-       ) AS used,
+       ) AS used_in_preparation,
+       EXISTS(
+         SELECT 1 FROM stock_movements
+         WHERE box_id = ? AND type = 'OUTSIDE_PILLBOX_INTAKE'
+       ) AS used_for_outside_pillbox_intake,
        EXISTS(SELECT 1 FROM preparation_progress WHERE box_id = ?) AS drafted`,
+    boxId,
     boxId,
     boxId,
     boxId,
@@ -136,7 +145,9 @@ export async function getMedicationBoxRemovalAction(
   if (row === null) {
     throw new Error('Impossible de vérifier l’usage de cette boîte.');
   }
-  if (row.used === 1) return 'KEEP_USED_IN_PREPARATION';
+  if (row.used_in_preparation === 1) return 'KEEP_USED_IN_PREPARATION';
+  if (row.used_for_outside_pillbox_intake === 1)
+    return 'KEEP_USED_FOR_OUTSIDE_PILLBOX_INTAKE';
   if (row.drafted === 1) return 'KEEP_IN_DRAFT_PREPARATION';
   return 'DELETE';
 }
@@ -161,6 +172,11 @@ export async function deleteUnusedMedicationBox(
     if (action === 'KEEP_USED_IN_PREPARATION') {
       throw new Error(
         'Cette boîte a déjà servi à une préparation : sa suppression effacerait cet historique. Pour la retirer du stock utilisable, ajustez sa quantité restante à 0.',
+      );
+    }
+    if (action === 'KEEP_USED_FOR_OUTSIDE_PILLBOX_INTAKE') {
+      throw new Error(
+        'Cette boîte a déjà servi à une prise hors pilulier : sa suppression effacerait cet historique. Pour la retirer du stock utilisable, ajustez sa quantité restante à 0.',
       );
     }
     if (action === 'KEEP_IN_DRAFT_PREPARATION') {

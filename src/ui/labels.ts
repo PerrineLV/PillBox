@@ -36,6 +36,7 @@ export const STOCK_MOVEMENT_TYPE_LABELS: Record<StockMovementType, string> = {
   MANUAL_ADJUSTMENT: 'Ajustement manuel',
   CORRECTION: 'Correction',
   PILLBOX_PREPARATION: 'Préparation du pilulier',
+  OUTSIDE_PILLBOX_INTAKE: 'Prise hors pilulier',
 };
 
 /** Libellés affichés pour le niveau d’urgence d’un besoin de renouvellement. */
