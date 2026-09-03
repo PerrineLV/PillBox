@@ -9,7 +9,7 @@ import {
   formatFrenchCivilDate,
   pickerDateToCivilDate,
 } from '@/components/treatments/civil-date';
-import { AppField, colors, radii, sizes, spacing, typography } from '@/ui';
+import { AppField, colors, radii, sizes } from '@/ui';
 
 /**
  * Saisie d'une date de péremption. La valeur reste au format civil AAAA-MM-JJ
@@ -53,7 +53,7 @@ export function ExpirationField({
         onPress={() => setPickerVisible(true)}
         style={styles.button}
       >
-        <Text style={value === '' ? styles.placeholder : typography.body}>
+        <Text style={value === '' ? styles.placeholder : styles.value}>
           {value === '' ? 'Choisir une date' : formatFrenchCivilDate(value)}
         </Text>
       </Pressable>
@@ -90,16 +90,37 @@ function frenchInputToCivilDate(value: string): string {
 const styles = StyleSheet.create({
   button: {
     backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.md,
+    borderColor: colors.cardBorder,
+    borderRadius: radii.tile,
     borderWidth: 1,
     justifyContent: 'center',
-    minHeight: sizes.touch,
-    paddingHorizontal: spacing.md,
+    minHeight: sizes.minTouch,
+    paddingHorizontal: 14,
   },
-  close: { minHeight: sizes.touch, justifyContent: 'center' },
-  closeText: { ...typography.label, color: colors.brand },
-  field: { gap: spacing.sm },
-  label: typography.label,
-  placeholder: { ...typography.body, color: colors.textMuted },
+  close: { justifyContent: 'center', minHeight: sizes.minTouch },
+  closeText: {
+    color: colors.brand,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  field: { gap: 6 },
+  label: {
+    color: colors.text,
+    fontSize: 13.5,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  value: {
+    color: colors.text,
+    fontSize: 14.5,
+    fontWeight: '600',
+    lineHeight: 19,
+  },
+  placeholder: {
+    color: colors.textTertiary,
+    fontSize: 14.5,
+    fontWeight: '500',
+    lineHeight: 19,
+  },
 });

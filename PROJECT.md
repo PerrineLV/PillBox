@@ -14,6 +14,8 @@ Application mobile personnelle pour assister la préparation hebdomadaire d'un p
 
 React Native + Expo + TypeScript strict + Expo Router + expo-sqlite + expo-camera. Notifications locales Expo pour le rappel hebdomadaire de préparation et pour les rappels de prise quotidiens (avec actions rapides pris/ignoré). Ajouter une dépendance seulement lorsqu'elle apporte une vraie valeur au produit.
 
+L'interface repose sur un système de jetons unique, décrit par `docs/charte-graphique.md` et défini par `src/ui/theme.ts` : palette claire unique, jeu d'icônes dessiné en vues natives, aucune bibliothèque d'icônes ni police embarquée.
+
 # Données médicaments
 
 Référentiel issu de la Base de données publique des médicaments. Distinguer spécialité (CIS) et présentation (CIP13). L'import est préparé hors de l'app puis consommé localement. Le référentiel inclut aussi le regroupement officiel des spécialités en groupes génériques (BDPM), utilisé uniquement à titre informatif.
@@ -69,6 +71,8 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 # Hors scope MVP
 
 Conseils médicaux, interactions, diagnostic, lecture automatique d'ordonnance, professionnels de santé, profils multiples, synchronisation cloud, IA médicale, Mon espace santé.
+
+Les statistiques descriptives sont également hors scope pour l'instant. Un écran de taux par semaine ou par mois a existé puis a été retiré ; son calcul est récupérable dans l'historique Git si la décision change. L'historique des prises et des préparations reste consultable, sans agrégat ni pourcentage.
 
 # Definition of Done MVP
 

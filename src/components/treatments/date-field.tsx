@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 
-import { colors, typography } from '@/ui';
+import { colors, radii, sizes } from '@/ui';
 
 import {
   civilDateToPickerDate,
@@ -110,27 +110,44 @@ function frenchInputToCivilDate(value: string): string {
 
 const styles = StyleSheet.create({
   clearDate: { paddingHorizontal: 8, paddingVertical: 12 },
-  clearDateText: { color: colors.danger },
+  clearDateText: {
+    color: colors.destructive,
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
   closePicker: { alignItems: 'center', padding: 10 },
   dateActions: { alignItems: 'center', flexDirection: 'row', gap: 6 },
   dateButton: {
-    borderColor: colors.borderStrong,
-    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderColor: colors.cardBorder,
+    borderRadius: radii.tile,
     borderWidth: 1,
     flex: 1,
-    padding: 12,
+    justifyContent: 'center',
+    minHeight: sizes.minTouch,
+    paddingHorizontal: 14,
   },
-  dateField: { gap: 4 },
+  dateField: { gap: 6 },
   dateInput: {
-    borderColor: colors.borderStrong,
-    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderColor: colors.cardBorder,
+    borderRadius: radii.tile,
     borderWidth: 1,
-    padding: 10,
+    color: colors.text,
+    fontSize: 14.5,
+    fontWeight: '600',
+    minHeight: sizes.minTouch,
+    paddingHorizontal: 14,
   },
-  datePlaceholder: { color: colors.textMuted },
-  label: typography.label,
+  datePlaceholder: { color: colors.textTertiary, fontWeight: '500' },
+  label: {
+    color: colors.text,
+    fontSize: 13.5,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
   secondaryButtonText: {
-    color: colors.focus,
+    color: colors.brand,
     fontWeight: '700',
     textAlign: 'center',
   },

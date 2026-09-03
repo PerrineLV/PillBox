@@ -14,6 +14,9 @@ import {
   startOfLocalDay,
 } from '@/domain/reminders/intake-reminder';
 import { serializeIntakeGroups } from '@/domain/reminders/notification-navigation';
+// Libellés seuls, sans passer par le baril `@/ui` : l'infrastructure n'a pas
+// à charger le kit d'interface pour nommer un créneau.
+import { INTAKE_SLOT_LABELS } from '@/ui/labels';
 
 type TodayWidgetNativeModule = { saveSnapshot(value: string): Promise<void> };
 
@@ -71,6 +74,7 @@ export async function refreshTodayWidget(
     attention.some((item) => item.type === 'PREPARATION'),
     (groups) =>
       `pillbox://intakes/planned?groups=${encodeURIComponent(serializeIntakeGroups(groups))}`,
+    (slot) => INTAKE_SLOT_LABELS[slot],
   );
   await widget.saveSnapshot(JSON.stringify(snapshot));
 }

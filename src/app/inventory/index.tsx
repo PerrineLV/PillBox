@@ -1,8 +1,21 @@
-import { Link, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { RenewalList } from '@/components/inventory/renewal-list';
+import {
+  forecastAlertBadge,
+  forecastCoverageLabel,
+  forecastSummary,
+} from '@/components/inventory/forecast-labels';
+import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
+import { buildInventoryAlerts } from '@/domain/alerts/inventory-alerts';
+import {
+  buildStockForecast,
+  type MedicationForecast,
+  type StockForecast,
+} from '@/domain/forecast/stock-forecast';
 import {
   buildAttachedSpecialtyCisSet,
   isOrphanBox,
@@ -14,34 +27,40 @@ import {
   type MedicationBox,
 } from '@/domain/inventory/inventory';
 import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
+import { buildRenewalList } from '@/domain/renewal/renewal-list';
 import type { Treatment } from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { listPreparationWeeks } from '@/infrastructure/preparations/preparation-repository';
 import { listPrescriptionItems } from '@/infrastructure/prescriptions/prescription-repository';
 import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
-import { buildInventoryAlerts } from '@/domain/alerts/inventory-alerts';
 import {
-  buildStockForecast,
-  type StockForecast,
-} from '@/domain/forecast/stock-forecast';
-import { buildRenewalList } from '@/domain/renewal/renewal-list';
-import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
-import { StockForecastCard } from '@/components/inventory/stock-forecast-card';
-import { StockForecastSummary } from '@/components/inventory/stock-forecast-summary';
-import { RenewalList } from '@/components/inventory/renewal-list';
-import {
-  Badge,
-  Card,
+  AppCard,
+  AppScreen,
+  Banner,
+  DenseRow,
   EmptyState,
+  FilterPills,
+  FloatingAction,
   LoadingState,
   Message,
+  ProgressBar,
+  SeverityBadge,
+  TabHeader,
+  WarningIcon,
   colors,
-  radii,
-  sizes,
-  spacing,
+  severity as severityScale,
   typography,
+  type SeverityLevel,
 } from '@/ui';
+
+type Filter = 'all' | 'renew' | 'expiring';
+
+const FILTERS: readonly { value: Filter; label: string }[] = [
+  { value: 'all', label: 'Tout' },
+  { value: 'renew', label: 'À renouveler' },
+  { value: 'expiring', label: 'Périme bientôt' },
+];
 
 export default function InventoryScreen() {
   const database = useSQLiteContext();
@@ -49,8 +68,10 @@ export default function InventoryScreen() {
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expiringBoxIds, setExpiringBoxIds] = useState<Set<number>>(new Set());
-  const [filter, setFilter] = useState<'all' | 'renew' | 'expiring'>('all');
+  const [expiringBoxIds, setExpiringBoxIds] = useState<ReadonlySet<number>>(
+    new Set(),
+  );
+  const [filter, setFilter] = useState<Filter>('all');
   const [forecast, setForecast] = useState<StockForecast | null>(null);
   const [attachedCis, setAttachedCis] = useState<ReadonlySet<string>>(
     new Set(),
@@ -60,8 +81,8 @@ export default function InventoryScreen() {
     PrescriptionItem[]
   >([]);
 
-  // Une carte d'attention de l'accueil peut ouvrir directement l'onglet
-  // « À renouveler » : le paramètre n'est appliqué qu'aux valeurs connues.
+  // Une alerte de l'accueil peut ouvrir directement « À renouveler » : le
+  // paramètre n'est appliqué qu'aux valeurs connues.
   useFocusEffect(
     useCallback(() => {
       if (filterParam === 'renew' || filterParam === 'expiring')
@@ -83,38 +104,38 @@ export default function InventoryScreen() {
         .then(
           ([
             items,
-            treatments,
+            loadedTreatments,
             preparations,
             equivalenceConfirmations,
-            fetchedPrescriptionItems,
+            loadedPrescriptionItems,
           ]) => {
-            if (active) {
-              setBoxes(items);
-              setTreatments(treatments);
-              setPrescriptionItems(fetchedPrescriptionItems);
-              const today = todayIso();
-              const equivalences = equivalenceConfirmations.map(
-                (confirmation) => ({
-                  treatmentId: confirmation.treatmentId,
-                  cis: confirmation.cis,
-                }),
-              );
-              const alerts = buildInventoryAlerts(treatments, items, today, {
-                equivalences,
-              });
-              setExpiringBoxIds(
-                new Set(alerts.expirations.map((item) => item.boxId)),
-              );
-              setForecast(
-                buildStockForecast(treatments, items, today, preparations, {
+            if (!active) return;
+            const today = todayIso();
+            const equivalences = equivalenceConfirmations.map(
+              (confirmation) => ({
+                treatmentId: confirmation.treatmentId,
+                cis: confirmation.cis,
+              }),
+            );
+            setBoxes(items);
+            setTreatments(loadedTreatments);
+            setPrescriptionItems(loadedPrescriptionItems);
+            setExpiringBoxIds(
+              new Set(
+                buildInventoryAlerts(loadedTreatments, items, today, {
                   equivalences,
-                }),
-              );
-              setAttachedCis(
-                buildAttachedSpecialtyCisSet(treatments, equivalences),
-              );
-              setError(null);
-            }
+                }).expirations.map((expiration) => expiration.boxId),
+              ),
+            );
+            setForecast(
+              buildStockForecast(loadedTreatments, items, today, preparations, {
+                equivalences,
+              }),
+            );
+            setAttachedCis(
+              buildAttachedSpecialtyCisSet(loadedTreatments, equivalences),
+            );
+            setError(null);
           },
         )
         .catch((reason: unknown) => {
@@ -134,6 +155,7 @@ export default function InventoryScreen() {
     }, [database]),
   );
 
+  const today = todayIso();
   const forecastsByCis = useMemo(
     () =>
       new Map(
@@ -141,25 +163,21 @@ export default function InventoryScreen() {
       ),
     [forecast],
   );
-  // Une boîte épuisée n'a plus aucune utilité opérationnelle sur cet écran
-  // (ticket 49) : masquée de l'affichage (liste, regroupements, compteur),
-  // jamais supprimée — son historique reste consultable depuis la
-  // Chronologie, et la fiche boîte reste accessible par un lien direct.
+  // Une boîte épuisée n'a plus d'utilité opérationnelle : masquée ici,
+  // jamais supprimée — sa fiche et son historique restent accessibles.
   const visibleBoxes = useMemo(
     () => boxes.filter((box) => box.remainingQuantity > 0),
     [boxes],
   );
-  const filteredBoxes = useMemo(
+  const groups = useMemo(
     () =>
-      visibleBoxes.filter(
-        (box) =>
-          filter === 'all' ||
-          (filter === 'expiring' && expiringBoxIds.has(box.id)),
+      groupByMedication(
+        visibleBoxes.filter(
+          (box) => filter !== 'expiring' || expiringBoxIds.has(box.id),
+        ),
       ),
     [visibleBoxes, expiringBoxIds, filter],
   );
-  const groups = useMemo(() => groupBoxes(filteredBoxes), [filteredBoxes]);
-  const today = todayIso();
   const renewalList = useMemo(
     () =>
       forecast
@@ -173,41 +191,43 @@ export default function InventoryScreen() {
         : [],
     [forecast, treatments, prescriptionItems, boxes, today],
   );
+  const summary = forecast ? forecastSummary(forecast) : null;
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerText}>
-          <Text accessibilityRole="header" style={typography.title}>
-            Stock
-          </Text>
-          <Text style={typography.caption}>
-            {visibleBoxes.length} boîte{visibleBoxes.length > 1 ? 's' : ''}{' '}
-            enregistrée{visibleBoxes.length > 1 ? 's' : ''}
-          </Text>
-        </View>
-        <Link href="/inventory/new" style={styles.add}>
-          Ajouter
-        </Link>
-      </View>
-      {forecast ? <StockForecastSummary forecast={forecast} /> : null}
-      <View style={styles.filters}>
-        <Filter
-          label="Tout"
-          selected={filter === 'all'}
-          onPress={() => setFilter('all')}
+    <AppScreen
+      floatingAction={
+        <FloatingAction
+          accessibilityLabel="Ajouter une boîte au stock"
+          href="/inventory/new"
+          label="Boîte"
         />
-        <Filter
-          label="À renouveler"
-          selected={filter === 'renew'}
-          onPress={() => setFilter('renew')}
+      }
+      header={
+        <TabHeader
+          subtitle={`${visibleBoxes.length} boîte${visibleBoxes.length > 1 ? 's' : ''} en stock`}
+          title="Stock"
         />
-        <Filter
-          label="Périme bientôt"
-          selected={filter === 'expiring'}
-          onPress={() => setFilter('expiring')}
-        />
-      </View>
+      }
+    >
+      {summary ? (
+        <Banner
+          compact
+          icon={
+            summary.alertCount > 0 ? (
+              <WarningIcon color={colors.warning} size={16} />
+            ) : undefined
+          }
+          level={summary.alertCount > 0 ? 'warning' : 'ok'}
+        >
+          {summary.label}
+        </Banner>
+      ) : null}
+      <FilterPills
+        accessibilityLabel="Filtrer le stock"
+        onChange={(next) => setFilter(next)}
+        options={FILTERS}
+        value={filter}
+      />
       {loading ? <LoadingState label="Chargement du stock…" /> : null}
       {error ? (
         <Message tone="error" title="Stock indisponible">
@@ -219,8 +239,8 @@ export default function InventoryScreen() {
       ) : null}
       {!loading && !error && filter !== 'renew' && visibleBoxes.length === 0 ? (
         <EmptyState
-          title="Aucune boîte enregistrée"
           description="Scannez le DataMatrix d’une boîte, ou ajoutez-la sans DataMatrix, pour suivre son lot, sa péremption et sa quantité."
+          title="Aucune boîte enregistrée"
         />
       ) : null}
       {!loading &&
@@ -229,181 +249,179 @@ export default function InventoryScreen() {
       visibleBoxes.length > 0 &&
       groups.length === 0 ? (
         <EmptyState
-          title="Aucune boîte pour ce filtre"
           description="Essayez un autre filtre pour retrouver le reste du stock."
+          title="Aucune boîte pour ce filtre"
         />
       ) : null}
-      {filter !== 'renew' &&
-        groups.map((medication) => {
-          const medicationForecast = forecastsByCis.get(medication.cis);
-          return (
-            <View key={medication.cis} style={styles.medication}>
-              <Text style={styles.medicationName}>{medication.name}</Text>
-              {medicationForecast ? (
-                <StockForecastCard forecast={medicationForecast} />
-              ) : null}
-              {medication.lots.map((lot) => {
-                const usable = lot.boxes.reduce(
-                  (sum, box) => sum + usableQuantity(box, today),
-                  0,
-                );
-                return (
-                  <Card key={lot.key} style={styles.lot} tone="muted">
-                    <Text style={styles.lotTitle}>Lot {lot.label}</Text>
-                    <Text style={styles.usable}>
-                      Stock utilisable : {usable}
-                    </Text>
-                    {lot.boxes.map((box) => {
-                      const expired = isExpired(box.expirationDate, today);
-                      const orphan = isOrphanBox(box, attachedCis);
-                      return (
-                        <Link
-                          key={box.id}
-                          href={{
-                            pathname: '/inventory/[id]',
-                            params: { id: String(box.id) },
-                          }}
-                          style={[styles.box, expired && styles.expiredBox]}
-                        >
-                          <View>
-                            <Text style={styles.boxTitle}>
-                              Boîte #{box.id} · {box.remainingQuantity}/
-                              {box.initialQuantity}
-                            </Text>
-                            <Text>
-                              Péremption :{' '}
-                              {formatLongFrenchCivilDate(box.expirationDate)}
-                            </Text>
-                            <Text>
-                              {box.origin === 'SCAN'
-                                ? 'Ajoutée par scan DataMatrix'
-                                : 'Ajoutée manuellement, sans scan'}
-                            </Text>
-                            {expired ? (
-                              <Badge
-                                label="Périmée — stock inutilisable"
-                                tone="danger"
-                              />
-                            ) : null}
-                            {!expired && orphan ? (
-                              <Badge
-                                label="Aucun traitement actif associé"
-                                tone="warning"
-                              />
-                            ) : null}
-                          </View>
-                        </Link>
-                      );
-                    })}
-                  </Card>
-                );
-              })}
-            </View>
-          );
-        })}
-    </ScrollView>
+      {filter !== 'renew'
+        ? groups.map((group) => (
+            <MedicationStockCard
+              attachedCis={attachedCis}
+              forecast={forecastsByCis.get(group.cis) ?? null}
+              group={group}
+              key={group.cis}
+              today={today}
+            />
+          ))
+        : null}
+    </AppScreen>
   );
 }
 
-function Filter({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress(): void;
-}) {
+function MedicationStockCard({
+  group,
+  forecast,
+  attachedCis,
+  today,
+}: Readonly<{
+  group: MedicationGroup;
+  forecast: MedicationForecast | null;
+  attachedCis: ReadonlySet<string>;
+  today: string;
+}>) {
+  const usable = group.boxes.reduce(
+    (total, box) => total + usableQuantity(box, today),
+    0,
+  );
+  const badge = forecast ? forecastAlertBadge(forecast) : null;
+  const level: SeverityLevel =
+    badge === null ? 'ok' : badge.tone === 'danger' ? 'high' : 'warning';
+  const lots = [...new Set(group.boxes.map((box) => box.lot ?? 'sans lot'))];
+  const nextExpiration = group.boxes
+    .map((box) => box.expirationDate)
+    .sort()
+    .at(0);
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={[styles.filter, selected && styles.filterSelected]}
-    >
-      <Text style={[typography.caption, selected && styles.filterTextSelected]}>
-        {label}
-      </Text>
-    </Pressable>
+    <AppCard style={styles.card}>
+      <View style={styles.cardHead}>
+        <Text style={styles.medicationName}>{group.name}</Text>
+        <View style={styles.quantity}>
+          <Text
+            style={[styles.quantityValue, { color: severityScale[level].text }]}
+          >
+            {usable}
+          </Text>
+          <Text style={styles.quantityUnit}>unité(s)</Text>
+        </View>
+      </View>
+      <ProgressBar
+        color={severityScale[level].text}
+        ratio={coverageRatio(forecast)}
+      />
+      <View style={styles.detailRow}>
+        <Text style={styles.detail}>
+          {lots.length} lot{lots.length > 1 ? 's' : ''} ·{' '}
+          {nextExpiration
+            ? `péremption la plus proche le ${formatLongFrenchCivilDate(nextExpiration)}`
+            : 'aucune péremption connue'}
+        </Text>
+        {badge ? <SeverityBadge label={badge.label} level={level} /> : null}
+      </View>
+      {forecast ? (
+        <Text style={typography.micro}>
+          {forecastCoverageLabel(forecast.coverage)}
+        </Text>
+      ) : null}
+      <View style={styles.boxes}>
+        {group.boxes.map((box, index) => (
+          <DenseRow
+            chevron
+            detail={`${box.remainingQuantity}/${box.initialQuantity} · périme le ${formatLongFrenchCivilDate(box.expirationDate)} · ${box.origin === 'SCAN' ? 'scan' : 'saisie manuelle'}`}
+            first={index === 0}
+            href={{
+              pathname: '/inventory/[id]',
+              params: { id: String(box.id) },
+            }}
+            key={box.id}
+            title={`Boîte #${box.id} · lot ${box.lot ?? 'non renseigné'}`}
+            trailing={
+              isExpired(box.expirationDate, today) ? (
+                <SeverityBadge label="Périmée" level="high" />
+              ) : isOrphanBox(box, attachedCis) ? (
+                <SeverityBadge label="Sans traitement" level="warning" />
+              ) : undefined
+            }
+          />
+        ))}
+      </View>
+    </AppCard>
   );
 }
 
-type MedicationGroup = {
+/**
+ * Part du besoin de la prochaine préparation déjà couverte par le stock
+ * utilisable. Sans besoin connu, la barre est pleine : rien ne manque.
+ */
+function coverageRatio(forecast: MedicationForecast | null): number {
+  if (forecast === null || forecast.nextPreparationHalfUnits === 0) return 1;
+  return forecast.availableHalfUnits / forecast.nextPreparationHalfUnits;
+}
+
+type MedicationGroup = Readonly<{
   cis: string;
   name: string;
-  lots: { key: string; label: string; boxes: MedicationBox[] }[];
-};
+  boxes: MedicationBox[];
+}>;
 
-function groupBoxes(boxes: readonly MedicationBox[]): MedicationGroup[] {
-  const medications = new Map<string, MedicationGroup>();
+function groupByMedication(boxes: readonly MedicationBox[]): MedicationGroup[] {
+  const groups = new Map<
+    string,
+    { cis: string; name: string; boxes: MedicationBox[] }
+  >();
   for (const box of boxes) {
-    let medication = medications.get(box.specialtyCis);
-    if (!medication) {
-      medication = { cis: box.specialtyCis, name: box.specialtyName, lots: [] };
-      medications.set(box.specialtyCis, medication);
-    }
-    const key = box.lot ?? '__absent__';
-    let lot = medication.lots.find((item) => item.key === key);
-    if (!lot) {
-      lot = { key, label: box.lot ?? 'non renseigné', boxes: [] };
-      medication.lots.push(lot);
-    }
-    lot.boxes.push(box);
+    const existing = groups.get(box.specialtyCis) ?? {
+      cis: box.specialtyCis,
+      name: box.specialtyName,
+      boxes: [],
+    };
+    existing.boxes.push(box);
+    groups.set(box.specialtyCis, existing);
   }
-  return [...medications.values()];
+  // FEFO : la boîte qui périme en premier est celle qu'on utilisera d'abord.
+  for (const group of groups.values())
+    group.boxes.sort((left, right) =>
+      left.expirationDate.localeCompare(right.expirationDate),
+    );
+  return [...groups.values()];
 }
 
 const styles = StyleSheet.create({
-  add: {
-    backgroundColor: colors.brand,
-    borderRadius: radii.md,
-    color: colors.surface,
-    fontWeight: '700',
-    overflow: 'hidden',
-    minHeight: 48,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    textAlign: 'center',
+  /** Densité propre au stock : une carte par médicament, resserrée. */
+  card: { padding: 14 },
+  cardHead: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
   },
-  box: {
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    paddingVertical: spacing.md,
+  medicationName: {
+    ...typography.itemTitle,
+    flex: 1,
+    fontSize: 15.5,
+    minWidth: 0,
   },
-  boxTitle: { fontWeight: '700' },
-  container: {
-    backgroundColor: colors.background,
-    flexGrow: 1,
-    padding: spacing.lg,
+  quantity: { alignItems: 'baseline', flexDirection: 'row', gap: 4 },
+  quantityValue: {
+    ...typography.numeric,
+    fontSize: 19,
+    lineHeight: 21,
   },
-  header: {
+  quantityUnit: {
+    color: colors.textTertiary,
+    fontSize: 11.5,
+    fontWeight: '600',
+    lineHeight: 13,
+  },
+  detailRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.lg,
+    gap: 10,
+    justifyContent: 'space-between',
   },
-  headerText: { flex: 1, gap: spacing.xs },
-  filters: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
+  detail: { ...typography.detail, flex: 1, minWidth: 0 },
+  boxes: {
+    borderTopColor: colors.hairline,
+    borderTopWidth: 1,
+    marginTop: 2,
   },
-  filter: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: sizes.touch,
-    paddingHorizontal: spacing.md,
-  },
-  filterSelected: { backgroundColor: colors.brand, borderColor: colors.brand },
-  filterTextSelected: { color: colors.surface, fontWeight: '700' },
-  expiredBox: { backgroundColor: colors.dangerSoft },
-  lot: { marginTop: spacing.sm },
-  lotTitle: { fontSize: 16, fontWeight: '700' },
-  medication: { marginBottom: 24 },
-  medicationName: typography.heading,
-  usable: { color: colors.brand, fontWeight: '700', marginBottom: 4 },
 });

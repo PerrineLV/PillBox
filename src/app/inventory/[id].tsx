@@ -1,8 +1,15 @@
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { BoxDeletionConfirmation } from '@/components/inventory/delete-confirmation';
+import { GenericGroupSection } from '@/components/medications/generic-group-section';
+import { OrphanBoxGenericMatch } from '@/components/medications/orphan-box-generic-match';
+import {
+  formatFrenchDateTime,
+  formatLongFrenchCivilDate,
+} from '@/components/treatments/civil-date';
 import {
   buildAttachedSpecialtyCisSet,
   isOrphanBox,
@@ -25,24 +32,29 @@ import {
 } from '@/infrastructure/inventory/inventory-repository';
 import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
-import { BoxDeletionConfirmation } from '@/components/inventory/delete-confirmation';
-import { GenericGroupSection } from '@/components/medications/generic-group-section';
-import { OrphanBoxGenericMatch } from '@/components/medications/orphan-box-generic-match';
 import {
-  AppButton,
+  AppCard,
   AppField,
-  Card,
+  AppScreen,
+  Banner,
+  DenseList,
+  DenseRow,
+  LoadingState,
   Message,
+  PillButton,
+  ProgressBar,
+  Section,
   STOCK_MOVEMENT_TYPE_LABELS,
+  StackHeader,
+  Stepper,
+  Tile,
+  TileRow,
   colors,
-  spacing,
+  severity as severityScale,
   typography,
   useToast,
+  type SeverityLevel,
 } from '@/ui';
-import {
-  formatFrenchDateTime,
-  formatLongFrenchCivilDate,
-} from '@/components/treatments/civil-date';
 
 export default function BoxDetailScreen() {
   const database = useSQLiteContext();
@@ -55,7 +67,8 @@ export default function BoxDetailScreen() {
   const [equivalences, setEquivalences] = useState<
     TreatmentGenericEquivalence[]
   >([]);
-  const [quantity, setQuantity] = useState('');
+  /** Pré-rempli avec la quantité restante réelle, jamais la quantité initiale. */
+  const [quantity, setQuantity] = useState(0);
   const [explanation, setExplanation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [removalAction, setRemovalAction] =
@@ -91,7 +104,7 @@ export default function BoxDetailScreen() {
         cis: confirmation.cis,
       })),
     );
-    if (nextBox) setQuantity(String(nextBox.remainingQuantity));
+    if (nextBox) setQuantity(nextBox.remainingQuantity);
   };
 
   useEffect(() => {
@@ -109,7 +122,7 @@ export default function BoxDetailScreen() {
       await adjustMedicationBox(
         database,
         id,
-        Number(quantity),
+        quantity,
         'MANUAL_ADJUSTMENT',
         explanation,
       );
@@ -125,8 +138,8 @@ export default function BoxDetailScreen() {
   };
 
   /**
-   * En cas de refus, l'écran est rechargé : la raison du refus vient de la base
-   * et non de l'état affiché avant la confirmation.
+   * En cas de refus, l'écran est rechargé : la raison du refus vient de la
+   * base et non de l'état affiché avant la confirmation.
    */
   const remove = async () => {
     setDeleting(true);
@@ -148,50 +161,81 @@ export default function BoxDetailScreen() {
     [treatments, equivalences],
   );
 
-  if (!box)
+  if (!box) {
     return (
-      <View style={styles.center}>
-        <Text>{error ?? 'Chargement…'}</Text>
-      </View>
+      <AppScreen header={<StackHeader title="Boîte" />}>
+        {error ? (
+          <Message tone="error">{error}</Message>
+        ) : (
+          <LoadingState label="Chargement de la boîte…" />
+        )}
+      </AppScreen>
     );
-  const expired = isExpired(box.expirationDate, todayIso());
+  }
+
+  const today = todayIso();
+  const expired = isExpired(box.expirationDate, today);
   const orphan = isOrphanBox(box, attachedCis);
+  const level: SeverityLevel = expired
+    ? 'high'
+    : box.remainingQuantity === 0
+      ? 'warning'
+      : 'ok';
+  const blockedReason = REMOVAL_BLOCKED_REASONS[removalAction ?? 'DELETE'];
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Stack.Screen
-        options={{ headerShown: true, title: `Boîte #${box.id}` }}
-      />
-      <Text style={styles.title}>{box.specialtyName}</Text>
-      <Text>{box.presentationLabel}</Text>
-      <Text>Lot : {box.lot ?? 'non renseigné'}</Text>
-      <Text>Péremption : {formatLongFrenchCivilDate(box.expirationDate)}</Text>
-      <Text>
-        Origine :{' '}
-        {box.origin === 'SCAN'
-          ? 'scan DataMatrix'
-          : 'saisie manuelle, sans scan'}
-      </Text>
-      <Text>Quantité initiale : {box.initialQuantity}</Text>
-      <Text style={styles.remaining}>
-        Quantité restante : {box.remainingQuantity}
-      </Text>
+    <AppScreen
+      header={
+        <StackHeader subtitle={box.specialtyName} title={`Boîte #${box.id}`} />
+      }
+    >
+      <AppCard>
+        <Text style={typography.sectionLabel}>Quantité restante</Text>
+        <View style={styles.remainingRow}>
+          <Text
+            style={[styles.remaining, { color: severityScale[level].text }]}
+          >
+            {box.remainingQuantity}
+          </Text>
+          <Text style={styles.initial}>/ {box.initialQuantity}</Text>
+        </View>
+        <ProgressBar
+          color={severityScale[level].text}
+          height={6}
+          ratio={
+            box.initialQuantity > 0
+              ? box.remainingQuantity / box.initialQuantity
+              : 0
+          }
+        />
+        <TileRow>
+          <Tile label="Lot" value={box.lot ?? 'non renseigné'} />
+          <Tile
+            label="Péremption"
+            value={formatLongFrenchCivilDate(box.expirationDate)}
+          />
+          <Tile
+            label="Origine"
+            value={box.origin === 'SCAN' ? 'Scan' : 'Manuelle'}
+          />
+        </TileRow>
+        <Text style={typography.micro}>{box.presentationLabel}</Text>
+      </AppCard>
+
       {expired ? (
-        <Message tone="error" title="Boîte périmée">
+        <Banner level="high" title="Boîte périmée">
           Stock utilisable : 0. Cette boîte ne pourra pas être sélectionnée
           pendant une préparation.
-        </Message>
+        </Banner>
       ) : null}
       {orphan ? (
-        <Message tone="warning" title="Aucun traitement actif associé">
+        <Banner level="warning" title="Aucun traitement actif associé">
           Ce médicament ne correspond, ni par CIS exact ni par équivalence
           générique confirmée, à aucun traitement actif : cette boîte ne
           participe à aucun calcul de besoin pour l’instant.
-        </Message>
+        </Banner>
       ) : null}
       <OrphanBoxGenericMatch
-        personalDatabase={database}
-        specialtyCis={box.specialtyCis}
-        specialtyName={box.specialtyName}
         onConfirmed={() => {
           void load();
           showToast(
@@ -199,100 +243,159 @@ export default function BoxDetailScreen() {
             'success',
           );
         }}
+        personalDatabase={database}
+        specialtyCis={box.specialtyCis}
+        specialtyName={box.specialtyName}
       />
       <GenericGroupSection cis={box.specialtyCis} />
 
-      <Text style={styles.section}>Ajuster le stock physique</Text>
-      <AppField
-        label="Nouvelle quantité restante"
-        keyboardType="number-pad"
-        onChangeText={setQuantity}
-        value={quantity}
-      />
-      <AppField
-        label="Explication de l’ajustement"
-        multiline
-        onChangeText={setExplanation}
-        placeholder="Pourquoi le stock diffère-t-il ?"
-        value={explanation}
-      />
-      {error ? <Message tone="error">{error}</Message> : null}
-      <AppButton
-        label="Enregistrer l’ajustement"
-        onPress={() => void adjust()}
-      />
+      <Section label="Ajuster le stock physique">
+        <AppCard>
+          <View style={styles.adjustRow}>
+            <Text style={styles.adjustLabel}>Nouvelle quantité restante</Text>
+            <Stepper
+              label="nouvelle quantité restante"
+              min={0}
+              onChange={setQuantity}
+              value={quantity}
+            />
+          </View>
+          <AppField
+            label="Explication de l’ajustement"
+            multiline
+            onChangeText={setExplanation}
+            placeholder="Pourquoi le stock diffère-t-il ?"
+            value={explanation}
+          />
+          {error ? <Message tone="error">{error}</Message> : null}
+          <PillButton
+            label="Enregistrer l’ajustement"
+            onPress={() => void adjust()}
+          />
+        </AppCard>
+      </Section>
 
-      <Text style={styles.section}>Retirer cette boîte du stock</Text>
-      {deleteError ? <Message tone="error">{deleteError}</Message> : null}
-      {removalAction === 'DELETE' ? (
-        <AppButton
-          label="Supprimer cette boîte"
-          variant="danger"
-          loading={deleting}
-          onPress={() => setDeleteConfirmationVisible(true)}
-        />
-      ) : null}
+      <Section label="Retirer cette boîte du stock">
+        {deleteError ? <Message tone="error">{deleteError}</Message> : null}
+        {removalAction === 'DELETE' ? (
+          <PillButton
+            disabled={deleting}
+            height={46}
+            label="Supprimer cette boîte"
+            onPress={() => setDeleteConfirmationVisible(true)}
+            tone="destructive"
+          />
+        ) : blockedReason ? (
+          <Banner level="warning" title="Suppression impossible">
+            {blockedReason}
+          </Banner>
+        ) : null}
+      </Section>
+
       <BoxDeletionConfirmation
-        visible={deleteConfirmationVisible}
         box={box}
         onCancel={() => setDeleteConfirmationVisible(false)}
         onConfirm={() => {
           setDeleteConfirmationVisible(false);
           void remove();
         }}
+        visible={deleteConfirmationVisible}
       />
-      {removalAction === 'KEEP_USED_IN_PREPARATION' ? (
-        <Message tone="warning" title="Suppression impossible">
-          Cette boîte a déjà servi à une préparation : la supprimer effacerait
-          cet historique. Pour la retirer du stock utilisable, ajustez sa
-          quantité restante à 0 ci-dessus.
-        </Message>
-      ) : null}
-      {removalAction === 'KEEP_USED_FOR_OUTSIDE_PILLBOX_INTAKE' ? (
-        <Message tone="warning" title="Suppression impossible">
-          Cette boîte a déjà servi à une prise hors pilulier : la supprimer
-          effacerait cet historique. Pour la retirer du stock utilisable,
-          ajustez sa quantité restante à 0 ci-dessus.
-        </Message>
-      ) : null}
-      {removalAction === 'KEEP_IN_DRAFT_PREPARATION' ? (
-        <Message tone="warning" title="Suppression impossible">
-          Cette boîte est désignée dans une préparation en cours. Terminez ou
-          annulez cette préparation avant de la supprimer.
-        </Message>
-      ) : null}
 
-      <Text style={styles.section}>Mouvements</Text>
-      {movements.map((movement) => (
-        <Card key={movement.id}>
-          <Text style={styles.movementType}>
-            {STOCK_MOVEMENT_TYPE_LABELS[movement.type]}
-          </Text>
-          <Text>
-            {movement.quantityDelta >= 0 ? '+' : ''}
-            {movement.quantityDelta} → reste {movement.quantityAfter}
-          </Text>
-          <Text>{movement.explanation}</Text>
-          <Text style={styles.date}>
-            {formatFrenchDateTime(movement.createdAt)}
-          </Text>
-        </Card>
-      ))}
-    </ScrollView>
+      <Section aside={String(movements.length)} label="Mouvements">
+        <DenseList>
+          {movements.map((movement, index) => (
+            <DenseRow
+              detail={`${movement.explanation} · reste ${movement.quantityAfter}`}
+              first={index === 0}
+              key={movement.id}
+              title={
+                <View style={styles.movementTitle}>
+                  <Text style={styles.movementType}>
+                    {STOCK_MOVEMENT_TYPE_LABELS[movement.type]}
+                  </Text>
+                  <Text style={styles.movementDate}>
+                    {formatFrenchDateTime(movement.createdAt)}
+                  </Text>
+                </View>
+              }
+              trailing={
+                <Text
+                  style={[
+                    styles.delta,
+                    movement.quantityDelta >= 0
+                      ? styles.deltaPositive
+                      : styles.deltaNegative,
+                  ]}
+                >
+                  {movement.quantityDelta >= 0 ? '+' : '−'}
+                  {Math.abs(movement.quantityDelta)}
+                </Text>
+              }
+            />
+          ))}
+        </DenseList>
+      </Section>
+    </AppScreen>
   );
 }
 
+const REMOVAL_BLOCKED_REASONS: Record<
+  MedicationBoxRemovalAction,
+  string | null
+> = {
+  DELETE: null,
+  KEEP_USED_IN_PREPARATION:
+    'Cette boîte a déjà servi à une préparation : la supprimer effacerait cet historique. Pour la retirer du stock utilisable, ajustez sa quantité restante à 0 ci-dessus.',
+  KEEP_USED_FOR_OUTSIDE_PILLBOX_INTAKE:
+    'Cette boîte a déjà servi à une prise hors pilulier : la supprimer effacerait cet historique. Pour la retirer du stock utilisable, ajustez sa quantité restante à 0 ci-dessus.',
+  KEEP_IN_DRAFT_PREPARATION:
+    'Cette boîte est désignée dans une préparation en cours. Terminez ou annulez cette préparation avant de la supprimer.',
+};
+
 const styles = StyleSheet.create({
-  center: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  container: {
-    backgroundColor: colors.background,
-    flexGrow: 1,
-    gap: spacing.md,
-    padding: spacing.lg,
+  remainingRow: { alignItems: 'baseline', flexDirection: 'row', gap: 7 },
+  remaining: {
+    ...typography.numeric,
+    fontSize: 26,
+    lineHeight: 29,
   },
-  date: { color: colors.textMuted, fontSize: 12 },
-  movementType: { fontWeight: '800' },
-  remaining: { ...typography.heading, marginTop: 8 },
-  section: { ...typography.heading, marginBottom: 10, marginTop: 24 },
-  title: typography.title,
+  initial: {
+    color: colors.textTertiary,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 15,
+  },
+  adjustRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  adjustLabel: {
+    ...typography.itemTitle,
+    flex: 1,
+    fontSize: 14.5,
+    minWidth: 0,
+  },
+  movementTitle: { gap: 3 },
+  movementType: {
+    ...typography.itemTitle,
+    fontSize: 13.5,
+    lineHeight: 17,
+  },
+  movementDate: {
+    ...typography.numeric,
+    color: colors.textTertiary,
+    fontSize: 11,
+    fontWeight: '500',
+    lineHeight: 14,
+  },
+  delta: {
+    ...typography.numeric,
+    fontSize: 15,
+    lineHeight: 18,
+  },
+  deltaPositive: { color: colors.success },
+  deltaNegative: { color: colors.destructive },
 });

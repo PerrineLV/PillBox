@@ -7,16 +7,16 @@ Les rappels utilisent uniquement `expo-notifications` et une programmation local
 1. Installer une nouvelle build Android contenant le plugin natif `expo-notifications`. Une simple mise à jour JavaScript d'une ancienne build ne suffit pas après l'ajout du plugin.
    La build déclare aussi `SCHEDULE_EXACT_ALARM`, nécessaire à la programmation à heure exacte à partir d'Android 12.
 2. Vérifier que la date, l'heure et le fuseau horaire automatiques du téléphone sont corrects.
-3. Ouvrir **Réglages > Rappel de préparation** dans PillBox.
+3. Ouvrir **Plus > Rappels** dans PillBox, section **Rappel de préparation**.
 
-Configurer les heures communes **Matin**, **Midi**, **Soir** et **Coucher**, puis activer l’unique interrupteur **Rappels de prise** dans les réglages. Tous les traitements non archivés sont alors pris en compte automatiquement, y compris ceux qui sont hors pilulier ; un traitement archivé ne génère aucun rappel. Le contenu système reste toujours neutre ; le détail n'apparaît que dans PillBox, après le verrou local lorsqu'il est activé.
+Configurer les heures communes **Matin**, **Midi**, **Soir** et **Coucher** dans la section **Heures des rappels de prise**, puis activer l’unique interrupteur **Rappels de prise**. Tous les traitements non archivés sont alors pris en compte automatiquement, y compris ceux qui sont hors pilulier ; un traitement archivé ne génère aucun rappel. Le contenu système reste toujours neutre ; le détail n'apparaît que dans PillBox, après le verrou local lorsqu'il est activé.
 
 ## Scénarios à vérifier
 
 ### Permission accordée et ouverture du parcours
 
 1. Choisir un jour et une heure proches, puis activer le rappel.
-2. Accepter la permission Android. L'écran doit confirmer le jour et l'heure programmés.
+2. Accepter la permission Android. Un toast doit confirmer le jour et l'heure programmés, et l'interrupteur **Me rappeler de préparer** doit les rappeler sous son libellé.
 3. Mettre l'application en arrière-plan, verrouiller si souhaité, puis attendre l'heure choisie.
 4. Toucher la notification **Préparer mon pilulier**. PillBox doit ouvrir directement l'écran **Préparer mon pilulier**.
 5. Refaire le test après avoir complètement arrêté PillBox : toucher la notification doit ouvrir le même parcours à froid.
@@ -32,13 +32,13 @@ Configurer les heures communes **Matin**, **Midi**, **Soir** et **Coucher**, pui
 1. Réinitialiser la permission depuis **Informations sur l'application > Notifications**, ou réinstaller l'application.
 2. Activer le rappel puis refuser la permission : l'interrupteur doit rester désactivé, aucune programmation ne doit être créée et un lien doit proposer les réglages Android.
 3. Autoriser ensuite les notifications dans Android, revenir dans PillBox et activer le rappel.
-4. Retirer à nouveau la permission dans Android puis rouvrir l'écran Réglages : PillBox doit désactiver et supprimer sa programmation locale, en l'annonçant.
-5. Retirer la permission, revenir dans PillBox **sans ouvrir les réglages**, puis la rendre : les rappels doivent reprendre sans avoir à réactiver l'interrupteur. Une permission manquante ne supprime jamais silencieusement la programmation ; seule une désactivation explicite le fait.
+4. Retirer à nouveau la permission dans Android puis rouvrir **Plus > Rappels** : PillBox doit désactiver et supprimer sa programmation locale, en l'annonçant.
+5. Retirer la permission, revenir dans PillBox **sans ouvrir l'écran Rappels**, puis la rendre : les rappels doivent reprendre sans avoir à réactiver l'interrupteur. Une permission manquante ne supprime jamais silencieusement la programmation ; seule une désactivation explicite le fait.
 
 ### Désactivation
 
 1. Désactiver l'interrupteur lorsqu'un rappel est actif.
-2. Vérifier le message **Rappel désactivé** et l'absence de notification à l'heure auparavant choisie.
+2. Vérifier le toast **Rappel de préparation désactivé** et l'absence de notification à l'heure auparavant choisie.
 
 Les optimisations batterie propres à certains constructeurs peuvent retarder une alarme. Pour valider le comportement produit, tester également sans mode économie d'énergie et avec PillBox autorisée à fonctionner normalement en arrière-plan.
 
@@ -89,7 +89,7 @@ Sur l'écran verrouillé, les notifications de PillBox sont en visibilité priv�
 ## Confirmation, historique et report
 
 1. Ouvrir une notification et vérifier que les médicaments sont séparés par créneau lorsque deux créneaux partagent la même heure globale.
-2. Marquer deux médicaments avec des états différents, puis corriger chacun vers **Non renseigné**, **Pris** et **Ignoré** depuis l'historique.
+2. Marquer deux médicaments avec des états différents, puis corriger chacun vers **Non renseigné**, **Pris** et **Ignoré** depuis **Plus > Prises**.
 3. Reporter un seul créneau à une heure proche. Vérifier que la notification reportée reste neutre et que l'autre créneau à la même heure n'est pas déplacé.
 4. Remplacer le report : seule la nouvelle heure doit sonner. L'annuler : aucune notification reportée ne doit subsister.
 5. Modifier ensuite la posologie et archiver le traitement. L'historique doit conserver le nom, la forme et la quantité qui avaient été matérialisés avant la modification.

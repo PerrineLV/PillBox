@@ -23,8 +23,11 @@ function render(notice: UpdateNotice): string {
 describe('carte de nouvelle version', () => {
   it('propose Télécharger et Plus tard et rappelle les deux versions', () => {
     const rendered = render(NOTICE);
-    expect(rendered).toContain('PillBox 1.0.42 est disponible');
-    expect(rendered).toContain('Vous utilisez la version 1.0.41');
+    // Une seule ligne : la nouvelle version en titre, l'installée en dessous.
+    expect(rendered).toContain('Version ');
+    expect(rendered).toContain('1.0.42');
+    expect(rendered).toContain('Installée : ');
+    expect(rendered).toContain('1.0.41');
     expect(rendered).toContain('Télécharger');
     expect(rendered).toContain('Plus tard');
   });

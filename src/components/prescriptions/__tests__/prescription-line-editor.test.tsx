@@ -1,4 +1,3 @@
-import { Switch } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { Treatment } from '@/domain/treatments/treatment';
@@ -172,8 +171,10 @@ describe('ligne avec traitement planifié (SCHEDULED)', () => {
     );
     expect(JSON.stringify(renderer.toJSON())).not.toContain('Périodicité');
 
-    const toggle = renderer.root.findByType(Switch);
-    await act(async () => toggle.props.onValueChange(true));
+    const toggle = renderer.root.findByProps({
+      accessibilityLabel: 'Délivrance fractionnée',
+    });
+    await act(async () => toggle.props.onPress());
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ dispensingMode: 'FRACTIONAL' }),
     );

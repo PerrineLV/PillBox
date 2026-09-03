@@ -1,4 +1,4 @@
-import { Text } from 'react-native';
+import { Text, View } from 'react-native';
 
 import {
   formatFrenchWeekdayAndDate,
@@ -13,7 +13,7 @@ import type {
 } from '@/domain/preparations/preparation';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
 import type { SavedPreparationProgress } from '@/infrastructure/preparations/preparation-repository';
-import { Card, Message, typography } from '@/ui';
+import { AppCard, Banner } from '@/ui';
 
 import { SLOT_LABELS } from './labels';
 import { styles } from './styles';
@@ -71,21 +71,30 @@ export function MedicationStep({
     boxes,
   );
   return (
-    <Card style={styles.card}>
-      <Text style={styles.name}>{current.specialtyName}</Text>
+    <AppCard>
+      <Text style={styles.stepName}>{current.specialtyName}</Text>
       {cases[0]?.pharmaceuticalForm ? (
-        <Text style={typography.body}>{cases[0].pharmaceuticalForm}</Text>
+        <Text style={styles.stepForm}>{cases[0].pharmaceuticalForm}</Text>
       ) : null}
-      <Text style={styles.total}>
-        Quantité totale : {formatHalfUnits(current.requiredHalfUnits)}
-      </Text>
+      <View style={styles.stepTiles}>
+        <View style={styles.stepTile}>
+          <Text style={styles.stepTileLabel}>À déposer</Text>
+          <Text style={styles.stepTileValue}>
+            {formatHalfUnits(current.remainingHalfUnits)}
+          </Text>
+        </View>
+        <View style={styles.stepTile}>
+          <Text style={styles.stepTileLabel}>Cases</Text>
+          <Text style={styles.stepTileValue}>{cases.length}</Text>
+        </View>
+      </View>
       {pendingComplementEnabled && pendingCases.length > 0 ? (
-        <Message tone="warning" title="Stock insuffisant pour toute la semaine">
+        <Banner level="warning" title="Stock insuffisant pour toute la semaine">
           {shortageDescription}
-        </Message>
+        </Banner>
       ) : null}
       {current.contributions.length > 0 ? (
-        <Message tone="warning" title="Guidage de remplissage">
+        <Banner level="warning" title="Guidage de remplissage">
           <Text style={styles.case}>
             Les prises sont indiquées dans l’ordre chronologique. Le stock ne
             sera décrémenté qu’à la validation finale.
@@ -116,7 +125,7 @@ export function MedicationStep({
             Passez maintenant à une autre boîte pour couvrir :{' '}
             {formatHalfUnits(current.remainingHalfUnits)}
           </Text>
-        </Message>
+        </Banner>
       ) : null}
       <Text style={styles.casesTitle}>Cases concernées</Text>
       {cases.map((item, index) => (
@@ -125,6 +134,6 @@ export function MedicationStep({
           {formatHalfUnits(item.quantityHalfUnits)}
         </Text>
       ))}
-    </Card>
+    </AppCard>
   );
 }

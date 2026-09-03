@@ -3,6 +3,7 @@ import { CameraView } from 'expo-camera';
 import { router, Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
@@ -17,12 +18,19 @@ import {
   MedicationStep,
   type CurrentRequirement,
 } from '@/components/preparations/medication-step';
+import { PreparationGrid } from '@/components/preparations/preparation-grid';
 import { StockBoxChoice } from '@/components/preparations/stock-box-choice';
 import { styles } from '@/components/preparations/styles';
 import { UsageSummary } from '@/components/preparations/usage-summary';
 import { WeekChoice } from '@/components/preparations/week-choice';
 import { useBarcodeScanner } from '@/components/scanning/use-barcode-scanner';
+import {
+  ScanHeader,
+  Viewfinder,
+  WithoutScanLink,
+} from '@/components/scanning/viewfinder';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
+import { buildWeeklyGrid } from '@/domain/home/weekly-grid';
 import {
   formatFrenchCivilPeriod,
   formatLongFrenchCivilDate,
@@ -73,13 +81,14 @@ import {
 } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
-  AppButton,
+  AppCard,
   AppModal,
-  Badge,
-  Card,
+  AppScreen,
+  Banner,
   LoadingState,
   Message,
-  Screen,
+  PillButton,
+  SeverityBadge,
   typography,
 } from '@/ui';
 
@@ -107,6 +116,7 @@ function NewPreparationScreenContent({
 }) {
   const referenceDatabase = useMedicationReferenceDatabase();
   const scanner = useBarcodeScanner();
+  const insets = useSafeAreaInsets();
   const [snapshot, setSnapshot] = useState<PreparationSnapshot | null>(null);
   const [preparationId, setPreparationId] = useState<number | null>(null);
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
@@ -716,92 +726,126 @@ function NewPreparationScreenContent({
     if (!scanner.permission.granted)
       return (
         <Centered text="La caméra est nécessaire pour vérifier la boîte.">
-          <AppButton
+          <PillButton
             label="Autoriser la caméra"
             onPress={() => void scanner.requestPermission()}
           />
-          <AppButton
+          <PillButton
             label="Annuler"
-            variant="quiet"
             onPress={() => setScanning(false)}
+            tone="outline"
           />
         </Centered>
       );
     return (
       <View style={styles.cameraContainer}>
-        <Stack.Screen
-          options={{ headerShown: true, title: 'Vérifier la boîte' }}
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={{ height: insets.top }} />
+        <ScanHeader
+          action={
+            <WithoutScanLink
+              accessibilityLabel="Choisir la boîte dans le stock"
+              onPress={() => {
+                setScanning(false);
+                beginChoice();
+              }}
+            />
+          }
+          onBack={() => setScanning(false)}
+          title="Vérifier la boîte"
         />
         <CameraView
-          style={styles.camera}
           barcodeScannerSettings={{ barcodeTypes: ['datamatrix'] }}
           onBarcodeScanned={handleScan}
+          style={styles.camera}
         >
-          <View style={styles.guide}>
-            <Text style={styles.guideText}>
-              Scannez la boîte réellement utilisée
-            </Text>
-            {snapshot ? (
-              <Text style={styles.guideText}>
-                Semaine{' '}
-                {formatFrenchCivilPeriod(snapshot.startDate, snapshot.endDate)}
-              </Text>
-            ) : null}
-          </View>
+          <Viewfinder
+            caption={`Scannez la boîte réellement utilisée${
+              snapshot
+                ? ` · semaine ${formatFrenchCivilPeriod(snapshot.startDate, snapshot.endDate)}`
+                : ''
+            }`}
+          />
         </CameraView>
-        <AppButton
-          label="Annuler le scan"
-          variant="quiet"
-          onPress={() => setScanning(false)}
-        />
       </View>
     );
   }
 
+  const grid = snapshot
+    ? buildWeeklyGrid({
+        startDate: snapshot.startDate,
+        items: snapshot.items,
+        preparedCis: progress.map((item) => item.specialtyCis),
+      })
+    : null;
+  const medicationIndex =
+    snapshot === null || current === null
+      ? 0
+      : snapshot.requirements.findIndex(
+          (requirement) => requirement.specialtyCis === current.specialtyCis,
+        ) + 1;
+
   return (
-    <Screen
-      fixedHeader={
-        snapshot ? (
-          <View style={styles.periodHeader}>
-            <Badge
-              label={finalized ? 'Semaine validée' : 'Semaine en préparation'}
-              tone={finalized ? 'success' : 'warning'}
+    <AppScreen
+      footer={
+        current && !pending && !choosing ? (
+          <View style={styles.footerActions}>
+            <PillButton
+              height={54}
+              label="Scanner la boîte utilisée"
+              onPress={beginScan}
+              tone="accent"
             />
-            <Text accessibilityRole="header" style={styles.period}>
-              Semaine{' '}
-              {formatFrenchCivilPeriod(snapshot.startDate, snapshot.endDate)}
+            <PillButton
+              height={46}
+              label="Choisir la boîte dans le stock"
+              onPress={beginChoice}
+              tone="outline"
+            />
+            {controlledDispensingActiveCis.has(current.specialtyCis) ? (
+              <PillButton
+                accessibilityHint="Passe au médicament suivant sans couverture complète ; réservé aux traitements à délivrance encadrée"
+                height={44}
+                label="Aucun stock disponible : laisser en attente de complément"
+                onPress={skipCurrentMedication}
+                tone="outline"
+              />
+            ) : null}
+            <Text style={styles.stockNotice}>
+              Le stock ne sera décrémenté qu’à la validation finale.
             </Text>
           </View>
         ) : undefined
       }
-      stickyFooter={
-        current && !pending && !choosing ? (
-          <View style={styles.footerActions}>
-            <AppButton label="Scanner la boîte utilisée" onPress={beginScan} />
-            <AppButton
-              label="Choisir la boîte dans le stock"
-              variant="secondary"
-              onPress={beginChoice}
-            />
-            {controlledDispensingActiveCis.has(current.specialtyCis) ? (
-              <AppButton
-                label="Aucun stock disponible : laisser en attente de complément"
-                variant="quiet"
-                onPress={skipCurrentMedication}
-                accessibilityHint="Passe au médicament suivant sans couverture complète ; réservé aux traitements à délivrance encadrée"
-              />
-            ) : null}
+      header={
+        snapshot && grid ? (
+          <View style={styles.darkHeader}>
+            <Text accessibilityRole="header" style={styles.darkTitle}>
+              Pilulier ·{' '}
+              {formatFrenchCivilPeriod(snapshot.startDate, snapshot.endDate)}
+            </Text>
+            <Text style={styles.darkProgress}>
+              {grid.preparedCases} sur {grid.totalCases} cases ·{' '}
+              {completedRequirementsCount}/{snapshot.requirements.length}{' '}
+              médicaments
+            </Text>
+            <PreparationGrid grid={grid} />
           </View>
         ) : undefined
       }
     >
-      <Stack.Screen
-        options={{ headerShown: true, title: 'Préparer mon pilulier' }}
-      />
-      <Text style={styles.intro}>
-        Préparation sur 7 jours. La progression est sauvegardée après chaque
-        médicament. Aucun stock n’est encore décrémenté.
-      </Text>
+      <Stack.Screen options={{ headerShown: false }} />
+      {snapshot === null ? (
+        <Text style={styles.intro}>
+          Préparation sur 7 jours. La progression est sauvegardée après chaque
+          médicament. Aucun stock n’est encore décrémenté.
+        </Text>
+      ) : null}
+      {current && snapshot ? (
+        <Text style={styles.eyebrow}>
+          Médicament {medicationIndex} sur {snapshot.requirements.length}
+        </Text>
+      ) : null}
       {preparationId === null ? (
         <WeekChoice
           options={options}
@@ -817,27 +861,18 @@ function NewPreparationScreenContent({
           {error}
         </Message>
       ) : null}
-      {snapshot ? (
-        <>
-          <Text style={typography.caption}>
-            {completedRequirementsCount} médicament
-            {completedRequirementsCount > 1 ? 's' : ''} déjà vérifié
-            {completedRequirementsCount > 1 ? 's' : ''}
-          </Text>
-          {progress.length > 0 && current ? (
-            <Badge label="Préparation reprise" tone="success" />
-          ) : null}
-        </>
+      {snapshot && progress.length > 0 && current ? (
+        <SeverityBadge label="Préparation reprise" level="ok" />
       ) : null}
       {snapshot?.hasShortages ? (
-        <Message
-          tone="warning"
+        <Banner
+          level="warning"
           title="Stock total insuffisant signalé lors de la génération"
         >
           La validation reste bloquée si la boîte scannée ne couvre pas le
           besoin, sauf pour un traitement à délivrance encadrée (stupéfiants et
           assimilés) explicitement laissé en attente de complément.
-        </Message>
+        </Banner>
       ) : null}
       {snapshot && snapshot.requirements.length === 0 ? (
         <Text>Aucune prise prévue pour cette période.</Text>
@@ -891,63 +926,96 @@ function NewPreparationScreenContent({
         />
       ) : null}
       {snapshot && current === null && !finalized ? (
-        <Card style={styles.success}>
-          <Text style={styles.successTitle}>Contrôle final jour par jour</Text>
-          <Text>
-            Vérifiez le contenu attendu de chaque case avant de décrémenter le
-            stock.
-          </Text>
-          <DailyFinalCheck snapshot={snapshot} />
-          <Text style={styles.casesTitle}>Lots retenus pour cette semaine</Text>
-          <UsageSummary snapshot={snapshot} progress={progress} boxes={boxes} />
-          <Message tone="warning">
-            Cette validation décrémentera le stock une seule fois. Contrôlez
-            chaque case avant de continuer.
-          </Message>
-          <AppButton
-            label="Valider définitivement la préparation"
-            loading={saving}
-            onPress={() => setFinalConfirmationVisible(true)}
-          />
-        </Card>
+        <>
+          <View style={styles.finalPanel}>
+            <View accessibilityElementsHidden style={styles.finalMark}>
+              <Text style={styles.finalMarkText}>✓</Text>
+            </View>
+            <Text accessibilityRole="header" style={styles.finalTitle}>
+              {grid ? `${grid.totalCases} cases remplies` : 'Cases remplies'}
+            </Text>
+            <Text style={styles.finalBody}>
+              {snapshot.requirements.length} médicament
+              {snapshot.requirements.length > 1 ? 's' : ''} vérifié
+              {snapshot.requirements.length > 1 ? 's' : ''},{' '}
+              {new Set(progress.map((item) => item.boxId)).size} lot
+              {new Set(progress.map((item) => item.boxId)).size > 1
+                ? 's'
+                : ''}{' '}
+              utilisé
+              {new Set(progress.map((item) => item.boxId)).size > 1 ? 's' : ''}.
+              Rien n’est encore décompté du stock.
+            </Text>
+          </View>
+          <AppCard>
+            <Text style={typography.cardTitle}>
+              Contrôle final jour par jour
+            </Text>
+            <Text style={typography.detail}>
+              Vérifiez le contenu attendu de chaque case avant de décrémenter le
+              stock.
+            </Text>
+            <DailyFinalCheck snapshot={snapshot} />
+            <Text style={typography.cardTitle}>
+              Lots retenus pour cette semaine
+            </Text>
+            <UsageSummary
+              boxes={boxes}
+              progress={progress}
+              snapshot={snapshot}
+            />
+            <Banner level="warning">
+              Cette validation décrémentera le stock une seule fois. Contrôlez
+              chaque case avant de continuer.
+            </Banner>
+            <PillButton
+              disabled={saving}
+              label="Valider la préparation"
+              onPress={() => setFinalConfirmationVisible(true)}
+            />
+          </AppCard>
+        </>
       ) : null}
       {finalized ? (
         <>
-          <Message tone="success" title="Préparation validée">
+          <Banner level="ok" title="Préparation validée">
             Le stock et les lots utilisés ont été enregistrés dans l’historique.
-          </Message>
+          </Banner>
           {pendingAfterValidation.length > 0 ? (
-            <Message tone="warning" title="Cases en attente de complément">
+            <Banner level="warning" title="Cases en attente de complément">
               {pendingAfterValidation.length} médicament
               {pendingAfterValidation.length > 1 ? 's' : ''} à délivrance
               encadrée n’ont pas pu être entièrement couvert
               {pendingAfterValidation.length > 1 ? 's' : ''}. Complétez-les dès
               que du stock est disponible, depuis l’historique. Un rappel dédié
               vous préviendra.
-            </Message>
+            </Banner>
           ) : null}
-          <AppButton
+          <PillButton
+            height={46}
             label="Voir l’historique"
-            variant="secondary"
             onPress={() => router.push('/preparations/history')}
+            tone="outline"
           />
-          <AppButton
+          <PillButton
+            height={46}
             label="Préparer une autre semaine"
-            variant="secondary"
             onPress={() => void prepareAnotherWeek()}
+            tone="outline"
           />
         </>
       ) : null}
       {preparationId !== null && !finalized ? (
         <View style={styles.cancelArea}>
-          <AppButton
-            label="Annuler la préparation"
-            variant="quiet"
-            disabled={saving}
-            onPress={requestCancel}
+          <PillButton
             accessibilityHint="Abandonne la préparation en cours sans modifier le stock"
+            disabled={saving}
+            height={44}
+            label="Annuler la préparation"
+            onPress={requestCancel}
+            tone="destructive"
           />
-          <Text style={typography.caption}>
+          <Text style={typography.micro}>
             L’annulation n’enregistre rien : aucun stock n’est modifié et aucune
             préparation n’apparaît dans l’historique.
           </Text>
@@ -988,7 +1056,7 @@ function NewPreparationScreenContent({
           leur stock. Elle ne peut être effectuée qu’une fois.
         </Text>
       </AppModal>
-    </Screen>
+    </AppScreen>
   );
 }
 

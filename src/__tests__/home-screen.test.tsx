@@ -1,185 +1,313 @@
-import { HomeContent } from '../app/index';
-import type { AttentionItem } from '@/domain/home/attention-items';
+import type { ReactNode } from 'react';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+
+import { buildTodaySlots } from '@/domain/home/today-plan';
+import { buildWeeklyGrid } from '@/domain/home/weekly-grid';
+import type {
+  IntakeRecord,
+  IntakeStatus,
+} from '@/domain/intakes/intake-tracking';
+import type { IntakeSlotTimes } from '@/domain/reminders/intake-reminder';
+import type { IntakeSlot } from '@/domain/treatments/treatment';
+import { HomeContent, type HomeData } from '../app/index';
 
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: jest.fn() }));
+jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
+jest.mock('expo-router', () => ({
+  Link: ({ children }: { children: ReactNode }) => children,
+  useFocusEffect: () => undefined,
+  usePathname: () => '/',
+  router: { navigate: jest.fn() },
+}));
 
-const PREPARATION_START: AttentionItem = {
-  type: 'PREPARATION',
-  id: 'preparation:next',
-  mode: 'START',
-  startDate: '2026-08-11',
-  endDate: '2026-08-17',
-  completedCount: 0,
-  totalCount: 0,
+const SLOT_TIMES: IntakeSlotTimes = {
+  morning: { hour: 8, minute: 0 },
+  noon: { hour: 12, minute: 30 },
+  evening: { hour: 19, minute: 0 },
+  bedtime: { hour: 22, minute: 0 },
 };
+const NOON = new Date(2026, 8, 1, 12, 45);
 
-describe('HomeScreen', () => {
-  it('affiche le titre de l’application', () => {
-    const rendered = JSON.stringify(
-      HomeContent({ items: [PREPARATION_START], loading: false, error: null }),
-    );
+function record(
+  name: string,
+  slot: IntakeSlot,
+  status: IntakeStatus,
+  treatmentId = 1,
+): IntakeRecord {
+  return {
+    key: `${treatmentId}:2026-09-01:${slot}`,
+    treatmentId,
+    date: '2026-09-01',
+    slot,
+    specialtyCis: '60000001',
+    specialtyName: name,
+    pharmaceuticalForm: 'comprimé',
+    quantityHalfUnits: 2,
+    status,
+    createdAt: '2026-09-01T06:00:00.000Z',
+    updatedAt: '2026-09-01T10:34:00.000Z',
+  };
+}
+
+/** Quatre médicaments sur un même créneau : un de plus que le plafond. */
+function crowdedNoon(): HomeData['slots'] {
+  return buildTodaySlots(
+    [
+      record('Kardégic', 'noon', 'UNSET', 2),
+      record('Metformine', 'noon', 'UNSET', 3),
+      record('Levothyrox', 'noon', 'UNSET', 4),
+      record('Doliprane', 'noon', 'UNSET', 5),
+    ],
+    SLOT_TIMES,
+  );
+}
+
+function homeData(overrides: Partial<HomeData> = {}): HomeData {
+  return {
+    slots: buildTodaySlots(
+      [
+        record('Levothyrox', 'morning', 'TAKEN'),
+        record('Kardégic', 'noon', 'UNSET', 2),
+        record('Metformine', 'noon', 'UNSET', 3),
+      ],
+      SLOT_TIMES,
+    ),
+    watchItems: [],
+    asNeededRows: [],
+    grid: null,
+    preparationState: 'TO_PREPARE',
+    outsidePillboxTreatmentIds: new Set(),
+    ...overrides,
+  };
+}
+
+function mount(props: Parameters<typeof HomeContent>[0]): ReactTestRenderer {
+  let renderer: ReactTestRenderer | null = null;
+  act(() => {
+    renderer = create(<HomeContent {...props} />);
+  });
+  return renderer!;
+}
+
+function render(props: Parameters<typeof HomeContent>[0]): string {
+  return JSON.stringify(mount(props).toJSON());
+}
+
+/**
+ * `findAllByProps` remonte aussi la vue hôte produite par `Pressable` : seule
+ * celle qui porte réellement le gestionnaire nous intéresse.
+ */
+function press(renderer: ReactTestRenderer, accessibilityLabel: string): void {
+  const target = renderer.root
+    .findAllByProps({ accessibilityLabel })
+    .find((node) => typeof node.props.onPress === 'function');
+  if (target === undefined)
+    throw new Error(`Aucun élément pressable « ${accessibilityLabel} ».`);
+  act(() => {
+    target.props.onPress();
+  });
+}
+
+describe('accueil', () => {
+  it('porte la marque et le créneau en cours, médicaments repliés', () => {
+    const rendered = render({
+      data: homeData(),
+      loading: false,
+      error: null,
+      now: NOON,
+    });
     expect(rendered).toContain('PillBox');
-    expect(rendered).toContain('preparation:next');
+    expect(rendered).toContain('Midi');
+    expect(rendered).toContain('12:30');
+    expect(rendered).toContain('2 médicaments');
+    expect(rendered).not.toContain('Kardégic');
+    expect(rendered).not.toContain('Metformine');
   });
 
-  it('affiche un indicateur de chargement tant que la situation n’est pas connue', () => {
-    const rendered = JSON.stringify(
-      HomeContent({ items: null, loading: true, error: null }),
-    );
-    expect(rendered).toContain('Chargement de votre situation');
+  it('propose la validation groupée tant que des prises attendent', () => {
+    expect(
+      render({ data: homeData(), loading: false, error: null, now: NOON }),
+    ).toContain('Tout valider');
   });
 
-  it('affiche une erreur sans faire disparaître le titre', () => {
-    const rendered = JSON.stringify(
-      HomeContent({ items: null, loading: false, error: 'Panne locale' }),
-    );
-    expect(rendered).toContain('Panne locale');
-    expect(rendered).toContain('PillBox');
+  it('remplace la validation par l’heure de renseignement une fois le créneau complet', () => {
+    const rendered = render({
+      data: homeData({
+        slots: buildTodaySlots(
+          [record('Levothyrox', 'morning', 'TAKEN')],
+          SLOT_TIMES,
+        ),
+      }),
+      loading: false,
+      error: null,
+      now: NOON,
+    });
+    expect(rendered).not.toContain('Tout valider');
+    expect(rendered).toContain('Créneau du matin validé');
   });
 
-  it('affiche un état calme quand aucune action n’est requise', () => {
-    const rendered = JSON.stringify(
-      HomeContent({
-        items: [{ ...PREPARATION_START, mode: 'READY' }],
-        loading: false,
-        error: null,
+  it('ne propose pas la validation groupée quand une prise hors pilulier attend', () => {
+    const renderer = mount({
+      data: homeData({ outsidePillboxTreatmentIds: new Set([3]) }),
+      loading: false,
+      error: null,
+      now: NOON,
+    });
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Tout valider');
+    press(renderer, 'Afficher 2 médicaments');
+    expect(JSON.stringify(renderer.toJSON())).toContain('Boîte à désigner');
+  });
+
+  it('annonce le nombre de médicaments sans en afficher aucun', () => {
+    const rendered = render({
+      data: homeData({ slots: crowdedNoon() }),
+      loading: false,
+      error: null,
+      now: NOON,
+    });
+    expect(rendered).toContain('4 médicaments');
+    for (const name of ['Kardégic', 'Metformine', 'Levothyrox', 'Doliprane'])
+      expect(rendered).not.toContain(name);
+    // Le repli est visuel : la validation porte toujours sur les quatre.
+    expect(rendered).toContain('Tout valider');
+  });
+
+  it('déplie la liste complète puis la referme', () => {
+    const renderer = mount({
+      data: homeData({ slots: crowdedNoon() }),
+      loading: false,
+      error: null,
+      now: NOON,
+    });
+    press(renderer, 'Afficher 4 médicaments');
+    const expanded = JSON.stringify(renderer.toJSON());
+    for (const name of ['Kardégic', 'Metformine', 'Levothyrox', 'Doliprane'])
+      expect(expanded).toContain(name);
+    expect(expanded).toContain('Réduire');
+
+    press(renderer, 'Réduire la liste');
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Doliprane');
+  });
+
+  it('affiche directement un médicament unique, sans ligne de repli', () => {
+    const rendered = render({
+      data: homeData({
+        slots: buildTodaySlots(
+          [record('Levothyrox', 'noon', 'UNSET')],
+          SLOT_TIMES,
+        ),
+      }),
+      loading: false,
+      error: null,
+      now: NOON,
+    });
+    expect(rendered).toContain('Levothyrox');
+    // Aucune commande d'ouverture ou de fermeture : elle remplacerait la
+    // ligne qu'elle masque, sans rien gagner.
+    expect(rendered).not.toContain('Afficher');
+    expect(rendered).not.toContain('Réduire');
+    // « Tout valider » n'aurait rien à englober.
+    expect(rendered).toContain('Valider');
+    expect(rendered).not.toContain('Tout valider');
+  });
+
+  it('annonce la prochaine prise quand rien n’est en attente', () => {
+    const rendered = render({
+      data: homeData({
+        slots: buildTodaySlots(
+          [record('Metformine', 'evening', 'UNSET')],
+          SLOT_TIMES,
+        ),
+      }),
+      loading: false,
+      error: null,
+      now: NOON,
+    });
+    expect(rendered).toContain('Prochaine prise');
+    expect(rendered).toContain('6 h 15');
+  });
+
+  it('affiche le chargement puis l’erreur sans faire disparaître l’en-tête', () => {
+    expect(
+      render({ data: null, loading: true, error: null, now: NOON }),
+    ).toContain('Chargement de votre situation');
+    const failed = render({
+      data: null,
+      loading: false,
+      error: 'Panne locale',
+      now: NOON,
+    });
+    expect(failed).toContain('Panne locale');
+    expect(failed).toContain('PillBox');
+  });
+
+  it('limite les alertes affichées mais annonce leur nombre total', () => {
+    const watchItems: HomeData['watchItems'] = [1, 2, 3, 4].map((index) => ({
+      type: 'EXPIRATION' as const,
+      id: `expiration:${index}`,
+      boxId: index,
+      specialtyName: `Médicament ${index}`,
+      lot: `LOT-${index}`,
+      expirationDate: '2026-09-20',
+      remainingQuantity: 5,
+    }));
+    const rendered = render({
+      data: homeData({ watchItems }),
+      loading: false,
+      error: null,
+      now: NOON,
+    });
+    expect(rendered).toContain('Médicament 3');
+    expect(rendered).not.toContain('Médicament 4');
+    expect(rendered).toContain('"4"');
+  });
+
+  it('n’affiche la section « si besoin » que lorsqu’un traitement en relève', () => {
+    expect(
+      render({ data: homeData(), loading: false, error: null, now: NOON }),
+    ).not.toContain('Si besoin');
+  });
+
+  it('plafonne les traitements « si besoin » et renvoie les autres à l’onglet', () => {
+    const asNeededRows: HomeData['asNeededRows'] = [1, 2, 3, 4].map(
+      (index) => ({
+        treatmentId: index,
+        specialtyName: `Antalgique ${index}`,
+        rank: 1 as const,
+        blocked: false,
+        detail: 'Aucune prise aujourd’hui',
       }),
     );
-    expect(rendered).toContain('Tout va bien');
+    const rendered = render({
+      data: homeData({ asNeededRows }),
+      loading: false,
+      error: null,
+      now: NOON,
+    });
+    expect(rendered).toContain('Antalgique 3');
+    expect(rendered).not.toContain('Antalgique 4');
+    expect(rendered).toContain('autre');
   });
 
-  it('ne montre pas l’état calme quand une préparation reste à faire', () => {
-    const rendered = JSON.stringify(
-      HomeContent({ items: [PREPARATION_START], loading: false, error: null }),
-    );
-    expect(rendered).not.toContain('Tout va bien');
-  });
-
-  it('ne montre pas l’état calme quand un renouvellement ou une péremption reste à traiter', () => {
-    const items: AttentionItem[] = [
-      { ...PREPARATION_START, mode: 'READY' },
-      {
-        type: 'EXPIRATION',
-        id: 'expiration:2',
-        boxId: 2,
-        specialtyName: 'Beta',
-        lot: 'LOT-B',
-        expirationDate: '2026-08-20',
-        remainingQuantity: 5,
-      },
-    ];
-    const rendered = JSON.stringify(
-      HomeContent({ items, loading: false, error: null }),
-    );
-    expect(rendered).not.toContain('Tout va bien');
-  });
-
-  it('place la préparation avant les autres actions dans Maintenant, puis sépare les alertes et les prises si besoin', () => {
-    const items: AttentionItem[] = [
-      {
-        type: 'NEXT_INTAKE_GROUP',
-        id: 'next-intake:1',
-        scheduledAt: '2026-08-11T08:00:00.000Z',
-        groups: [{ date: '2026-08-11', slot: 'morning' }],
-        medicationCount: 1,
-      },
-      PREPARATION_START,
-      {
-        type: 'STOCK_RENEWAL',
-        id: 'stock-renewal:1',
-        item: {
-          specialtyCis: '1',
-          specialtyName: 'Alpha',
-          urgency: 'INSUFFICIENT_FOR_NEXT_PREPARATION',
-          availableHalfUnits: 4,
-          nextPreparationHalfUnits: 14,
-          missingHalfUnits: 10,
-          ruptureDate: null,
-          ruptureCause: null,
-          theoreticalRenewalDate: null,
-          theoreticalRenewalWindow: null,
-          runsOutBeforeRenewalWindow: false,
-          usableBoxCount: null,
-        },
-      },
-      {
-        type: 'EXPIRATION',
-        id: 'expiration:2',
-        boxId: 2,
-        specialtyName: 'Beta',
-        lot: 'LOT-B',
-        expirationDate: '2026-08-20',
-        remainingQuantity: 5,
-      },
-      {
-        type: 'AS_NEEDED_INFO',
-        id: 'as-needed:3',
-        treatmentId: 3,
-        specialtyName: 'Gamma',
-        lastIntake: null,
-      },
-    ];
-    const rendered = JSON.stringify(
-      HomeContent({ items, loading: false, error: null }),
-    );
-    const order = [
-      'preparation:next',
-      'next-intake:1',
-      'stock-renewal:1',
-      'expiration:2',
-      'as-needed:3',
-    ].map((id) => rendered.indexOf(`"${id}"`));
-    expect(order.every((index) => index >= 0)).toBe(true);
-    for (let index = 1; index < order.length; index += 1) {
-      expect(order[index]).toBeGreaterThan(order[index - 1]);
-    }
-  });
-
-  it('n’affiche le bloc Si besoin que lorsqu’un traitement concerné existe', () => {
-    const empty = JSON.stringify(
-      HomeContent({ items: [], loading: false, error: null }),
-    );
-    const withAsNeeded = JSON.stringify(
-      HomeContent({
-        items: [
-          {
-            type: 'AS_NEEDED_INFO',
-            id: 'as-needed:3',
-            treatmentId: 3,
-            specialtyName: 'Gamma',
-            lastIntake: null,
-          },
-        ],
-        loading: false,
-        error: null,
+  it('résume la semaine et son avancement', () => {
+    const rendered = render({
+      data: homeData({
+        grid: buildWeeklyGrid({
+          startDate: '2026-09-02',
+          items: [
+            { date: '2026-09-02', slot: 'morning', specialtyCis: '1' },
+            { date: '2026-09-03', slot: 'morning', specialtyCis: '1' },
+          ],
+          preparedCis: ['1'],
+        }),
+        preparationState: 'IN_PROGRESS',
       }),
-    );
-    expect(empty).not.toContain('Si besoin');
-    expect(withAsNeeded).toContain('Si besoin');
-  });
-
-  it('n’affiche aucune information de mise à jour quand l’app est à jour', () => {
-    const rendered = JSON.stringify(
-      HomeContent({ items: [PREPARATION_START], loading: false, error: null }),
-    );
-    expect(rendered).not.toContain('Mise à jour');
-  });
-
-  it('affiche un lien vers la dernière préparation quand elle existe', () => {
-    const rendered = JSON.stringify(
-      HomeContent({
-        items: [PREPARATION_START],
-        loading: false,
-        error: null,
-        lastPreparation: {
-          id: 1,
-          startDate: '2026-08-04',
-          endDate: '2026-08-10',
-          completedAt: '2026-08-04T10:00:00.000Z',
-          medications: [],
-        },
-      }),
-    );
-    expect(rendered).toContain('Validée le');
+      loading: false,
+      error: null,
+      now: NOON,
+    });
+    expect(rendered).toContain('2 septembre');
+    expect(rendered).toContain('2 / 2 cases');
+    expect(rendered).toContain('Reprendre');
   });
 });

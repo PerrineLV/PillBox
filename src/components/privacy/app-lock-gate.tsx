@@ -25,7 +25,7 @@ import {
   canOfferEmergencyUnlock,
   getLocalAuthAvailability,
 } from '@/infrastructure/privacy/local-authentication';
-import { AppButton, Message, colors, spacing, typography } from '@/ui';
+import { Banner, LockIcon, PillButton, colors, radii, typography } from '@/ui';
 
 export function AppLockGate({ children }: { children: ReactNode }) {
   const database = useSQLiteContext();
@@ -151,6 +151,10 @@ export function AppLockGate({ children }: { children: ReactNode }) {
     // récentes.
     return (
       <View style={styles.container}>
+        <View accessibilityElementsHidden style={styles.mark}>
+          <View style={styles.markTop} />
+          <View style={styles.markBottom} />
+        </View>
         <Text accessibilityRole="header" style={styles.title}>
           PillBox
         </Text>
@@ -160,6 +164,9 @@ export function AppLockGate({ children }: { children: ReactNode }) {
 
   return (
     <View style={styles.container}>
+      <View accessibilityElementsHidden style={styles.lockBadge}>
+        <LockIcon color={colors.onDarkSoft} size={24} />
+      </View>
       <Text accessibilityRole="header" style={styles.title}>
         PillBox est verrouillée
       </Text>
@@ -167,11 +174,12 @@ export function AppLockGate({ children }: { children: ReactNode }) {
         Les données restent sur ce téléphone. PillBox ne stocke aucun code, mot
         de passe ni donnée biométrique.
       </Text>
-      {message ? <Message tone="warning">{message}</Message> : null}
-      <AppButton
+      {message ? <Banner level="warning">{message}</Banner> : null}
+      <PillButton
+        disabled={busy}
         label="Déverrouiller avec Android"
-        loading={busy}
         onPress={() => dispatch({ type: 'authentication-requested' })}
+        tone="onDark"
       />
       {emergencyUnlock ? (
         <>
@@ -180,11 +188,12 @@ export function AppLockGate({ children }: { children: ReactNode }) {
             une indisponibilité du système, vous pouvez désactiver ce verrou
             local. Vos données ne seront pas supprimées.
           </Text>
-          <AppButton
-            label="Désactiver le verrou local"
-            variant="danger"
+          <PillButton
             disabled={busy}
+            height={46}
+            label="Désactiver le verrou local"
             onPress={() => void disableUnavailableLock()}
+            tone="onDarkOutline"
           />
         </>
       ) : null}
@@ -194,12 +203,43 @@ export function AppLockGate({ children }: { children: ReactNode }) {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.background,
+    backgroundColor: colors.headerDark,
     flex: 1,
-    gap: spacing.lg,
+    gap: 14,
     justifyContent: 'center',
-    padding: spacing.xl,
+    padding: 26,
   },
-  help: typography.body,
-  title: typography.title,
+  lockBadge: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 253, 249, 0.10)',
+    borderRadius: radii.pill,
+    height: 56,
+    justifyContent: 'center',
+    width: 56,
+  },
+  mark: { height: 48, width: 30 },
+  markTop: {
+    backgroundColor: colors.accentOnDark,
+    borderTopLeftRadius: 15,
+    borderTopRightRadius: 15,
+    height: 24,
+  },
+  markBottom: {
+    backgroundColor: colors.onDarkMuted,
+    borderBottomLeftRadius: 15,
+    borderBottomRightRadius: 15,
+    height: 24,
+  },
+  title: {
+    ...typography.hero,
+    color: colors.onDark,
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  help: {
+    color: colors.onDarkMuted,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 19,
+  },
 });

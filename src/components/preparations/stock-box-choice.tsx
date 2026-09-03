@@ -1,11 +1,18 @@
-import { Pressable, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import { todayIso, type MedicationBox } from '@/domain/inventory/inventory';
 import { evaluateBoxAvailability } from '@/domain/preparations/preparation';
-import { AppButton, Badge, Card, typography } from '@/ui';
-
-import { styles } from './styles';
+import {
+  AppCard,
+  DenseList,
+  DenseRow,
+  PillButton,
+  SeverityBadge,
+  colors,
+  radii,
+  typography,
+} from '@/ui';
 
 /**
  * Boîtes déjà enregistrées pour ce médicament, du lot à utiliser en priorité
@@ -29,9 +36,11 @@ export function StockBoxChoice({
 }) {
   const today = todayIso();
   return (
-    <Card style={styles.card}>
-      <Text style={styles.casesTitle}>Boîtes enregistrées dans le stock</Text>
-      <Text style={typography.caption}>
+    <AppCard>
+      <Text style={typography.cardTitle}>
+        Boîtes enregistrées dans le stock
+      </Text>
+      <Text style={typography.micro}>
         Aucune lecture de DataMatrix ne sera enregistrée : les contrôles de
         médicament, de lot et de péremption restent appliqués. Un autre membre
         du même groupe générique officiel exige une confirmation explicite. La
@@ -39,49 +48,85 @@ export function StockBoxChoice({
         plus proche ; la boîte que vous confirmez est celle retenue.
       </Text>
       {boxes.length === 0 ? (
-        <Text style={styles.case}>
+        <Text style={typography.detail}>
           Aucune boîte de ce médicament n’est enregistrée dans le stock.
         </Text>
-      ) : null}
-      {boxes.map((box) => {
-        const availability = evaluateBoxAvailability(
-          box,
-          requiredHalfUnits,
-          today,
-        );
-        return (
-          <Pressable
-            accessibilityRole="button"
-            key={box.id}
-            onPress={() => onSelect(box)}
-            style={styles.stockOption}
-          >
-            <Text style={styles.stockOptionTitle}>
-              Boîte #{box.id} · lot {box.lot ?? 'non renseigné'}
-            </Text>
-            <Text>
-              Péremption {formatLongFrenchCivilDate(box.expirationDate)} · reste{' '}
-              {box.remainingQuantity}
-            </Text>
-            {availability === 'EXPIRED' ? (
-              <Badge label="Périmée" tone="danger" />
-            ) : null}
-            {availability === 'INSUFFICIENT' ? (
-              <Badge label="Quantité insuffisante seule" tone="warning" />
-            ) : null}
-            {box.origin === 'MANUAL' ? (
-              <Badge label="Ajoutée sans DataMatrix" />
-            ) : null}
-            {box.specialtyCis !== expectedSpecialtyCis ? (
-              <Badge
-                label={`Autre spécialité du même groupe générique : ${box.specialtyName}`}
-                tone="warning"
+      ) : (
+        <DenseList>
+          {boxes.map((box, index) => {
+            const availability = evaluateBoxAvailability(
+              box,
+              requiredHalfUnits,
+              today,
+            );
+            const otherSpecialty = box.specialtyCis !== expectedSpecialtyCis;
+            return (
+              <DenseRow
+                accessibilityLabel={`Boîte numéro ${box.id}, lot ${box.lot ?? 'non renseigné'}`}
+                detail={
+                  <View style={styles.details}>
+                    <Text style={styles.detailText}>
+                      Reste {box.remainingQuantity} · péremption{' '}
+                      {formatLongFrenchCivilDate(box.expirationDate)} ·{' '}
+                      {box.origin === 'MANUAL'
+                        ? 'ajoutée sans DataMatrix'
+                        : 'ajoutée par scan'}
+                    </Text>
+                    {availability === 'EXPIRED' ? (
+                      <SeverityBadge label="Périmée" level="high" />
+                    ) : null}
+                    {availability === 'INSUFFICIENT' ? (
+                      <SeverityBadge
+                        label="Quantité insuffisante seule"
+                        level="warning"
+                      />
+                    ) : null}
+                    {otherSpecialty ? (
+                      <SeverityBadge
+                        label={`Même groupe générique : ${box.specialtyName}`}
+                        level="warning"
+                      />
+                    ) : null}
+                  </View>
+                }
+                first={index === 0}
+                key={box.id}
+                leading={<View style={styles.radio} />}
+                onPress={() => onSelect(box)}
+                title={
+                  <Text style={styles.boxTitle}>
+                    Boîte #{box.id} · lot {box.lot ?? 'non renseigné'}
+                  </Text>
+                }
               />
-            ) : null}
-          </Pressable>
-        );
-      })}
-      <AppButton label="Annuler" variant="quiet" onPress={onCancel} />
-    </Card>
+            );
+          })}
+        </DenseList>
+      )}
+      <PillButton
+        height={44}
+        label="Annuler"
+        onPress={onCancel}
+        tone="outline"
+      />
+    </AppCard>
   );
 }
+
+const styles = StyleSheet.create({
+  radio: {
+    borderColor: colors.border,
+    borderRadius: radii.pill,
+    borderWidth: 2,
+    height: 22,
+    width: 22,
+  },
+  boxTitle: { ...typography.itemTitle, fontSize: 13.5, lineHeight: 17 },
+  details: { alignItems: 'flex-start', gap: 5 },
+  detailText: {
+    color: colors.textTertiary,
+    fontSize: 11.5,
+    fontWeight: '500',
+    lineHeight: 15,
+  },
+});

@@ -45,6 +45,7 @@ jest.mock('expo-camera', () => ({
 jest.mock('expo-router', () => ({
   router: { push: jest.fn() },
   Stack: { Screen: () => null },
+  usePathname: () => '/preparations/new',
 }));
 
 jest.mock('@/infrastructure/inventory/inventory-repository', () => ({
@@ -262,7 +263,7 @@ describe('validation finale d’une préparation', () => {
 
     expect(textOf(renderer)).toContain('Contrôle final jour par jour');
 
-    await press(renderer, 'Valider définitivement la préparation');
+    await press(renderer, 'Valider la préparation');
     await press(renderer, 'Valider et décrémenter le stock');
 
     expect(mockedCompletePreparation).toHaveBeenCalledWith(
@@ -509,7 +510,7 @@ describe('confirmation d’une équivalence générique', () => {
     expect(textOf(renderer)).not.toContain('Correspondance générique détectée');
     expect(textOf(renderer)).toContain('Équivalence générique confirmée');
 
-    await press(renderer, 'Valider ce médicament');
+    await press(renderer, 'Boîte choisie, cases remplies');
 
     expect(mockedSavePreparationProgress).toHaveBeenCalledWith(
       expect.anything(),

@@ -21,7 +21,14 @@ import { drainCreatedTreatmentForPrescription } from '@/infrastructure/prescript
 import { listActivePrescriptionsCoveringTreatments } from '@/infrastructure/prescriptions/prescription-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
-import { AppButton, AppField, Message, spacing, typography } from '@/ui';
+import {
+  AppCard,
+  AppField,
+  Message,
+  PillButton,
+  SectionLabel,
+  typography,
+} from '@/ui';
 
 import { DateField } from '../treatments/date-field';
 import {
@@ -214,7 +221,7 @@ export function PrescriptionForm({
       />
       {existingItems.length > 0 ? (
         <>
-          <Text style={styles.heading}>Traitements déjà associés</Text>
+          <SectionLabel>Traitements déjà associés</SectionLabel>
           {existingItems.map(({ item, treatment }) => (
             <ExistingItemCard
               key={item.id}
@@ -230,9 +237,9 @@ export function PrescriptionForm({
           ))}
         </>
       ) : null}
-      <Text style={styles.heading}>
+      <SectionLabel>
         {existingItems.length > 0 ? 'Nouvelles lignes' : 'Traitements'}
-      </Text>
+      </SectionLabel>
       <PrescriptionLinesSection
         ref={linesSectionRef}
         personalDatabase={personalDatabase}
@@ -242,9 +249,9 @@ export function PrescriptionForm({
           {error}
         </Message>
       ) : null}
-      <AppButton
+      <PillButton
+        disabled={saving}
         label={submitLabel}
-        loading={saving}
         onPress={() => void submit()}
       />
       <PrescriptionReplacementConfirmation
@@ -349,10 +356,11 @@ const PrescriptionLinesSection = forwardRef<
           onRequestNewTreatment={() => requestNewTreatmentFor(line.key)}
         />
       ))}
-      <AppButton
+      <PillButton
+        height={46}
         label="Ajouter une ligne"
-        variant="secondary"
         onPress={addLine}
+        tone="outline"
       />
     </>
   );
@@ -370,18 +378,19 @@ function ExistingItemCard({
   onRemove?: () => void;
 }) {
   return (
-    <View style={styles.existingItem}>
-      <Text style={typography.heading}>{treatment.specialtyName}</Text>
-      <Text>{describePrescriptionItem(item)}</Text>
+    <AppCard tone="muted">
+      <Text style={styles.itemName}>{treatment.specialtyName}</Text>
+      <Text style={typography.detail}>{describePrescriptionItem(item)}</Text>
       {onRemove ? (
-        <AppButton
+        <PillButton
+          disabled={removing}
+          height={40}
           label="Retirer ce traitement"
-          variant="quiet"
-          loading={removing}
           onPress={onRemove}
+          tone="destructive"
         />
       ) : null}
-    </View>
+    </AppCard>
   );
 }
 
@@ -431,7 +440,6 @@ function toNumberOrNull(text: string): number | null {
 }
 
 const styles = StyleSheet.create({
-  existingItem: { gap: spacing.xs, marginTop: spacing.sm },
-  form: { gap: spacing.md },
-  heading: { ...typography.heading, marginTop: spacing.md },
+  form: { gap: 12 },
+  itemName: { ...typography.itemTitle, fontSize: 14.5, lineHeight: 19 },
 });

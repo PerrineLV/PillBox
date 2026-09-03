@@ -40,6 +40,21 @@ export async function recordAsNeededIntake(
   return result.lastInsertRowId;
 }
 
+/**
+ * Retour immédiat sur une prise enregistrée d'un seul geste depuis l'accueil.
+ * Aucun mouvement de stock n'ayant été écrit à l'enregistrement, il n'y a rien
+ * à compenser : la ligne disparaît, sans trace ni ajustement.
+ */
+export async function deleteAsNeededIntake(
+  database: SQLiteDatabase,
+  id: number,
+): Promise<void> {
+  await database.runAsync(
+    'DELETE FROM as_needed_intake_records WHERE id = ?',
+    id,
+  );
+}
+
 export async function listAsNeededIntakes(
   database: SQLiteDatabase,
   treatmentId: number,

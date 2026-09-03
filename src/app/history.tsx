@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -20,27 +20,32 @@ import {
 import { listTimelineEvents } from '@/infrastructure/history/timeline-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
-  Badge,
-  Card,
+  AppScreen,
   EmptyState,
+  FilterPills,
+  INTAKE_SLOT_LABELS,
   LoadingState,
   Message,
-  Screen,
-  SectionTitle,
+  STOCK_MOVEMENT_TYPE_LABELS,
+  Section,
+  SeverityBadge,
+  StackHeader,
+  WEEKDAY_LABELS,
   colors,
   radii,
-  sizes,
-  spacing,
+  severity as severityScale,
   typography,
+  type SeverityLevel,
 } from '@/ui';
-import {
-  INTAKE_SLOT_LABELS,
-  STOCK_MOVEMENT_TYPE_LABELS,
-  WEEKDAY_LABELS,
-} from '@/ui/labels';
 
-type Period = 7 | 30 | 90 | 'all';
-type BadgeTone = 'neutral' | 'success' | 'warning' | 'danger';
+type Period = '7' | '30' | '90' | 'all';
+
+const PERIODS: readonly { value: Period; label: string }[] = [
+  { value: '7', label: '7 jours' },
+  { value: '30', label: '30 jours' },
+  { value: '90', label: '90 jours' },
+  { value: 'all', label: 'Tout' },
+];
 
 type EventGroup = Readonly<{
   key: string;
@@ -77,7 +82,7 @@ export default function TimelineScreen() {
   const database = useSQLiteContext();
   const [events, setEvents] = useState<TimelineEvent[] | null>(null);
   const [treatments, setTreatments] = useState<Treatment[]>([]);
-  const [period, setPeriod] = useState<Period>(90);
+  const [period, setPeriod] = useState<Period>('90');
   const [treatmentId, setTreatmentId] = useState<number | null>(
     treatmentIdParam ? Number(treatmentIdParam) : null,
   );
@@ -86,7 +91,7 @@ export default function TimelineScreen() {
   );
   const [error, setError] = useState<string | null>(null);
 
-  const startDate = period === 'all' ? null : dateDaysAgo(period - 1);
+  const startDate = period === 'all' ? null : dateDaysAgo(Number(period) - 1);
 
   const load = useCallback(async () => {
     try {
@@ -103,6 +108,7 @@ export default function TimelineScreen() {
       );
     }
   }, [database, treatmentId, startDate]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -124,119 +130,130 @@ export default function TimelineScreen() {
     .reverse();
 
   return (
-    <Screen>
-      <Stack.Screen options={{ headerShown: true, title: 'Chronologie' }} />
-      <Text style={typography.title}>Chronologie</Text>
-      <Message>
-        Vue de consultation, construite à partir de l’historique déjà enregistré
-        : elle ne modifie ni les posologies ni les préparations passées.
-      </Message>
-      <SectionTitle>Période</SectionTitle>
-      <View style={styles.chips}>
-        {([7, 30, 90, 'all'] as const).map((value) => (
-          <FilterChip
-            key={String(value)}
-            label={value === 'all' ? 'Tout' : `${value} jours`}
-            selected={period === value}
-            onPress={() => setPeriod(value)}
-          />
-        ))}
-      </View>
-      <SectionTitle>Traitement</SectionTitle>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chips}
-      >
-        <FilterChip
-          label="Tous"
-          selected={treatmentId === null}
-          onPress={() => setTreatmentId(null)}
+    <AppScreen
+      header={
+        <StackHeader
+          subtitle="Vue de consultation : rien n’y est modifiable"
+          title="Chronologie"
         />
-        {treatments.map((treatment) => (
-          <FilterChip
-            key={treatment.id}
-            label={treatment.specialtyName}
-            selected={treatmentId === treatment.id}
-            onPress={() => setTreatmentId(treatment.id)}
-          />
-        ))}
-      </ScrollView>
-      <SectionTitle>Type d’événement</SectionTitle>
-      <View style={styles.chips}>
-        {EVENT_GROUPS.map((group) => (
-          <FilterChip
-            key={group.key}
-            label={group.label}
-            selected={selectedGroups.includes(group.key)}
-            onPress={() => toggleGroup(group.key)}
-          />
-        ))}
-      </View>
+      }
+    >
+      <FilterPills
+        accessibilityLabel="Période affichée"
+        onChange={(next) => setPeriod(next)}
+        options={PERIODS}
+        value={period}
+      />
+      <Section label="Type d’événement">
+        <View style={styles.groupFilters}>
+          {EVENT_GROUPS.map((group) => (
+            <Chip
+              key={group.key}
+              label={group.label}
+              onPress={() => toggleGroup(group.key)}
+              selected={selectedGroups.includes(group.key)}
+            />
+          ))}
+        </View>
+      </Section>
+      {treatments.length > 0 ? (
+        <Section label="Traitement">
+          <ScrollView
+            contentContainerStyle={styles.treatmentFilters}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+          >
+            <Chip
+              label="Tous"
+              onPress={() => setTreatmentId(null)}
+              selected={treatmentId === null}
+            />
+            {treatments.map((treatment) => (
+              <Chip
+                key={treatment.id}
+                label={treatment.specialtyName}
+                onPress={() => setTreatmentId(treatment.id)}
+                selected={treatmentId === treatment.id}
+              />
+            ))}
+          </ScrollView>
+        </Section>
+      ) : null}
+
       {error ? <Message tone="error">{error}</Message> : null}
       {events === null && !error ? (
         <LoadingState label="Chargement de la chronologie…" />
       ) : null}
       {events !== null && filtered.length === 0 ? (
         <EmptyState
-          title="Aucun événement dans cette sélection"
           description="Élargissez la période ou les types d’événement."
+          title="Aucun événement dans cette sélection"
         />
       ) : null}
-      {filtered.map((event) => (
-        <TimelineEventCard key={event.id} event={event} />
-      ))}
-    </Screen>
+
+      {filtered.length > 0 ? (
+        <View style={styles.thread}>
+          <View accessibilityElementsHidden style={styles.rail} />
+          {filtered.map((event) => (
+            <TimelineEntry event={event} key={event.id} />
+          ))}
+        </View>
+      ) : null}
+    </AppScreen>
   );
 }
 
-function TimelineEventCard({ event }: { event: TimelineEvent }) {
-  const { title, detail, tone } = describeEvent(event);
+function TimelineEntry({ event }: Readonly<{ event: TimelineEvent }>) {
+  const { title, detail, level } = describeEvent(event);
   return (
-    <Card>
-      <View style={styles.cardHeader}>
-        <Text style={typography.label}>{event.specialtyName}</Text>
-        <Badge label={title} tone={tone} />
+    <View style={styles.entry}>
+      <View
+        accessibilityElementsHidden
+        style={[styles.dot, { backgroundColor: severityScale[level].text }]}
+      />
+      <View style={styles.entryBody}>
+        <Text style={styles.occurredAt}>
+          {formatEventDate(event.occurredAt)}
+        </Text>
+        <View style={styles.entryCard}>
+          <View style={styles.entryHead}>
+            <Text style={styles.entryName}>{event.specialtyName}</Text>
+            <SeverityBadge label={title} level={level} />
+          </View>
+          {detail ? <Text style={styles.entryDetail}>{detail}</Text> : null}
+        </View>
       </View>
-      <Text style={typography.caption}>
-        {formatEventDate(event.occurredAt)}
-      </Text>
-      {detail ? <Text style={typography.body}>{detail}</Text> : null}
-    </Card>
+    </View>
   );
 }
 
 function describeEvent(event: TimelineEvent): {
   title: string;
   detail: string | null;
-  tone: BadgeTone;
+  level: SeverityLevel;
 } {
   switch (event.type) {
     case 'TREATMENT_CREATED':
-      return { title: 'Traitement créé', detail: null, tone: 'neutral' };
+      return { title: 'Traitement créé', detail: null, level: 'neutral' };
     case 'DOSAGE_MODIFIED':
-      return { title: 'Posologie modifiée', detail: null, tone: 'neutral' };
+      return { title: 'Posologie modifiée', detail: null, level: 'neutral' };
     case 'PHASE_STARTED':
       return {
         title: 'Nouvelle posologie en vigueur',
         detail: describeFrequency(event.frequency),
-        tone: 'neutral',
+        level: 'neutral',
       };
     case 'DOSAGE_INTERRUPTED':
-      return {
-        title: 'Posologie interrompue',
-        detail: null,
-        tone: 'warning',
-      };
+      return { title: 'Posologie interrompue', detail: null, level: 'warning' };
     case 'TREATMENT_ARCHIVED':
-      return { title: 'Traitement archivé', detail: null, tone: 'warning' };
+      return { title: 'Traitement archivé', detail: null, level: 'warning' };
     case 'TREATMENT_REACTIVATED':
-      return { title: 'Traitement réactivé', detail: null, tone: 'success' };
+      return { title: 'Traitement réactivé', detail: null, level: 'ok' };
     case 'PREPARATION_COMPLETED':
       return {
         title: 'Préparation validée',
         detail: `Semaine du ${formatLongFrenchCivilDate(event.startDate)} au ${formatLongFrenchCivilDate(event.endDate)}`,
-        tone: 'success',
+        level: 'ok',
       };
     case 'BOX_USED':
       return {
@@ -246,7 +263,7 @@ function describeEvent(event: TimelineEvent): {
           (event.matchedSpecialtyName
             ? ` · équivalence générique confirmée : ${event.matchedSpecialtyName}`
             : ''),
-        tone: 'success',
+        level: 'ok',
       };
     case 'STOCK_MOVEMENT':
       return {
@@ -254,13 +271,13 @@ function describeEvent(event: TimelineEvent): {
         detail:
           `${event.quantityDelta > 0 ? '+' : ''}${event.quantityDelta} · ${event.explanation}` +
           ` · lot ${event.lot ?? 'non renseigné'} · péremption ${formatLongFrenchCivilDate(event.expirationDate)}`,
-        tone: 'neutral',
+        level: 'neutral',
       };
     case 'INTAKE_RECORDED':
       return {
         title: `Prise du ${INTAKE_SLOT_LABELS[event.slot].toLowerCase()} ${event.status === 'TAKEN' ? 'prise' : 'ignorée'}`,
         detail: `${formatHalfUnits(event.quantityHalfUnits)} unité(s) le ${formatLongFrenchCivilDate(event.date)}`,
-        tone: event.status === 'TAKEN' ? 'success' : 'warning',
+        level: event.status === 'TAKEN' ? 'ok' : 'warning',
       };
   }
 }
@@ -279,23 +296,26 @@ function formatEventDate(occurredAt: string): string {
     : formatFrenchDateTime(occurredAt);
 }
 
-function FilterChip({
+function Chip({
   label,
   selected,
   onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress(): void;
-}) {
+}: Readonly<{ label: string; selected: boolean; onPress(): void }>) {
   return (
     <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityLabel={label}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: selected }}
       onPress={onPress}
-      style={[styles.chip, selected && styles.chipSelected]}
+      style={({ pressed }) => [
+        styles.chip,
+        selected ? styles.chipSelected : styles.chipIdle,
+        pressed && styles.pressed,
+      ]}
     >
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+      <Text
+        style={[styles.chipText, selected ? styles.chipTextSelected : null]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -309,24 +329,75 @@ function dateDaysAgo(days: number): string {
 }
 
 const styles = StyleSheet.create({
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  groupFilters: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  treatmentFilters: { flexDirection: 'row', gap: 7, paddingRight: 20 },
   chip: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+    alignItems: 'center',
     borderRadius: radii.pill,
     borderWidth: 1,
-    minHeight: sizes.touch,
+    height: 34,
     justifyContent: 'center',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: 14,
   },
-  chipSelected: { backgroundColor: colors.brand, borderColor: colors.brand },
-  chipText: typography.caption,
-  chipTextSelected: { color: colors.surface, fontWeight: '700' },
-  cardHeader: {
-    alignItems: 'center',
+  chipSelected: {
+    backgroundColor: colors.headerDark,
+    borderColor: colors.headerDark,
+  },
+  chipIdle: { backgroundColor: colors.surface, borderColor: colors.cardBorder },
+  chipText: { color: colors.textMuted, fontSize: 12.5, fontWeight: '600' },
+  chipTextSelected: { color: colors.onDark, fontWeight: '700' },
+  thread: { gap: 14, position: 'relative' },
+  rail: {
+    backgroundColor: colors.cardBorder,
+    bottom: 8,
+    left: 4,
+    position: 'absolute',
+    top: 8,
+    width: 2,
+  },
+  entry: { flexDirection: 'row', gap: 12 },
+  dot: {
+    borderColor: colors.background,
+    borderRadius: radii.pill,
+    borderWidth: 2,
+    height: 10,
+    marginTop: 3,
+    width: 10,
+  },
+  entryBody: { flex: 1, gap: 5, minWidth: 0 },
+  occurredAt: {
+    color: colors.textTertiary,
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 13,
+  },
+  entryCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.cardBorder,
+    borderRadius: 15,
+    borderWidth: 1,
+    gap: 6,
+    padding: 12,
+  },
+  entryHead: {
+    alignItems: 'flex-start',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.sm,
+    gap: 8,
     justifyContent: 'space-between',
   },
+  entryName: {
+    ...typography.itemTitle,
+    flex: 1,
+    fontSize: 13.5,
+    lineHeight: 17,
+    minWidth: 0,
+  },
+  entryDetail: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 17,
+  },
+  pressed: { opacity: 0.72 },
 });
