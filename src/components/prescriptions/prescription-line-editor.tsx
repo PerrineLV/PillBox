@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   suggestedToleranceDays,
@@ -10,14 +10,15 @@ import {
 import type { Treatment } from '@/domain/treatments/treatment';
 import { detectControlledDispensingMention } from '@/infrastructure/medications/medication-reference';
 import {
-  AppButton,
+  AppCard,
   AppField,
-  Badge,
-  Card,
+  DenseList,
+  MetaBadge,
+  PillButton,
   SelectField,
+  Toggle,
   colors,
-  sizes,
-  spacing,
+  radii,
   typography,
 } from '@/ui';
 
@@ -114,7 +115,7 @@ export function PrescriptionLineEditor({
 
   if (line.treatment === null) {
     return (
-      <Card style={styles.card}>
+      <AppCard>
         {choosingExisting ? (
           <>
             <SelectField
@@ -132,10 +133,11 @@ export function PrescriptionLineEditor({
                 if (treatment) onChange(attachTreatmentToLine(line, treatment));
               }}
             />
-            <AppButton
+            <PillButton
+              height={44}
               label="Annuler"
-              variant="quiet"
               onPress={() => setChoosingExisting(false)}
+              tone="outline"
             />
           </>
         ) : (
@@ -144,21 +146,23 @@ export function PrescriptionLineEditor({
               Renouvellement d’un traitement existant, ou nouveau traitement
               prescrit sur cette ordonnance ?
             </Text>
-            <AppButton
-              label="Renouveler un traitement existant"
-              variant="secondary"
+            <PillButton
               disabled={treatments.length === 0}
+              height={46}
+              label="Renouveler un traitement existant"
               onPress={() => setChoosingExisting(true)}
+              tone="outline"
             />
-            <AppButton
+            <PillButton
+              height={46}
               label="Ajouter un nouveau traitement"
-              variant="secondary"
               onPress={onRequestNewTreatment}
+              tone="outline"
             />
           </>
         )}
         <RemoveLineButton onPress={onRemove} />
-      </Card>
+      </AppCard>
     );
   }
 
@@ -166,12 +170,9 @@ export function PrescriptionLineEditor({
   const isAsNeeded = treatment.dosageKind === 'AS_NEEDED';
 
   return (
-    <Card style={styles.card}>
+    <AppCard>
       <Text style={styles.name}>{treatment.specialtyName}</Text>
-      <Badge
-        label={isAsNeeded ? 'Si besoin' : 'Posologie planifiée'}
-        tone="neutral"
-      />
+      <MetaBadge label={isAsNeeded ? 'Si besoin' : 'Posologie planifiée'} />
       {isAsNeeded ? (
         <AppField
           label="Nombre de boîtes délivrées"
@@ -212,18 +213,18 @@ export function PrescriptionLineEditor({
           )}
         </>
       )}
-      <View style={styles.toggle}>
-        <Text>Délivrance fractionnée</Text>
-        <Switch
-          value={line.dispensingMode === 'FRACTIONAL'}
-          onValueChange={(fractional) =>
+      <DenseList tone="muted">
+        <Toggle
+          label="Délivrance fractionnée"
+          onChange={(fractional) =>
             onChange({
               ...line,
               dispensingMode: fractional ? 'FRACTIONAL' : 'FULL',
             })
           }
+          value={line.dispensingMode === 'FRACTIONAL'}
         />
-      </View>
+      </DenseList>
       {line.dispensingMode === 'FRACTIONAL' ? (
         <>
           <AppField
@@ -247,7 +248,7 @@ export function PrescriptionLineEditor({
         </>
       ) : null}
       <RemoveLineButton onPress={onRemove} />
-    </Card>
+    </AppCard>
   );
 }
 
@@ -267,39 +268,46 @@ function QuantityKindChoice({
       onPress={onPress}
       style={[styles.choice, selected && styles.choiceSelected]}
     >
-      <Text>{label}</Text>
+      <Text
+        numberOfLines={1}
+        style={[styles.choiceText, selected && styles.choiceTextSelected]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
 
 function RemoveLineButton({ onPress }: { onPress: () => void }) {
   return (
-    <AppButton label="Retirer cette ligne" variant="quiet" onPress={onPress} />
+    <PillButton
+      height={40}
+      label="Retirer cette ligne"
+      onPress={onPress}
+      tone="destructive"
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  card: { gap: spacing.sm, marginTop: spacing.md },
   choice: {
-    borderColor: colors.borderStrong,
-    borderRadius: 8,
-    borderWidth: 1,
-    minHeight: sizes.touch,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
+    alignItems: 'center',
+    borderColor: colors.cardBorder,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 42,
+    minWidth: 0,
+    paddingHorizontal: 12,
   },
   choiceSelected: {
-    backgroundColor: colors.brandSoft,
-    borderColor: colors.brand,
-    borderWidth: 2,
+    backgroundColor: colors.headerDark,
+    borderColor: colors.headerDark,
   },
-  name: typography.heading,
-  prompt: { color: colors.textMuted },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  toggle: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: spacing.xs,
-  },
+  choiceText: { color: colors.textMuted, fontSize: 12.5, fontWeight: '700' },
+  choiceTextSelected: { color: colors.onDark },
+  name: { ...typography.cardTitle, fontSize: 15.5, lineHeight: 19 },
+  prompt: typography.detail,
+  row: { flexDirection: 'row', gap: 7 },
 });

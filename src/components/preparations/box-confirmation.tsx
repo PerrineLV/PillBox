@@ -1,4 +1,4 @@
-import { Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import type {
@@ -6,9 +6,16 @@ import type {
   BoxVerificationMethod,
 } from '@/domain/preparations/preparation';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
-import { AppButton, Badge } from '@/ui';
-
-import { styles } from './styles';
+import {
+  BoxIcon,
+  PillButton,
+  SeverityBadge,
+  colors,
+  radii,
+  severity as severityScale,
+  typography,
+  type SeverityLevel,
+} from '@/ui';
 
 export type PendingBox = Readonly<{
   method: BoxVerificationMethod;
@@ -33,104 +40,109 @@ export function BoxConfirmation({
 }) {
   const { verification } = pending;
   const scanned = pending.method === 'SCAN';
+  const partial = verification.status === 'PARTIAL';
+  const isFefo = verification.status === 'VALID' && verification.isFefo;
+  const level: SeverityLevel = partial || !isFefo ? 'high' : 'ok';
+  const box = verification.box;
 
-  if (verification.status === 'PARTIAL') {
-    const { box, quantityHalfUnits, remainingAfterHalfUnits } = verification;
-    return (
-      <View style={styles.warning}>
-        <Text style={styles.warningTitle}>
-          Boîte insuffisante seule : contribution partielle
-        </Text>
-        <Badge
-          label={
-            scanned
-              ? 'Vérifiée par scan DataMatrix'
-              : 'Choisie dans le stock, sans scan'
-          }
-          tone={scanned ? 'success' : 'warning'}
-        />
-        <Text>
-          Lot {box.lot ?? 'non renseigné'} · péremption{' '}
-          {formatLongFrenchCivilDate(box.expirationDate)}
-        </Text>
-        {pending.matchedSpecialtyName ? (
-          <Badge
-            label={`Équivalence générique confirmée : ${pending.matchedSpecialtyName}`}
-            tone="warning"
-          />
-        ) : null}
-        <Text>
-          Cette boîte couvre {formatHalfUnits(quantityHalfUnits)}. Il restera{' '}
-          {formatHalfUnits(remainingAfterHalfUnits)} à couvrir avec une seconde
-          boîte.
-        </Text>
-        <AppButton
-          loading={saving}
-          label="Utiliser cette boîte entièrement"
-          onPress={() => void onValidate(false)}
-        />
-        <AppButton
-          label={
-            scanned ? 'Scanner une autre boîte' : 'Choisir une autre boîte'
-          }
-          variant="secondary"
-          onPress={onRestart}
-        />
-      </View>
-    );
-  }
-
-  const { box, isFefo, recommendedBox } = verification;
   return (
-    <View style={isFefo ? styles.verified : styles.warning}>
-      <Text style={styles.warningTitle}>
-        {isFefo
-          ? 'Boîte vérifiée'
-          : 'Boîte valide, mais un autre lot périme plus tôt'}
-      </Text>
-      <Badge
+    <View
+      style={[
+        styles.panel,
+        { backgroundColor: severityScale[level].background },
+      ]}
+    >
+      <View style={styles.head}>
+        <BoxIcon color={severityScale[level].text} size={19} />
+        <Text style={[styles.title, { color: severityScale[level].text }]}>
+          {partial
+            ? 'Boîte insuffisante seule : contribution partielle'
+            : isFefo
+              ? `Boîte vérifiée · lot ${box.lot ?? 'non renseigné'}`
+              : 'Boîte valide, mais un autre lot périme plus tôt'}
+        </Text>
+      </View>
+
+      <SeverityBadge
         label={
           scanned
             ? 'Vérifiée par scan DataMatrix'
             : 'Choisie dans le stock, sans scan'
         }
-        tone={scanned ? 'success' : 'warning'}
+        level={scanned ? 'ok' : 'warning'}
       />
-      <Text>
-        Lot {box.lot ?? 'non renseigné'} · péremption{' '}
-        {formatLongFrenchCivilDate(box.expirationDate)}
+
+      <Text style={[styles.body, { color: severityScale[level].text }]}>
+        {scanned
+          ? `Scannez le DataMatrix de la boîte réellement utilisée. Lot ${box.lot ?? 'non renseigné'}, péremption ${formatLongFrenchCivilDate(box.expirationDate)}.`
+          : `Boîte choisie dans le stock : vérifiez le lot ${box.lot ?? 'non renseigné'} et la péremption du ${formatLongFrenchCivilDate(box.expirationDate)} sur la boîte que vous avez en main.`}
       </Text>
+
       {pending.matchedSpecialtyName ? (
-        <Badge
+        <SeverityBadge
           label={`Équivalence générique confirmée : ${pending.matchedSpecialtyName}`}
-          tone="warning"
+          level="warning"
         />
       ) : null}
-      {!isFefo ? (
-        <Text>
-          Lot recommandé : {recommendedBox.lot ?? 'non renseigné'} · péremption{' '}
-          {formatLongFrenchCivilDate(recommendedBox.expirationDate)}. Vous
-          pouvez continuer en confirmant cet avertissement.
+
+      {partial ? (
+        <Text style={[styles.body, { color: severityScale[level].text }]}>
+          Cette boîte couvre {formatHalfUnits(verification.quantityHalfUnits)}.
+          Il restera {formatHalfUnits(verification.remainingAfterHalfUnits)} à
+          couvrir avec une seconde boîte.
         </Text>
-      ) : null}
-      {isFefo ? (
-        <Text>
+      ) : isFefo ? (
+        <Text style={[styles.body, { color: severityScale[level].text }]}>
           Cette boîte couvre toutes les prises restantes. Aucune autre boîte
           n’est nécessaire.
         </Text>
-      ) : null}
-      <AppButton
-        loading={saving}
+      ) : (
+        <Text style={[styles.body, { color: severityScale[level].text }]}>
+          Lot recommandé : {verification.recommendedBox.lot ?? 'non renseigné'}{' '}
+          · péremption{' '}
+          {formatLongFrenchCivilDate(
+            verification.recommendedBox.expirationDate,
+          )}
+          . Vous pouvez continuer en confirmant cet avertissement.
+        </Text>
+      )}
+
+      <PillButton
+        disabled={saving}
+        height={54}
         label={
-          isFefo ? 'Valider ce médicament' : 'Utiliser quand même cette boîte'
+          !partial && !isFefo
+            ? 'Utiliser quand même cette boîte'
+            : scanned
+              ? 'Boîte scannée, cases remplies'
+              : 'Boîte choisie, cases remplies'
         }
-        onPress={() => void onValidate(!isFefo)}
+        onPress={() => void onValidate(!partial && !isFefo)}
+        tone="accent"
       />
-      <AppButton
+      <PillButton
+        height={44}
         label={scanned ? 'Scanner une autre boîte' : 'Choisir une autre boîte'}
-        variant="secondary"
         onPress={onRestart}
+        tone="outline"
       />
+      <Text style={styles.notice}>
+        Le stock ne sera décrémenté qu’à la validation finale.
+      </Text>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  panel: { borderRadius: radii.md, gap: 9, padding: 14 },
+  head: { alignItems: 'flex-start', flexDirection: 'row', gap: 9 },
+  title: {
+    flex: 1,
+    fontSize: 13.5,
+    fontWeight: '700',
+    lineHeight: 18,
+    minWidth: 0,
+  },
+  body: { fontSize: 12, fontWeight: '500', lineHeight: 17 },
+  notice: { ...typography.micro, color: colors.textMuted, textAlign: 'center' },
+});

@@ -5,18 +5,27 @@ import {
   renewalRunsOutBeforeWindowLabel,
   renewalRuptureLabel,
   renewalTheoreticalRenewalLabel,
-  renewalUrgencyTone,
 } from './renewal-labels';
-import type { RenewalItem } from '@/domain/renewal/renewal-list';
+import type {
+  RenewalItem,
+  RenewalUrgency,
+} from '@/domain/renewal/renewal-list';
 import {
-  Badge,
-  Card,
+  AppCard,
   EmptyState,
   RENEWAL_URGENCY_LABELS,
+  SeverityBadge,
   colors,
-  spacing,
   typography,
+  type SeverityLevel,
 } from '@/ui';
+
+/** Gravité affichée pour une urgence de renouvellement, selon l'échelle commune. */
+export function renewalSeverity(urgency: RenewalUrgency): SeverityLevel {
+  if (urgency === 'INSUFFICIENT_FOR_NEXT_PREPARATION') return 'high';
+  if (urgency === 'RUNS_OUT_SOON') return 'warning';
+  return 'neutral';
+}
 
 export function RenewalList({
   items,
@@ -26,43 +35,58 @@ export function RenewalList({
   if (items.length === 0) {
     return (
       <EmptyState
-        title="Rien à renouveler"
         description="Aucun médicament ne nécessite d’action selon la prévision de stock."
+        title="Rien à renouveler"
       />
     );
   }
-
   return (
     <View style={styles.list}>
-      {items.map((item) => (
-        <Card key={item.specialtyCis} style={styles.card}>
-          <Text style={typography.heading}>{item.specialtyName}</Text>
-          <Badge
-            label={RENEWAL_URGENCY_LABELS[item.urgency]}
-            tone={renewalUrgencyTone(item.urgency)}
-          />
-          <Text style={typography.body}>{renewalAvailabilityLabel(item)}</Text>
-          {renewalRuptureLabel(item) !== null ? (
-            <Text style={typography.caption}>{renewalRuptureLabel(item)}</Text>
-          ) : null}
-          {renewalTheoreticalRenewalLabel(item) !== null ? (
-            <Text style={typography.caption}>
-              {renewalTheoreticalRenewalLabel(item)}
+      {items.map((item) => {
+        const level = renewalSeverity(item.urgency);
+        const rupture = renewalRuptureLabel(item);
+        const window = renewalTheoreticalRenewalLabel(item);
+        const blocked = renewalRunsOutBeforeWindowLabel(item);
+        return (
+          <AppCard key={item.specialtyCis}>
+            <View style={styles.head}>
+              <Text style={styles.name}>{item.specialtyName}</Text>
+              <SeverityBadge
+                label={RENEWAL_URGENCY_LABELS[item.urgency]}
+                level={level}
+              />
+            </View>
+            <Text style={typography.detail}>
+              {renewalAvailabilityLabel(item)}
             </Text>
-          ) : null}
-          {renewalRunsOutBeforeWindowLabel(item) !== null ? (
-            <Text style={[typography.caption, styles.alert]}>
-              {renewalRunsOutBeforeWindowLabel(item)}
-            </Text>
-          ) : null}
-        </Card>
-      ))}
+            {rupture !== null ? (
+              <Text style={typography.micro}>{rupture}</Text>
+            ) : null}
+            {window !== null ? (
+              <Text style={typography.micro}>{window}</Text>
+            ) : null}
+            {blocked !== null ? (
+              <Text style={styles.blocked}>{blocked}</Text>
+            ) : null}
+          </AppCard>
+        );
+      })}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  alert: { color: colors.danger },
-  card: { gap: spacing.sm },
-  list: { gap: spacing.md },
+  list: { gap: 12 },
+  head: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  name: { ...typography.itemTitle, flex: 1, fontSize: 15.5, minWidth: 0 },
+  blocked: {
+    ...typography.micro,
+    color: colors.destructive,
+    fontWeight: '700',
+  },
 });

@@ -1,4 +1,4 @@
-import { colors, sizes } from '@/ui/theme';
+import { colors, severity, sizes, toastToneColors } from '@/ui/theme';
 
 function luminance(hex: string): number {
   const channels = hex
@@ -20,7 +20,7 @@ function contrast(foreground: string, background: string): number {
 
 describe('design system PillBox', () => {
   it('garantit une cible tactile commune supérieure au minimum accessible', () => {
-    expect(sizes.touch).toBeGreaterThanOrEqual(44);
+    expect(sizes.minTouch).toBeGreaterThanOrEqual(44);
   });
 
   it('conserve un contraste AA pour les textes et actions principales', () => {
@@ -31,6 +31,37 @@ describe('design system PillBox', () => {
     expect(contrast(colors.danger, colors.dangerSoft)).toBeGreaterThanOrEqual(
       4.5,
     );
+  });
+
+  it('conserve un contraste AA pour chaque niveau de l’échelle de gravité', () => {
+    for (const level of Object.values(severity)) {
+      expect(contrast(level.text, level.background)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  });
+
+  it('conserve un contraste AA sur l’en-tête sombre', () => {
+    expect(contrast(colors.onDark, colors.headerDark)).toBeGreaterThanOrEqual(
+      4.5,
+    );
+    expect(
+      contrast(colors.onDarkMuted, colors.headerDark),
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrast(colors.headerDark, colors.accentOnDark),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('conserve un contraste AA pour chaque tonalité de toast sur son fond sombre', () => {
+    // La tonalité d'un toast ne se lit qu'à son icône : si l'une d'elles passe
+    // sous le seuil, l'information de gravité disparaît sans autre repli.
+    for (const tone of Object.values(toastToneColors)) {
+      expect(contrast(tone, colors.headerDark)).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(
+      contrast(colors.accentOnDark, colors.headerDark),
+    ).toBeGreaterThanOrEqual(4.5);
   });
 
   it('conserve un contraste AA pour les bandeaux d’information colorés', () => {

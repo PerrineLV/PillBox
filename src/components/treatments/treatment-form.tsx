@@ -1,14 +1,7 @@
 import { useCallback, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import type { SQLiteDatabase } from 'expo-sqlite';
-import {
-  Pressable,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { isTreatmentWithoutStock } from '@/domain/inventory/box-attachment';
 import {
@@ -24,24 +17,36 @@ import {
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import { listGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import {
-  AppButton,
+  AppCard,
   AppField,
+  Banner,
+  ChoicePills,
+  DenseList,
+  DenseRow,
   INTAKE_SLOT_LABELS,
   Message,
+  PillButton,
+  SectionLabel,
   SelectField,
-  SlotCard,
-  SlotGrid,
+  Stepper,
+  Toggle,
   WEEKDAY_LABELS,
   WEEKDAY_OPTIONS,
   colors,
-  radii,
-  sizes,
-  spacing,
   typography,
 } from '@/ui';
 
 import { nextCivilDay, pickerDateToCivilDate } from './civil-date';
 import { DateField } from './date-field';
+
+type FrequencyChoice = 'daily' | 'interval' | 'weekly';
+
+const FREQUENCY_OPTIONS: readonly { value: FrequencyChoice; label: string }[] =
+  [
+    { value: 'daily', label: 'Chaque jour' },
+    { value: 'interval', label: 'Tous les N jours' },
+    { value: 'weekly', label: 'Chaque semaine' },
+  ];
 
 type Props = {
   /**
@@ -52,20 +57,25 @@ type Props = {
   initialValue: TreatmentDraft;
   /**
    * `null` pour un traitement en cours de création, pas encore enregistré :
-   * transmis au calcul du signal de stock manquant (ticket 29), qui ne peut
-   * alors s'appuyer sur aucune équivalence générique mémorisée pour lui.
+   * transmis au calcul du signal de stock manquant, qui ne peut alors
+   * s'appuyer sur aucune équivalence générique mémorisée pour lui.
    */
   treatmentId: number | null;
   /**
    * CIS d'équivalences génériques déjà confirmées explicitement pendant
-   * cette création (ticket 29), en attente d'écriture en base faute
-   * d'identifiant : comptent comme couvrant le traitement au même titre
-   * qu'une équivalence mémorisée, pour ne jamais afficher un signal que
-   * cette confirmation contredirait. Sans effet une fois `treatmentId` connu.
+   * cette création, en attente d'écriture en base faute d'identifiant :
+   * comptent comme couvrant le traitement au même titre qu'une équivalence
+   * mémorisée. Sans effet une fois `treatmentId` connu.
    */
   pendingEquivalenceCis?: readonly string[];
   submitLabel: string;
   onSubmit: (value: TreatmentDraft) => Promise<void>;
+  /**
+   * Masqué lorsque l'écran appelant décide déjà de l'inclusion (création,
+   * où le type de posologie est choisi en tête d'écran) : deux contrôles pour
+   * le même réglage pourraient se contredire à l'écran.
+   */
+  showPillboxToggle?: boolean;
 };
 
 export function TreatmentForm({
@@ -75,6 +85,7 @@ export function TreatmentForm({
   pendingEquivalenceCis = [],
   submitLabel,
   onSubmit,
+  showPillboxToggle = true,
 }: Props) {
   const database = personalDatabase;
   const router = useRouter();
@@ -86,14 +97,11 @@ export function TreatmentForm({
   const [saving, setSaving] = useState(false);
   const [withoutStock, setWithoutStock] = useState<boolean | null>(null);
   // Recréé à chaque rendu par l'écran de création : comparer son contenu
-  // plutôt que sa référence évite de recharger le stock à chaque frappe dans
-  // le formulaire.
+  // plutôt que sa référence évite de recharger le stock à chaque frappe.
   const pendingEquivalenceCisKey = pendingEquivalenceCis.join(',');
 
   // Recalculé à chaque focus, pas seulement au montage : l'écran reste monté
-  // dans la pile de navigation pendant un aller-retour vers l'ajout de boîte
-  // (ticket 29), un simple useEffect ne se redéclencherait donc jamais au
-  // retour.
+  // dans la pile pendant un aller-retour vers l'ajout de boîte.
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
@@ -158,23 +166,18 @@ export function TreatmentForm({
 
   return (
     <View style={styles.form}>
-      <Text style={styles.name}>{initialValue.specialtyName}</Text>
-      <Text>CIS {initialValue.specialtyCis}</Text>
-      {initialValue.pharmaceuticalForm ? (
-        <Text>{initialValue.pharmaceuticalForm}</Text>
-      ) : null}
-      <Message tone="warning" title="Posologie à vérifier">
+      <Banner level="warning" title="Posologie à vérifier">
         La posologie est saisie par vous. Elle n’est jamais déduite du
         médicament.
-      </Message>
+      </Banner>
       {withoutStock && included ? (
         <>
-          <Message tone="warning" title="Aucune boîte en stock">
+          <Banner level="warning" title="Aucune boîte en stock">
             Aucune boîte en stock ne correspond actuellement à cette spécialité.
-          </Message>
-          <AppButton
+          </Banner>
+          <PillButton
+            height={46}
             label="Ajouter une boîte au stock"
-            variant="secondary"
             onPress={() =>
               router.push(
                 treatmentId === null
@@ -188,10 +191,12 @@ export function TreatmentForm({
                   : '/inventory/new',
               )
             }
+            tone="outline"
           />
         </>
       ) : null}
-      <Text style={styles.heading}>Phases de traitement</Text>
+
+      <SectionLabel>Phases de traitement</SectionLabel>
       {[...phases]
         .map((phase, originalIndex) => ({ phase, originalIndex }))
         .sort((a, b) =>
@@ -199,62 +204,77 @@ export function TreatmentForm({
         )
         .map(({ phase, originalIndex }, displayedIndex) =>
           isLegacyTreatmentPhase(phase) ? (
-            <View
-              key={`legacy-${phase.id ?? originalIndex}`}
-              style={styles.phase}
-            >
+            <AppCard key={`legacy-${phase.id ?? originalIndex}`}>
               <Text style={styles.phaseTitle}>Posologie existante</Text>
-              <Text style={styles.hint}>
+              <Text style={typography.micro}>
                 Conservée exactement comme avant la migration. Pour utiliser les
                 phases datées, supprimez-la puis ajoutez une phase.
               </Text>
-              {phase.dosage.map((item) => (
-                <Text key={`${item.weekday}-${item.slot}`}>
-                  {WEEKDAY_LABELS[item.weekday]} ·{' '}
-                  {INTAKE_SLOT_LABELS[item.slot]} :{' '}
-                  {formatHalfUnits(item.quantityHalfUnits)}
-                </Text>
-              ))}
-              <RemoveButton
+              <DenseList tone="muted">
+                {phase.dosage.map((item, index) => (
+                  <DenseRow
+                    first={index === 0}
+                    key={`${item.weekday}-${item.slot}`}
+                    title={`${WEEKDAY_LABELS[item.weekday]} · ${INTAKE_SLOT_LABELS[item.slot]}`}
+                    trailing={
+                      <Text style={styles.legacyQuantity}>
+                        {formatHalfUnits(item.quantityHalfUnits)}
+                      </Text>
+                    }
+                  />
+                ))}
+              </DenseList>
+              <PillButton
+                height={44}
+                label="Supprimer cette phase"
                 onPress={() =>
                   setPhases(
                     phases.filter((_item, index) => index !== originalIndex),
                   )
                 }
+                tone="destructive"
               />
-            </View>
+            </AppCard>
           ) : (
             <PhaseEditor
               key={`phase-${phase.id ?? originalIndex}`}
               number={displayedIndex + 1}
-              phase={phase}
               onChange={(value) => updatePhase(originalIndex, value)}
               onRemove={() =>
                 setPhases(
                   phases.filter((_item, index) => index !== originalIndex),
                 )
               }
+              phase={phase}
             />
           ),
         )}
-      <AppButton
+      <PillButton
+        height={46}
         label="Ajouter une phase"
-        variant="secondary"
         onPress={() => setPhases([...phases, nextPhase(phases)])}
+        tone="outline"
       />
-      <Toggle
-        label="Inclure dans le pilulier"
-        value={included}
-        onChange={setIncluded}
-      />
+
+      {showPillboxToggle ? (
+        <DenseList>
+          <Toggle
+            help="Sinon la prise reste suivie, hors préparation."
+            label="Inclure dans le pilulier"
+            onChange={setIncluded}
+            value={included}
+          />
+        </DenseList>
+      ) : null}
+
       {error ? (
         <Message tone="error" title="Traitement non enregistré">
           {error}
         </Message>
       ) : null}
-      <AppButton
+      <PillButton
+        disabled={saving}
         label={submitLabel}
-        loading={saving}
         onPress={() => void submit()}
       />
     </View>
@@ -306,71 +326,51 @@ export function PhaseEditor({
 }) {
   const frequency = phase.frequency;
   return (
-    <View style={styles.phase}>
+    <AppCard>
       <Text style={styles.phaseTitle}>Phase {number}</Text>
       <DateField
         label="Début"
-        value={phase.startDate}
         onChange={(startDate) => onChange({ ...phase, startDate })}
+        value={phase.startDate}
       />
       <DateField
         label="Fin optionnelle"
-        value={phase.endDate ?? ''}
         onChange={(value) =>
           onChange({ ...phase, endDate: value.trim() === '' ? null : value })
         }
+        value={phase.endDate ?? ''}
       />
-      <Text style={styles.label}>Fréquence</Text>
-      <View style={styles.row}>
-        <Choice
-          label="Tous les jours"
-          selected={frequency.type === 'daily'}
-          onPress={() => onChange({ ...phase, frequency: { type: 'daily' } })}
-        />
-        <Choice
-          label="Tous les N jours"
-          selected={frequency.type === 'interval'}
-          onPress={() =>
-            onChange({
-              ...phase,
-              frequency: { type: 'interval', everyNDays: 2, anchorDate: '' },
-            })
-          }
-        />
-        <Choice
-          label="1 fois/semaine"
-          selected={frequency.type === 'weekly'}
-          onPress={() =>
-            onChange({
-              ...phase,
-              frequency: { type: 'weekly', weekday: null },
-            })
-          }
-        />
-      </View>
+
+      <SectionLabel>Fréquence</SectionLabel>
+      <ChoicePills
+        height={42}
+        onChange={(next) =>
+          onChange({ ...phase, frequency: frequencyFor(next) })
+        }
+        options={FREQUENCY_OPTIONS}
+        value={frequency.type}
+      />
       {frequency.type === 'interval' ? (
         <>
           <DateField
             label="Date d’ancrage"
-            value={frequency.anchorDate}
             onChange={(anchorDate) =>
               onChange({ ...phase, frequency: { ...frequency, anchorDate } })
             }
+            value={frequency.anchorDate}
           />
-          <View style={styles.fieldRow}>
-            <AppField
-              label="Nombre de jours entre les prises"
-              inputMode="numeric"
-              style={styles.compactInput}
-              value={String(frequency.everyNDays)}
-              onChangeText={(value) =>
-                onChange({
-                  ...phase,
-                  frequency: { ...frequency, everyNDays: Number(value) },
-                })
-              }
-            />
-          </View>
+          <AppField
+            inputMode="numeric"
+            label="Nombre de jours entre les prises"
+            onChangeText={(value) =>
+              onChange({
+                ...phase,
+                frequency: { ...frequency, everyNDays: Number(value) },
+              })
+            }
+            style={styles.compactInput}
+            value={String(frequency.everyNDays)}
+          />
         </>
       ) : null}
       {frequency.type === 'weekly' ? (
@@ -385,52 +385,67 @@ export function PhaseEditor({
           value={frequency.weekday}
         />
       ) : null}
-      <Text style={styles.label}>Posologie</Text>
-      <SlotGrid>
-        {INTAKE_SLOTS.map((slot) => {
+
+      <SectionLabel>Posologie</SectionLabel>
+      <DenseList>
+        {INTAKE_SLOTS.map((slot, index) => {
           const item = phase.dosage.find((dosage) => dosage.slot === slot);
+          const units = (item?.quantityHalfUnits ?? 0) / 2;
           return (
-            <SlotCard key={slot} label={INTAKE_SLOT_LABELS[slot]}>
-              <TextInput
-                accessibilityLabel={`Posologie ${INTAKE_SLOT_LABELS[slot]}, phase ${number}`}
-                inputMode="decimal"
-                placeholder="0"
-                placeholderTextColor={colors.textMuted}
-                style={styles.slotInput}
-                value={
-                  item
-                    ? String(item.quantityHalfUnits / 2).replace('.', ',')
-                    : ''
-                }
-                onChangeText={(value) =>
-                  onChange({
-                    ...phase,
-                    dosage: updateDosage(phase, slot, value),
-                  })
-                }
-              />
-            </SlotCard>
+            <DenseRow
+              first={index === 0}
+              key={slot}
+              title={
+                <Text style={styles.slotLabel}>{INTAKE_SLOT_LABELS[slot]}</Text>
+              }
+              trailing={
+                <Stepper
+                  format={(value) => formatHalfUnits(Math.round(value * 2))}
+                  label={`posologie ${INTAKE_SLOT_LABELS[slot].toLowerCase()}, phase ${number}`}
+                  min={0}
+                  onChange={(value) =>
+                    onChange({
+                      ...phase,
+                      dosage: updateDosage(phase, slot, value),
+                    })
+                  }
+                  step={0.5}
+                  value={units}
+                />
+              }
+            />
           );
         })}
-      </SlotGrid>
-      <Text style={styles.hint}>
-        Saisissez explicitement chaque créneau. Multiples de 0,5 acceptés.
+      </DenseList>
+      <Text style={typography.micro}>
+        Les demi-doses sont acceptées pour les comprimés sécables.
       </Text>
-      <RemoveButton onPress={onRemove} />
-    </View>
+      <PillButton
+        height={44}
+        label="Supprimer cette phase"
+        onPress={onRemove}
+        tone="destructive"
+      />
+    </AppCard>
   );
+}
+
+function frequencyFor(
+  choice: FrequencyChoice,
+): ScheduledTreatmentPhase['frequency'] {
+  if (choice === 'daily') return { type: 'daily' };
+  if (choice === 'weekly') return { type: 'weekly', weekday: null };
+  return { type: 'interval', everyNDays: 2, anchorDate: '' };
 }
 
 function updateDosage(
   phase: ScheduledTreatmentPhase,
   slot: IntakeSlot,
-  value: string,
+  units: number,
 ) {
   const withoutSlot = phase.dosage.filter((item) => item.slot !== slot);
-  const normalized = value.trim().replace(',', '.');
-  if (normalized === '') return withoutSlot;
-  const quantityHalfUnits = Number(normalized) * 2;
-  return [...withoutSlot, { slot, quantityHalfUnits }];
+  if (units <= 0) return withoutSlot;
+  return [...withoutSlot, { slot, quantityHalfUnits: Math.round(units * 2) }];
 }
 
 function emptyPhase(): ScheduledTreatmentPhase {
@@ -449,99 +464,15 @@ function orderPhases(phases: readonly TreatmentPhase[]): TreatmentPhase[] {
   );
 }
 
-function Choice({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ checked: selected }}
-      onPress={onPress}
-      style={[styles.choice, selected && styles.choiceSelected]}
-    >
-      <Text>{label}</Text>
-    </Pressable>
-  );
-}
-function RemoveButton({ onPress }: { onPress: () => void }) {
-  return (
-    <AppButton
-      label="Supprimer cette phase"
-      variant="quiet"
-      onPress={onPress}
-    />
-  );
-}
-function Toggle({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <View style={styles.toggle}>
-      <Text>{label}</Text>
-      <Switch value={value} onValueChange={onChange} />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  choice: {
-    borderColor: colors.borderStrong,
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    minHeight: sizes.touch,
-    paddingVertical: 10,
-  },
-  choiceSelected: {
-    backgroundColor: colors.brandSoft,
-    borderColor: colors.brand,
-    borderWidth: 2,
-  },
-  compactInput: { width: 100 },
-  slotInput: {
-    backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.sm,
-    borderWidth: 1,
+  form: { gap: 12 },
+  phaseTitle: { ...typography.cardTitle, fontSize: 15.5, lineHeight: 19 },
+  compactInput: { maxWidth: 140 },
+  slotLabel: { ...typography.itemTitle, fontSize: 14.5, lineHeight: 19 },
+  legacyQuantity: {
+    ...typography.numeric,
     color: colors.text,
-    fontSize: 20,
-    fontVariant: ['tabular-nums'],
-    minHeight: sizes.touch,
-    paddingHorizontal: spacing.md,
-    textAlign: 'center',
-  },
-  fieldRow: { alignItems: 'center', flexDirection: 'row', marginTop: 8 },
-  form: { gap: spacing.md },
-  heading: { ...typography.heading, marginTop: 12 },
-  hint: typography.caption,
-  label: typography.label,
-  name: typography.title,
-  phase: {
-    borderColor: colors.border,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    gap: 6,
-    marginTop: 8,
-    padding: 12,
-  },
-  phaseTitle: { fontSize: 16, fontWeight: '700' },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  toggle: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
+    fontSize: 15,
+    lineHeight: 18,
   },
 });

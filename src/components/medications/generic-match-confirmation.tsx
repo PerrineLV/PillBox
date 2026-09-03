@@ -36,10 +36,10 @@ export function GenericMatchConfirmation({
       onCancel={onCancel}
       onPrimary={onConfirm}
     >
-      <Text style={typography.body}>
+      <Text style={typography.detail}>
         {`La boîte désignée est « ${scannedSpecialtyName} », différente de « ${expectedSpecialtyName} » attendu pour ce traitement, mais appartient au même groupe générique officiel de la BDPM : ${groupLabel}.`}
       </Text>
-      <Text style={typography.body}>
+      <Text style={typography.detail}>
         Cette information vient de la BDPM ; ce n’est pas une recommandation
         médicale ni une substitution automatique. En confirmant, vous choisissez
         d’utiliser cette boîte pour ce traitement. PillBox mémorisera cette

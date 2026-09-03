@@ -4,7 +4,6 @@ import type {
   MedicationForecast,
   StockForecast,
 } from '@/domain/forecast/stock-forecast';
-import { formatHalfUnits } from '@/domain/treatments/treatment';
 
 export type ForecastStatusBadge = Readonly<{
   label: string;
@@ -75,13 +74,4 @@ export function forecastSummary(forecast: StockForecast): ForecastSummary {
         ? `${window} : aucune rupture prévue.`
         : `${window} : ${alertCount} médicament${alertCount > 1 ? 's' : ''} à surveiller.`,
   };
-}
-
-export function forecastAvailabilityLabel(
-  forecast: MedicationForecast,
-): string {
-  const available = formatHalfUnits(forecast.availableHalfUnits);
-  if (forecast.nextPreparationHalfUnits === 0)
-    return `${available} disponible(s), aucune prise prévue la semaine prochaine.`;
-  return `${available} disponible(s) pour ${formatHalfUnits(forecast.nextPreparationHalfUnits)} nécessaire(s) la semaine prochaine.`;
 }

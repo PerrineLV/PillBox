@@ -1,15 +1,30 @@
 export type ToastTone = 'info' | 'success' | 'warning' | 'error';
 
+/**
+ * Action facultative offerte par un toast, pour revenir immédiatement sur un
+ * geste qui vient d'écrire en base sans écran de confirmation.
+ */
+export type ToastActionButton = Readonly<{
+  label: string;
+  onPress(): void;
+}>;
+
 export type Toast = {
   id: number;
   message: string;
   tone: ToastTone;
+  action: ToastActionButton | null;
 };
 
 export type ToastState = Toast | null;
 
 export type ToastAction =
-  | { type: 'show'; message: string; tone: ToastTone }
+  | {
+      type: 'show';
+      message: string;
+      tone: ToastTone;
+      action?: ToastActionButton | null;
+    }
   | { type: 'dismiss'; id: number };
 
 /**
@@ -28,6 +43,7 @@ export function reduceToast(
         id: (state?.id ?? 0) + 1,
         message: action.message,
         tone: action.tone,
+        action: action.action ?? null,
       };
     case 'dismiss':
       return state !== null && state.id === action.id ? null : state;

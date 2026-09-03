@@ -30,60 +30,48 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ),
       versionCode,
     },
-    plugins: appendPlugin(
-      appendPlugin(
-        appendPlugin(
-          appendPlugin(
-            appendPlugin(config.plugins, 'expo-notifications'),
-            'expo-local-authentication',
-          ),
-          'expo-mail-composer',
-        ),
-        [
-          '@react-native-community/datetimepicker',
-          {
-            android: {
-              datePicker: {
-                colorAccent: {
-                  light: DATE_TIME_PICKER_ACCENT_COLOR,
-                  dark: DATE_TIME_PICKER_ACCENT_COLOR,
-                },
-              },
-              timePicker: {
-                numbersSelectorColor: {
-                  light: DATE_TIME_PICKER_ACCENT_COLOR,
-                  dark: DATE_TIME_PICKER_ACCENT_COLOR,
-                },
-                headerBackground: {
-                  light: DATE_TIME_PICKER_ACCENT_COLOR,
-                  dark: DATE_TIME_PICKER_ACCENT_COLOR,
-                },
-                // Sans ces trois attributs, le cadran hérite du style AOSP par
-                // défaut, dont le contraste des chiffres non sélectionnés varie
-                // fortement selon la version d'Android et la surcouche du
-                // fabricant (ticket 43). Valeurs choisies à la main, à valider
-                // visuellement sur un appareil réel.
-                background: {
-                  light: '#FFFDF9',
-                  dark: '#1E1E1E',
-                },
-                numbersBackgroundColor: {
-                  light: '#F3EFE6',
-                  dark: '#2A2A2A',
-                },
-                numbersTextColor: {
-                  light: '#24322D',
-                  dark: '#F2F0EA',
-                },
-              },
-            },
-          },
-        ],
-      ),
-      './plugins/withPillBoxTodayWidget',
-    ),
+    plugins: ADDED_PLUGINS.reduce(appendPlugin, config.plugins ?? []),
   };
 };
+
+/**
+ * Options du sélecteur natif de date et d'heure.
+ *
+ * Aucune variante sombre n'est déclarée : les deux sélecteurs sont fixés en
+ * clair, comme le reste de PillBox. Une couleur absente de `values-night`
+ * retombe sur `values`, donc sur ces teintes-ci quel que soit le mode du
+ * téléphone ; `withAndroidLightTheme` fait de même pour le cadre de la boîte
+ * de dialogue, qui hérite sinon du thème de l'application.
+ */
+const DATE_TIME_PICKER_OPTIONS = {
+  android: {
+    datePicker: {
+      colorAccent: { light: DATE_TIME_PICKER_ACCENT_COLOR },
+    },
+    timePicker: {
+      numbersSelectorColor: { light: DATE_TIME_PICKER_ACCENT_COLOR },
+      headerBackground: { light: DATE_TIME_PICKER_ACCENT_COLOR },
+      // Sans ces trois attributs, le cadran hérite du style AOSP par défaut,
+      // dont le contraste des chiffres non sélectionnés varie fortement selon
+      // la version d'Android et la surcouche du fabricant (ticket 43).
+      // Valeurs choisies à la main, à valider visuellement sur un appareil
+      // réel.
+      background: { light: '#FFFDF9' },
+      numbersBackgroundColor: { light: '#F3EFE6' },
+      numbersTextColor: { light: '#24322D' },
+    },
+  },
+};
+
+/** Ajoutés à ceux de `app.json`, dans l'ordre, sans doublon. */
+const ADDED_PLUGINS: readonly (string | [string, unknown])[] = [
+  'expo-notifications',
+  'expo-local-authentication',
+  'expo-mail-composer',
+  ['@react-native-community/datetimepicker', DATE_TIME_PICKER_OPTIONS],
+  './plugins/withAndroidLightTheme',
+  './plugins/withPillBoxTodayWidget',
+];
 
 function appendValue(
   values: readonly string[] | undefined,

@@ -1,8 +1,7 @@
 import * as MailComposer from 'expo-mail-composer';
-import { Stack } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import {
   clearCrashLogs,
@@ -10,7 +9,15 @@ import {
   readCrashLogs,
   type CrashLogEntry,
 } from '@/infrastructure/logging/crash-logger';
-import { AppButton, Card, EmptyState, Message, Screen, typography } from '@/ui';
+import {
+  AppCard,
+  AppScreen,
+  EmptyState,
+  PillButton,
+  StackHeader,
+  colors,
+  typography,
+} from '@/ui';
 
 export default function ErrorLogScreen() {
   const [entries, setEntries] = useState<CrashLogEntry[] | null>(null);
@@ -18,6 +25,8 @@ export default function ErrorLogScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const empty = entries === null || entries.length === 0;
 
   async function share(): Promise<void> {
     const uri = crashLogUri();
@@ -39,40 +48,72 @@ export default function ErrorLogScreen() {
   }
 
   return (
-    <Screen>
-      <Stack.Screen
-        options={{ headerShown: true, title: 'Journal des erreurs' }}
-      />
-      <Message tone="info">
-        Seuls les crashs JavaScript sont journalisés ; les crashs natifs ne le
-        sont pas.
-      </Message>
+    <AppScreen
+      header={
+        <StackHeader
+          subtitle="Crashs JavaScript uniquement"
+          title="Journal des erreurs"
+        />
+      }
+    >
       {entries === null ? null : entries.length === 0 ? (
-        <EmptyState title="Aucune erreur enregistrée" />
+        <EmptyState
+          description="Les crashs natifs ne sont pas journalisés : eux seuls échappent à ce journal."
+          title="Aucune erreur enregistrée"
+        />
       ) : (
-        <ScrollView>
-          {entries.map((entry) => (
-            <Card key={entry.timestamp}>
-              <Text style={typography.caption}>{entry.timestamp}</Text>
-              <Text style={typography.body}>{entry.message}</Text>
-              {entry.stack ? (
-                <Text style={typography.caption}>{entry.stack}</Text>
-              ) : null}
-            </Card>
-          ))}
-        </ScrollView>
+        entries.map((entry) => (
+          <AppCard key={entry.timestamp}>
+            <Text style={styles.timestamp}>{entry.timestamp}</Text>
+            <Text style={styles.message}>{entry.message}</Text>
+            {entry.stack ? (
+              <Text style={styles.stack}>{entry.stack}</Text>
+            ) : null}
+          </AppCard>
+        ))
       )}
-      <AppButton
-        label="Envoyer par email"
-        disabled={entries === null || entries.length === 0}
-        onPress={() => void share()}
-      />
-      <AppButton
-        label="Effacer le journal"
-        variant="danger"
-        disabled={entries === null || entries.length === 0}
-        onPress={clear}
-      />
-    </Screen>
+      <View style={styles.actions}>
+        <PillButton
+          disabled={empty}
+          height={46}
+          label="Envoyer par email"
+          onPress={() => void share()}
+          tone="outline"
+        />
+        <PillButton
+          disabled={empty}
+          height={46}
+          label="Effacer le journal"
+          onPress={clear}
+          tone="destructive"
+        />
+      </View>
+      <Text style={typography.micro}>
+        Le journal ne quitte ce téléphone que si vous l’envoyez vous-même.
+      </Text>
+    </AppScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  actions: { gap: 9 },
+  timestamp: {
+    ...typography.numeric,
+    color: colors.textTertiary,
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 14,
+  },
+  message: {
+    ...typography.itemTitle,
+    fontSize: 13.5,
+    lineHeight: 18,
+  },
+  stack: {
+    color: colors.textTertiary,
+    fontFamily: 'monospace',
+    fontSize: 11,
+    fontWeight: '500',
+    lineHeight: 17,
+  },
+});

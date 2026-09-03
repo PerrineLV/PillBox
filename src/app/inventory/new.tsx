@@ -2,6 +2,7 @@ import type { BarcodeScanningResult } from 'expo-camera';
 import { CameraView } from 'expo-camera';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { type SQLiteDatabase, useSQLiteContext } from 'expo-sqlite';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,6 +20,11 @@ import { GenericMatchConfirmation } from '@/components/medications/generic-match
 import { useDraftGenericEquivalencePrompt } from '@/components/medications/use-draft-generic-equivalence-prompt';
 import { useGenericEquivalenceGate } from '@/components/medications/use-generic-equivalence-gate';
 import { useBarcodeScanner } from '@/components/scanning/use-barcode-scanner';
+import {
+  ScanHeader,
+  Viewfinder,
+  WithoutScanLink,
+} from '@/components/scanning/viewfinder';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import { buildAttachedSpecialtyCisSet } from '@/domain/inventory/box-attachment';
 import { parseGs1Expiration } from '@/domain/inventory/inventory';
@@ -34,14 +40,17 @@ import { useMedicationReferenceDatabase } from '@/infrastructure/medications/med
 import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
-  AppButton,
+  AppCard,
   AppField,
-  Card,
+  AppScreen,
+  Banner,
   EmptyState,
   LoadingState,
   Message,
-  Screen,
+  PillButton,
+  StackHeader,
   colors,
+  palette,
   radii,
   spacing,
   typography,
@@ -50,12 +59,15 @@ import {
 } from '@/ui';
 
 /**
- * Signale, sans jamais bloquer l'ajout ni créer de lien, qu'une boîte vient
- * d'être ajoutée pour un médicament sans traitement actif ni équivalence
- * générique mémorisée (ticket 28). Recalculé à chaque ajout à partir de
- * l'état courant : ne préjuge jamais qu'un traitement sera créé ensuite.
+ * Confirme l'ajout de la boîte, l'écran étant quitté aussitôt après.
+ *
+ * Signale au passage, sans jamais bloquer l'ajout ni créer de lien, qu'une
+ * boîte vient d'être ajoutée pour un médicament sans traitement actif ni
+ * équivalence générique mémorisée (ticket 28). Recalculé à chaque ajout à
+ * partir de l'état courant : ne préjuge jamais qu'un traitement sera créé
+ * ensuite.
  */
-async function notifyIfOrphanMedication(
+async function confirmBoxAdded(
   personalDatabase: SQLiteDatabase,
   specialtyCis: string,
   showToast: (message: string, tone?: ToastTone) => void,
@@ -71,12 +83,14 @@ async function notifyIfOrphanMedication(
       cis: confirmation.cis,
     })),
   );
-  if (!attachedCis.has(specialtyCis)) {
-    showToast(
-      'Boîte ajoutée : aucun traitement actif ne correspond à ce médicament pour le moment.',
-      'warning',
-    );
+  if (attachedCis.has(specialtyCis)) {
+    showToast('Boîte ajoutée au stock.', 'success');
+    return;
   }
+  showToast(
+    'Boîte ajoutée : aucun traitement actif ne correspond à ce médicament pour le moment.',
+    'warning',
+  );
 }
 
 type AddBoxMode = 'CHOICE' | 'SCAN' | 'MANUAL';
@@ -133,31 +147,30 @@ function AddBox({
 /** Le scan reste la voie rapide, sans jamais devenir la seule voie possible. */
 function ModeChoice({ onSelect }: { onSelect(mode: AddBoxMode): void }) {
   return (
-    <Screen>
-      <Stack.Screen options={{ headerShown: true, title: SCREEN_TITLE }} />
-      <Card>
-        <Text style={typography.heading}>Scanner le DataMatrix</Text>
-        <Text style={typography.body}>
+    <AppScreen header={<StackHeader title={SCREEN_TITLE} />}>
+      <AppCard>
+        <Text style={typography.cardTitle}>Scanner le DataMatrix</Text>
+        <Text style={typography.detail}>
           Préremplit le produit, le lot et la péremption depuis la boîte.
         </Text>
-        <AppButton
+        <PillButton
           label="Scanner le DataMatrix"
           onPress={() => onSelect('SCAN')}
         />
-      </Card>
-      <Card>
-        <Text style={typography.heading}>Ajouter sans DataMatrix</Text>
-        <Text style={typography.body}>
+      </AppCard>
+      <AppCard>
+        <Text style={typography.cardTitle}>Ajouter sans DataMatrix</Text>
+        <Text style={typography.detail}>
           Pour une boîte sans code lisible : choisissez le médicament dans le
           référentiel, puis saisissez vous-même le lot et la péremption.
         </Text>
-        <AppButton
+        <PillButton
           label="Ajouter sans DataMatrix"
-          variant="secondary"
           onPress={() => onSelect('MANUAL')}
+          tone="outline"
         />
-      </Card>
-    </Screen>
+      </AppCard>
+    </AppScreen>
   );
 }
 
@@ -248,11 +261,7 @@ function ManualBox({
         scanRaw: null,
       });
       if (draftOutcome !== 'confirmed')
-        await notifyIfOrphanMedication(
-          personalDatabase,
-          medication.cis,
-          showToast,
-        );
+        await confirmBoxAdded(personalDatabase, medication.cis, showToast);
       if (router.canGoBack()) router.back();
       else router.replace('/inventory');
     } catch (reason: unknown) {
@@ -265,12 +274,13 @@ function ManualBox({
   }
 
   return (
-    <Screen>
-      <Stack.Screen options={{ headerShown: true, title: SCREEN_TITLE }} />
-      <Message tone="info" title="Ajout sans DataMatrix">
+    <AppScreen
+      header={<StackHeader subtitle="Sans DataMatrix" title={SCREEN_TITLE} />}
+    >
+      <Banner level="neutral" title="Ajout sans DataMatrix">
         La boîte sera enregistrée comme saisie manuelle. PillBox ne complétera
         aucune information absente de la boîte.
-      </Message>
+      </Banner>
       {error ? (
         <Message tone="error" title="Boîte non enregistrée">
           {error}
@@ -294,14 +304,14 @@ function ManualBox({
             />
           ) : null}
           {results.map((result) => (
-            <Card key={result.cis} style={styles.result}>
-              <Text style={typography.heading}>{result.name}</Text>
+            <AppCard key={result.cis}>
+              <Text style={typography.cardTitle}>{result.name}</Text>
               {result.pharmaceuticalForm === null ? null : (
-                <Text style={typography.caption}>
+                <Text style={typography.detail}>
                   {result.pharmaceuticalForm}
                 </Text>
               )}
-              <Text style={typography.caption}>
+              <Text style={typography.micro}>
                 Choisissez la présentation exacte de votre boîte.
               </Text>
               {result.presentations.map((presentation) => (
@@ -319,27 +329,30 @@ function ManualBox({
                   }
                   style={styles.presentation}
                 >
-                  <Text style={typography.body}>{presentation.label}</Text>
-                  <Text style={typography.caption}>
+                  <Text style={styles.presentationLabel}>
+                    {presentation.label}
+                  </Text>
+                  <Text style={typography.micro}>
                     CIP13 {presentation.cip13}
                   </Text>
                 </Pressable>
               ))}
-            </Card>
+            </AppCard>
           ))}
         </>
       ) : (
         <>
-          <Card>
-            <Text style={typography.heading}>{medication.name}</Text>
-            <Text>{medication.label}</Text>
-            <Text>CIP13 {medication.cip13}</Text>
-            <AppButton
+          <AppCard>
+            <Text style={typography.cardTitle}>{medication.name}</Text>
+            <Text style={typography.detail}>{medication.label}</Text>
+            <Text style={typography.micro}>CIP13 {medication.cip13}</Text>
+            <PillButton
+              height={40}
               label="Changer de médicament"
-              variant="quiet"
               onPress={() => setMedication(null)}
+              tone="outline"
             />
-          </Card>
+          </AppCard>
           <AppField
             label="Lot"
             help="Requis : il identifie la boîte dans les préparations et l’historique."
@@ -360,24 +373,24 @@ function ManualBox({
             placeholder="Ex. 30"
             value={quantity}
           />
-          <AppButton
-            label="Ajouter cette boîte"
-            loading={saving}
+          <PillButton
             disabled={
               saving ||
               lot.trim() === '' ||
               expiration === '' ||
               quantity.trim() === ''
             }
+            label="Ajouter au stock"
             onPress={() => void save()}
           />
         </>
       )}
-      <AppButton
-        label="Revenir au choix"
-        variant="quiet"
-        onPress={onLeave}
+      <PillButton
         disabled={saving}
+        height={44}
+        label="Revenir au choix"
+        onPress={onLeave}
+        tone="outline"
       />
       {genericGate.pendingMatch ? (
         <GenericMatchConfirmation
@@ -409,7 +422,7 @@ function ManualBox({
           onConfirm={duplicateLotGate.confirm}
         />
       ) : null}
-    </Screen>
+    </AppScreen>
   );
 }
 
@@ -427,6 +440,7 @@ function ScanBox({
   const referenceDatabase = useMedicationReferenceDatabase();
   const { showToast } = useToast();
   const scanner = useBarcodeScanner();
+  const insets = useSafeAreaInsets();
   const [scan, setScan] = useState<BarcodeScanningResult | null>(null);
   const [medication, setMedication] =
     useState<IdentifiedMedicationPresentation | null>(null);
@@ -529,11 +543,7 @@ function ScanBox({
         scanRaw: scan.data,
       });
       if (draftOutcome !== 'confirmed')
-        await notifyIfOrphanMedication(
-          personalDatabase,
-          medication.cis,
-          showToast,
-        );
+        await confirmBoxAdded(personalDatabase, medication.cis, showToast);
       if (router.canGoBack()) router.back();
       else router.replace('/inventory');
     } catch (reason: unknown) {
@@ -550,14 +560,14 @@ function ScanBox({
   if (!scanner.permission.granted) {
     return (
       <Centered text="La caméra est nécessaire pour scanner une boîte.">
-        <AppButton
+        <PillButton
           label="Autoriser la caméra"
           onPress={() => void scanner.requestPermission()}
         />
-        <AppButton
+        <PillButton
           label="Ajouter sans DataMatrix"
-          variant="secondary"
           onPress={onLeave}
+          tone="outline"
         />
       </Centered>
     );
@@ -565,33 +575,46 @@ function ScanBox({
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ headerShown: true, title: SCREEN_TITLE }} />
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={{ height: insets.top }} />
+      <ScanHeader
+        action={
+          <WithoutScanLink
+            accessibilityLabel="Ajouter sans scan"
+            onPress={onLeave}
+          />
+        }
+        onBack={onLeave}
+        title={SCREEN_TITLE}
+      />
       {!scan ? (
         <CameraView
-          style={styles.camera}
           barcodeScannerSettings={{ barcodeTypes: ['datamatrix'] }}
           onBarcodeScanned={(result) => {
             if (scanner.lockOnce()) setScan(result);
           }}
+          style={styles.camera}
         >
-          <View style={styles.guide}>
-            <Text style={styles.guideText}>Cadrez le DataMatrix</Text>
-          </View>
+          <Viewfinder caption="Cadrez le DataMatrix imprimé sur la boîte" />
         </CameraView>
       ) : (
         <ScrollView
           contentContainerStyle={styles.form}
           keyboardShouldPersistTaps="handled"
+          style={styles.sheet}
         >
+          <View accessibilityElementsHidden style={styles.handle} />
           {identifying ? (
             <ActivityIndicator accessibilityLabel="Identification en cours" />
           ) : null}
           {medication ? (
-            <Card style={styles.identified} tone="muted">
+            <View style={styles.identified}>
+              <Text style={styles.confirmation}>✓ Boîte identifiée</Text>
               <Text style={styles.medication}>{medication.name}</Text>
-              <Text>{medication.label}</Text>
-              <Text>CIP13 {medication.cip13}</Text>
-            </Card>
+              <Text style={typography.detail}>
+                {medication.label} · CIP13 {medication.cip13}
+              </Text>
+            </View>
           ) : null}
           {error ? (
             <Message tone="error" title="Boîte non validée">
@@ -620,19 +643,17 @@ function ScanBox({
             placeholder="Ex. 30"
             value={quantity}
           />
-          <AppButton
-            label="Ajouter cette boîte"
-            loading={saving}
+          <PillButton
             disabled={saving || identifying || medication === null}
+            label="Ajouter au stock"
             onPress={() => void save()}
           />
-          <View style={styles.secondary}>
-            <AppButton
-              label="Scanner à nouveau"
-              variant="secondary"
-              onPress={reset}
-            />
-          </View>
+          <PillButton
+            height={44}
+            label="Scanner à nouveau"
+            onPress={reset}
+            tone="outline"
+          />
           <Text selectable style={styles.raw}>
             Scan brut conservé : {JSON.stringify(scan.data)}
           </Text>
@@ -680,11 +701,13 @@ function Centered({
   children?: React.ReactNode;
 }) {
   return (
-    <View style={styles.centered}>
-      <Stack.Screen options={{ headerShown: true, title: SCREEN_TITLE }} />
-      <Text style={typography.body}>{text}</Text>
+    <AppScreen
+      bodyStyle={styles.centered}
+      header={<StackHeader title={SCREEN_TITLE} />}
+    >
+      <Text style={typography.detail}>{text}</Text>
       {children}
-    </View>
+    </AppScreen>
   );
 }
 
@@ -692,41 +715,60 @@ const styles = StyleSheet.create({
   camera: { flex: 1 },
   centered: {
     alignItems: 'center',
-    flex: 1,
+    flexGrow: 1,
     gap: 16,
     justifyContent: 'center',
-    padding: 24,
   },
-  container: { backgroundColor: colors.background, flex: 1 },
+  container: { backgroundColor: palette.green[700], flex: 1 },
   form: { gap: spacing.lg, padding: spacing.lg },
-  guide: {
-    borderColor: colors.surface,
-    borderWidth: 2,
-    left: '12%',
-    padding: 12,
-    position: 'absolute',
-    right: '12%',
-    top: '35%',
+  sheet: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radii.sheet,
+    borderTopRightRadius: radii.sheet,
   },
-  guideText: {
-    backgroundColor: colors.overlay,
-    color: colors.surface,
-    padding: 6,
-    textAlign: 'center',
+  handle: {
+    alignSelf: 'center',
+    backgroundColor: colors.border,
+    borderRadius: radii.pill,
+    height: 4,
+    width: 38,
   },
-  identified: { marginBottom: spacing.lg },
-  medication: typography.heading,
+  identified: { gap: 5 },
+  confirmation: {
+    color: colors.success,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    lineHeight: 14,
+    textTransform: 'uppercase',
+  },
+  medication: {
+    color: colors.text,
+    fontSize: 21,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+    lineHeight: 25,
+  },
   presentation: {
-    borderColor: colors.border,
-    borderRadius: radii.md,
+    borderColor: colors.cardBorder,
+    borderRadius: radii.tile,
     borderWidth: 1,
-    gap: spacing.xs,
+    gap: 3,
     justifyContent: 'center',
     minHeight: 48,
-    padding: spacing.md,
+    padding: 12,
   },
-  quantityNotice: { fontWeight: '700', marginBottom: 8 },
+  presentationLabel: {
+    color: colors.text,
+    fontSize: 12.5,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
+  quantityNotice: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
   raw: { color: colors.textMuted, fontSize: 12, marginTop: 18 },
-  result: { marginBottom: spacing.sm },
-  secondary: { marginTop: 12 },
 });

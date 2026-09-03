@@ -1,12 +1,7 @@
-import {
-  router,
-  Stack,
-  useFocusEffect,
-  useLocalSearchParams,
-} from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext, type SQLiteDatabase } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 
 import {
   PrescriptionForm,
@@ -14,10 +9,11 @@ import {
 } from '@/components/prescriptions/prescription-form';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import { todayIso } from '@/domain/inventory/inventory';
-import type {
-  Prescription,
-  PrescriptionItem,
-  PrescriptionStatus,
+import {
+  isPrescriptionValidityApproaching,
+  type Prescription,
+  type PrescriptionItem,
+  type PrescriptionStatus,
 } from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
 import {
@@ -30,12 +26,20 @@ import {
 } from '@/infrastructure/prescriptions/prescription-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
-  Badge,
+  AppCard,
+  AppScreen,
+  Banner,
+  DenseList,
+  DenseRow,
   LoadingState,
   Message,
+  ProgressBar,
+  Section,
+  SeverityBadge,
+  StackHeader,
   colors,
-  spacing,
   typography,
+  type SeverityLevel,
 } from '@/ui';
 
 const STATUS_LABELS: Record<PrescriptionStatus, string> = {
@@ -43,15 +47,8 @@ const STATUS_LABELS: Record<PrescriptionStatus, string> = {
   EXPIRED: 'Expirée',
   REPLACED: 'Remplacée',
 };
-
-const STATUS_TONES: Record<
-  PrescriptionStatus,
-  'success' | 'neutral' | 'warning'
-> = {
-  ACTIVE: 'success',
-  EXPIRED: 'neutral',
-  REPLACED: 'neutral',
-};
+/** Fenêtre affichée par la barre de validité restante. */
+const VALIDITY_WINDOW_DAYS = 365;
 
 export default function PrescriptionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -61,6 +58,7 @@ export default function PrescriptionDetailScreen() {
   const [items, setItems] = useState<PrescriptionItem[]>([]);
   const [treatments, setTreatments] = useState<Treatment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const today = todayIso();
 
   const load = useCallback(async () => {
     if (!Number.isSafeInteger(numericId)) {
@@ -73,13 +71,14 @@ export default function PrescriptionDetailScreen() {
         listPrescriptionItemsByPrescription(database, numericId),
         listTreatments(database),
       ]);
-      if (value === null) setError('Ordonnance introuvable.');
-      else {
-        setPrescription(value);
-        setItems(values);
-        setTreatments(allTreatments);
-        setError(null);
+      if (value === null) {
+        setError('Ordonnance introuvable.');
+        return;
       }
+      setPrescription(value);
+      setItems(values);
+      setTreatments(allTreatments);
+      setError(null);
     } catch (reason: unknown) {
       setError(
         reason instanceof Error ? reason.message : 'Chargement impossible.',
@@ -100,44 +99,126 @@ export default function PrescriptionDetailScreen() {
       return treatment ? { item, treatment } : null;
     })
     .filter((entry): entry is PrescriptionFormExistingItem => entry !== null);
+  const level: SeverityLevel =
+    prescription === null
+      ? 'neutral'
+      : prescription.status !== 'ACTIVE'
+        ? 'neutral'
+        : isPrescriptionValidityApproaching(prescription, today)
+          ? 'warning'
+          : 'ok';
+  const remaining =
+    prescription === null
+      ? null
+      : remainingDays(prescription.validUntil, today);
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
+    <AppScreen
+      header={
+        <StackHeader
+          right={
+            prescription ? (
+              <SeverityBadge
+                label={STATUS_LABELS[prescription.status]}
+                level={level}
+              />
+            ) : undefined
+          }
+          subtitle={
+            prescription
+              ? `Émise le ${formatLongFrenchCivilDate(prescription.issueDate)}`
+              : undefined
+          }
+          title={prescription?.label ?? 'Ordonnance'}
+        />
+      }
     >
-      <Stack.Screen options={{ headerShown: true, title: 'Ordonnance' }} />
       {error ? <Message tone="error">{error}</Message> : null}
       {!error && prescription === null ? (
         <LoadingState label="Chargement de l’ordonnance…" />
       ) : null}
+
       {prescription ? (
         <>
-          <View style={styles.header}>
-            <Text accessibilityRole="header" style={typography.title}>
-              {prescription.label}
+          <AppCard>
+            <Text style={typography.sectionLabel}>Validité restante</Text>
+            <Text style={styles.validity}>
+              {remaining === null
+                ? 'Non renseignée'
+                : remaining > 0
+                  ? `${remaining} jour${remaining > 1 ? 's' : ''}`
+                  : 'Validité dépassée'}
             </Text>
-            <Badge
-              label={STATUS_LABELS[prescription.status]}
-              tone={STATUS_TONES[prescription.status]}
-            />
-          </View>
+            {remaining !== null ? (
+              <ProgressBar
+                color={colors.brand}
+                height={6}
+                ratio={remaining / VALIDITY_WINDOW_DAYS}
+              />
+            ) : null}
+            <Text style={typography.detail}>
+              {prescription.validUntil
+                ? `Valide jusqu’au ${formatLongFrenchCivilDate(prescription.validUntil)}`
+                : 'Fin de validité non renseignée : aucune date n’est déduite.'}
+            </Text>
+          </AppCard>
+
+          <Section
+            aside={String(existingItems.length)}
+            label="Traitements couverts"
+          >
+            {existingItems.length === 0 ? (
+              <Text style={typography.detail}>
+                Aucun traitement rattaché à cette ordonnance.
+              </Text>
+            ) : (
+              <DenseList>
+                {existingItems.map(({ item, treatment }, index) => (
+                  <DenseRow
+                    detail={
+                      item.dispensingMode === 'FRACTIONAL'
+                        ? `Délivrance fractionnée tous les ${item.periodicityDays} jours`
+                        : 'Délivrance complète'
+                    }
+                    first={index === 0}
+                    key={item.id}
+                    title={
+                      <Text style={styles.itemName}>
+                        {treatment.specialtyName}
+                      </Text>
+                    }
+                    trailing={
+                      <Text style={styles.quantity}>
+                        {item.quantityKind === 'DURATION'
+                          ? `${item.durationDays} jours`
+                          : `${item.boxCount} boîte${(item.boxCount ?? 0) > 1 ? 's' : ''}`}
+                      </Text>
+                    }
+                  />
+                ))}
+              </DenseList>
+            )}
+          </Section>
+
           {prescription.status === 'ACTIVE' ? (
-            <PrescriptionEditContent
-              personalDatabase={database}
-              prescription={prescription}
-              existingItems={existingItems}
-              onReload={load}
-            />
+            <Section label="Modifier">
+              <PrescriptionEditContent
+                existingItems={existingItems}
+                onReload={load}
+                personalDatabase={database}
+                prescription={prescription}
+              />
+            </Section>
           ) : (
-            <ReadOnlyPrescription
-              prescription={prescription}
-              existingItems={existingItems}
-            />
+            <Banner level="neutral" title="Conservée dans l’historique">
+              {prescription.status === 'EXPIRED'
+                ? 'Cette ordonnance n’est plus valide : elle reste consultable, en lecture seule.'
+                : 'Cette ordonnance a été remplacée par une plus récente couvrant au moins un même traitement. Elle reste consultable, en lecture seule.'}
+            </Banner>
           )}
         </>
       ) : null}
-    </ScrollView>
+    </AppScreen>
   );
 }
 
@@ -146,27 +227,25 @@ function PrescriptionEditContent({
   prescription,
   existingItems,
   onReload,
-}: {
+}: Readonly<{
   personalDatabase: SQLiteDatabase;
   prescription: Prescription;
   existingItems: readonly PrescriptionFormExistingItem[];
   onReload: () => Promise<void>;
-}) {
+}>) {
   return (
     <PrescriptionForm
-      personalDatabase={personalDatabase}
       currentPrescriptionId={prescription.id}
+      existingItems={existingItems}
       initialValue={{
         label: prescription.label,
         issueDate: prescription.issueDate,
         validUntil: prescription.validUntil,
       }}
-      existingItems={existingItems}
       onRemoveExistingItem={async (itemId) => {
         await deletePrescriptionItem(personalDatabase, itemId);
         await onReload();
       }}
-      submitLabel="Enregistrer les modifications"
       onSubmit={async ({
         label,
         issueDate,
@@ -194,69 +273,36 @@ function PrescriptionEditContent({
         }
         router.replace('/prescriptions');
       }}
+      personalDatabase={personalDatabase}
+      submitLabel="Enregistrer les modifications"
     />
   );
 }
 
-function ReadOnlyPrescription({
-  prescription,
-  existingItems,
-}: {
-  prescription: Prescription;
-  existingItems: readonly PrescriptionFormExistingItem[];
-}) {
-  return (
-    <View style={styles.readOnly}>
-      <Text>Émise le {formatLongFrenchCivilDate(prescription.issueDate)}</Text>
-      <Text>
-        {prescription.validUntil
-          ? `Valide jusqu’au ${formatLongFrenchCivilDate(prescription.validUntil)}`
-          : 'Fin de validité non renseignée'}
-      </Text>
-      <Message tone="info" title="Ordonnance conservée dans l’historique">
-        {prescription.status === 'EXPIRED'
-          ? 'Cette ordonnance n’est plus valide, mais reste consultable.'
-          : 'Cette ordonnance a été remplacée par une plus récente couvrant au moins un même traitement, et reste consultable.'}
-      </Message>
-      <Text style={typography.heading}>Traitements couverts</Text>
-      {existingItems.map(({ item, treatment }) => (
-        <View key={item.id} style={styles.readOnlyItem}>
-          <Text style={typography.heading}>{treatment.specialtyName}</Text>
-          <Text>
-            {item.quantityKind === 'DURATION'
-              ? `Durée : ${item.durationDays} jour(s)`
-              : `${item.boxCount} boîte(s)`}
-          </Text>
-          <Text>
-            {item.dispensingMode === 'FRACTIONAL'
-              ? `Délivrance fractionnée (${item.periodicityDays} jours)`
-              : 'Délivrance complète'}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
+/** `null` lorsque la fin de validité n'est pas renseignée : rien n'est deviné. */
+function remainingDays(
+  validUntil: string | null,
+  today: string,
+): number | null {
+  if (validUntil === null) return null;
+  const end = Date.parse(`${validUntil}T12:00:00`);
+  const start = Date.parse(`${today}T12:00:00`);
+  if (Number.isNaN(end) || Number.isNaN(start)) return null;
+  return Math.max(0, Math.round((end - start) / 86_400_000));
 }
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.background,
-    flexGrow: 1,
-    gap: spacing.lg,
-    padding: spacing.lg,
+  validity: {
+    ...typography.numeric,
+    color: colors.brand,
+    fontSize: 20,
+    lineHeight: 24,
   },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.md,
-    justifyContent: 'space-between',
-  },
-  readOnly: { gap: spacing.sm },
-  readOnlyItem: {
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    gap: 2,
-    marginTop: spacing.sm,
-    paddingTop: spacing.sm,
+  itemName: { ...typography.itemTitle, fontSize: 14, lineHeight: 18 },
+  quantity: {
+    color: colors.brand,
+    fontSize: 12.5,
+    fontWeight: '700',
+    lineHeight: 15,
   },
 });

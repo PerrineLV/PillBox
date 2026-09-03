@@ -1,6 +1,5 @@
-import { router, Stack } from 'expo-router';
+import { router } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { ScrollView, StyleSheet } from 'react-native';
 
 import { PrescriptionForm } from '@/components/prescriptions/prescription-form';
 import { todayIso } from '@/domain/inventory/inventory';
@@ -9,26 +8,18 @@ import {
   createPrescription,
   createPrescriptionItem,
 } from '@/infrastructure/prescriptions/prescription-repository';
-import { colors, spacing } from '@/ui';
+import { AppScreen, StackHeader } from '@/ui';
 
 export default function NewPrescriptionScreen() {
   const database = useSQLiteContext();
   return (
-    <ScrollView
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Stack.Screen
-        options={{ headerShown: true, title: 'Nouvelle ordonnance' }}
-      />
+    <AppScreen header={<StackHeader title="Nouvelle ordonnance" />}>
       <PrescriptionForm
-        personalDatabase={database}
         initialValue={{
           label: '',
           issueDate: todayIso(),
           validUntil: null,
         }}
-        submitLabel="Créer l’ordonnance"
         onSubmit={async ({
           label,
           issueDate,
@@ -56,15 +47,9 @@ export default function NewPrescriptionScreen() {
           }
           router.replace('/prescriptions');
         }}
+        personalDatabase={database}
+        submitLabel="Créer l’ordonnance"
       />
-    </ScrollView>
+    </AppScreen>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.background,
-    flexGrow: 1,
-    padding: spacing.lg,
-  },
-});

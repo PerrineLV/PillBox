@@ -1,6 +1,6 @@
-import { Link, Stack, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { GenericGroupSection } from '@/components/medications/generic-group-section';
 import {
@@ -9,27 +9,25 @@ import {
 } from '@/infrastructure/medications/medication-reference';
 import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 import {
-  AppField,
-  Card,
+  AppCard,
+  AppScreen,
   EmptyState,
   LoadingState,
   Message,
+  MetaBadge,
+  PillButton,
+  SearchField,
+  StackHeader,
   colors,
-  spacing,
   typography,
 } from '@/ui';
 
 export default function MedicationSearchScreen() {
-  return <MedicationSearch />;
-}
-
-function MedicationSearch() {
   const database = useMedicationReferenceDatabase();
   /**
    * Présent lorsque la recherche est atteinte depuis la saisie d'une ligne
-   * d'ordonnance (ticket 46) : transmis à `/treatments/new` pour qu'il
-   * revienne vers cet écran (`router.dismissTo`) une fois le traitement créé,
-   * au lieu d'aller vers la liste des traitements.
+   * d'ordonnance : transmis à `/treatments/new` pour qu'il revienne vers cet
+   * écran une fois le traitement créé, au lieu d'aller vers la liste.
    */
   const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const [query, setQuery] = useState('');
@@ -43,26 +41,21 @@ function MedicationSearch() {
       setIsSearching(query.trim().length > 0);
       searchMedicationReference(database, query)
         .then((nextResults) => {
-          if (!cancelled) {
-            setResults(nextResults);
-            setError(null);
-          }
+          if (cancelled) return;
+          setResults(nextResults);
+          setError(null);
         })
         .catch((reason: unknown) => {
-          if (!cancelled) {
-            setResults([]);
-            setError(
-              reason instanceof Error
-                ? reason.message
-                : 'Recherche impossible.',
-            );
-          }
+          if (cancelled) return;
+          setResults([]);
+          setError(
+            reason instanceof Error ? reason.message : 'Recherche impossible.',
+          );
         })
         .finally(() => {
           if (!cancelled) setIsSearching(false);
         });
     }, 200);
-
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -70,101 +63,99 @@ function MedicationSearch() {
   }, [database, query]);
 
   return (
-    <View style={styles.container}>
-      <Stack.Screen options={{ headerShown: true, title: 'Médicaments' }} />
-      <AppField
-        label="Rechercher un médicament"
+    <AppScreen header={<StackHeader title="Médicaments" />}>
+      <SearchField
+        accessibilityLabel="Rechercher un médicament"
         autoCapitalize="none"
         autoCorrect={false}
+        help="Nom, dosage ou forme · base de référence hors ligne"
         onChangeText={setQuery}
         placeholder="Nom, dosage ou forme"
         value={query}
       />
       {isSearching ? <LoadingState label="Recherche en cours…" /> : null}
       {error === null ? null : <Message tone="error">{error}</Message>}
-      <FlatList
-        data={results}
-        keyExtractor={(item) => item.cis}
-        keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          query.trim().length > 0 && !isSearching && error === null ? (
-            <EmptyState
-              title="Aucun médicament trouvé"
-              description="Vérifiez l’orthographe, le dosage ou la forme. PillBox ne propose aucune correspondance incertaine."
-            />
-          ) : null
-        }
-        renderItem={({ item }) => (
-          <MedicationResult result={item} returnTo={returnTo} />
-        )}
-      />
-    </View>
+      {query.trim().length > 0 &&
+      !isSearching &&
+      error === null &&
+      results.length === 0 ? (
+        <EmptyState
+          description="Vérifiez l’orthographe, le dosage ou la forme."
+          title="Aucun médicament trouvé"
+        />
+      ) : null}
+      {results.map((result) => (
+        <MedicationResult
+          key={result.cis}
+          result={result}
+          returnTo={returnTo}
+        />
+      ))}
+      <Text style={typography.micro}>
+        PillBox ne propose aucune correspondance incertaine : si le dosage ne
+        figure pas, il n’apparaît pas.
+      </Text>
+    </AppScreen>
   );
 }
 
 function MedicationResult({
   result,
   returnTo,
-}: {
-  result: MedicationSearchResult;
-  returnTo?: string;
-}) {
+}: Readonly<{ result: MedicationSearchResult; returnTo?: string }>) {
   return (
-    <Card style={styles.result}>
+    <AppCard>
       <Text style={styles.name}>{result.name}</Text>
-      <Text>CIS {result.cis}</Text>
-      {result.pharmaceuticalForm === null ? null : (
-        <Text>Forme : {result.pharmaceuticalForm}</Text>
-      )}
-      <Link
-        href={{
-          pathname: '/treatments/new',
-          params: {
-            cis: result.cis,
-            name: result.name,
-            form: result.pharmaceuticalForm ?? '',
-            ...(returnTo ? { returnTo } : {}),
-          },
-        }}
-        style={styles.createTreatment}
-      >
-        Créer un traitement
-      </Link>
-      {result.presentations.map((presentation) => (
-        <View key={presentation.cip13} style={styles.presentation}>
-          <Text>CIP13 {presentation.cip13}</Text>
-          <Text>{presentation.label}</Text>
+      <View style={styles.badges}>
+        <MetaBadge label={`CIS ${result.cis}`} />
+        {result.pharmaceuticalForm === null ? null : (
+          <MetaBadge label={result.pharmaceuticalForm} />
+        )}
+      </View>
+      {result.presentations.length > 0 ? (
+        <View style={styles.presentations}>
+          {result.presentations.map((presentation) => (
+            <View key={presentation.cip13} style={styles.presentation}>
+              <Text style={styles.presentationLabel}>{presentation.label}</Text>
+              <Text style={typography.micro}>CIP13 {presentation.cip13}</Text>
+            </View>
+          ))}
         </View>
-      ))}
+      ) : null}
       <GenericGroupSection cis={result.cis} />
-    </Card>
+      <PillButton
+        height={46}
+        label="Créer un traitement"
+        onPress={() =>
+          router.push({
+            pathname: '/treatments/new',
+            params: {
+              cis: result.cis,
+              name: result.name,
+              form: result.pharmaceuticalForm ?? '',
+              ...(returnTo ? { returnTo } : {}),
+            },
+          })
+        }
+      />
+    </AppCard>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.background,
-    flex: 1,
-    gap: spacing.lg,
-    padding: spacing.lg,
-  },
-  createTreatment: {
-    backgroundColor: colors.brand,
-    borderRadius: 12,
-    color: colors.surface,
-    fontWeight: '700',
-    marginTop: 8,
-    minHeight: 48,
-    overflow: 'hidden',
-    padding: 13,
-    textAlign: 'center',
-  },
-  name: typography.heading,
+  name: { ...typography.cardTitle, fontSize: 16, lineHeight: 20 },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  presentations: { gap: 9 },
   presentation: {
-    borderLeftColor: colors.border,
+    borderLeftColor: colors.cardBorder,
     borderLeftWidth: 2,
-    marginTop: spacing.sm,
-    paddingLeft: spacing.sm,
+    gap: 2,
+    paddingLeft: 10,
   },
-  result: { marginBottom: spacing.md },
+  presentationLabel: {
+    color: colors.text,
+    fontSize: 12.5,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
 });

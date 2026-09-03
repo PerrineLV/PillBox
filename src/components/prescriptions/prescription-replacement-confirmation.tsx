@@ -34,14 +34,14 @@ export function PrescriptionReplacementConfirmation({
       onCancel={onSkip}
       onPrimary={onConfirm}
     >
-      <Text style={typography.body}>
+      <Text style={typography.detail}>
         {`« ${overlapping.label} »${
           overlapping.validUntil !== null
             ? ` (valide jusqu’au ${formatLongFrenchCivilDate(overlapping.validUntil)})`
             : ''
         } couvre déjà au moins un des traitements de cette ordonnance.`}
       </Text>
-      <Text style={typography.body}>
+      <Text style={typography.detail}>
         En confirmant, cette ordonnance précédente sera marquée comme remplacée
         et restera consultable dans l’historique. Sans confirmation, les deux
         ordonnances resteront actives.
