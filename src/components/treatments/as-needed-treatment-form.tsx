@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import type { TreatmentDraft } from '@/domain/treatments/treatment';
-import { AppButton, AppField, Message, spacing, typography } from '@/ui';
+import { AppField, Banner, Message, PillButton } from '@/ui';
 
 type Props = {
   initialValue: TreatmentDraft;
@@ -57,16 +57,11 @@ export function AsNeededTreatmentForm({
 
   return (
     <View style={styles.form}>
-      <Text style={styles.name}>{initialValue.specialtyName}</Text>
-      <Text>CIS {initialValue.specialtyCis}</Text>
-      {initialValue.pharmaceuticalForm ? (
-        <Text>{initialValue.pharmaceuticalForm}</Text>
-      ) : null}
-      <Message tone="warning" title="Traitement si besoin">
+      <Banner level="warning" title="Traitement si besoin">
         Ce traitement est pris ponctuellement, sans posologie planifiée. Il
         n’est jamais inclus dans le pilulier et ne génère aucun rappel
         automatique.
-      </Message>
+      </Banner>
       <AppField
         label="Limite maximale par jour (optionnel)"
         inputMode="decimal"
@@ -81,19 +76,20 @@ export function AsNeededTreatmentForm({
         value={minIntervalText}
         onChangeText={setMinIntervalText}
       />
-      <Message tone="info">
-        Ces informations sont uniquement affichées à titre indicatif. PillBox ne
-        calcule jamais quand vous pouvez reprendre ce médicament et ne déclenche
-        aucune alerte à partir de ces valeurs.
-      </Message>
+      <Banner level="neutral">
+        Ces limites sont celles que vous saisissez. PillBox les rappelle sur
+        l’écran de prise et y désactive l’enregistrement tant qu’elles ne sont
+        pas respectées ; elle ne calcule jamais de posologie, ne déduit aucune
+        limite et ne déclenche aucune alerte.
+      </Banner>
       {error ? (
         <Message tone="error" title="Traitement non enregistré">
           {error}
         </Message>
       ) : null}
-      <AppButton
+      <PillButton
+        disabled={saving}
         label={submitLabel}
-        loading={saving}
         onPress={() => void submit()}
       />
     </View>
@@ -117,6 +113,5 @@ function textToInteger(value: string): number | null {
 }
 
 const styles = StyleSheet.create({
-  form: { gap: spacing.md },
-  name: typography.title,
+  form: { gap: 12 },
 });

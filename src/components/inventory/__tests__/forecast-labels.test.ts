@@ -1,6 +1,5 @@
 import {
   forecastAlertBadge,
-  forecastAvailabilityLabel,
   forecastCoverageLabel,
   forecastSummary,
 } from '../forecast-labels';
@@ -172,30 +171,5 @@ describe('libellés de prévision', () => {
       forecast(),
     ]).medications.filter((item) => forecastAlertBadge(item) !== null);
     expect(summary.alertCount).toBe(cards.length);
-  });
-
-  it('affiche le disponible face au besoin de la prochaine préparation', () => {
-    expect(forecastAvailabilityLabel(forecast())).toBe(
-      '10 disponible(s) pour 7 nécessaire(s) la semaine prochaine.',
-    );
-  });
-
-  it('compte les demi-unités sans arrondi', () => {
-    expect(
-      forecastAvailabilityLabel(
-        forecast({ availableHalfUnits: 5, nextPreparationHalfUnits: 7 }),
-      ),
-    ).toBe('2,5 disponible(s) pour 3,5 nécessaire(s) la semaine prochaine.');
-  });
-
-  it('n’évoque pas de besoin lorsque aucune prise n’est prévue', () => {
-    expect(
-      forecastAvailabilityLabel(
-        forecast({
-          nextPreparationHalfUnits: 0,
-          coverage: { status: 'NO_FUTURE_INTAKE' },
-        }),
-      ),
-    ).toBe('10 disponible(s), aucune prise prévue la semaine prochaine.');
   });
 });

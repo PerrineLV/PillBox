@@ -29,12 +29,12 @@ export function DuplicateLotConfirmation({
       onCancel={onCancel}
       onPrimary={onConfirm}
     >
-      <Text style={typography.body}>
+      <Text style={typography.detail}>
         {`Une boîte de ${existingBox.specialtyName} avec le lot ${
           existingBox.lot ?? ''
         } est déjà en stock, avec ${existingBox.remainingQuantity} unité(s) restante(s).`}
       </Text>
-      <Text style={typography.body}>
+      <Text style={typography.detail}>
         S’il s’agit bien d’une boîte supplémentaire portant le même lot,
         confirmez l’ajout. Si le lot a été mal recopié ou scanné deux fois par
         erreur, revenez à la saisie pour le corriger : rien ne sera enregistré.

@@ -30,6 +30,18 @@ export const INTAKE_SLOT_LABELS: Record<IntakeSlot, string> = {
   bedtime: 'Coucher',
 };
 
+/**
+ * Initiales des créneaux, pour les pastilles trop étroites pour un mot. Elles
+ * ne se lisent que dans l'ordre matin → coucher : tout élément qui les affiche
+ * doit porter le libellé complet pour les lecteurs d'écran.
+ */
+export const INTAKE_SLOT_INITIALS: Record<IntakeSlot, string> = {
+  morning: 'M',
+  noon: 'M',
+  evening: 'S',
+  bedtime: 'C',
+};
+
 /** Libellés affichés pour l’origine d’un mouvement de stock. */
 export const STOCK_MOVEMENT_TYPE_LABELS: Record<StockMovementType, string> = {
   BOX_ADDED: 'Ajout de la boîte',

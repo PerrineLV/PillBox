@@ -22,7 +22,7 @@ export function TreatmentDeletionConfirmation({
       onCancel={onCancel}
       onPrimary={onConfirm}
     >
-      <Text style={typography.body}>
+      <Text style={typography.detail}>
         {`Le traitement « ${treatmentName} » sera supprimé définitivement. Cette action est irréversible.`}
       </Text>
     </AppModal>

@@ -1,17 +1,6 @@
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
-import type {
-  RenewalItem,
-  RenewalUrgency,
-} from '@/domain/renewal/renewal-list';
+import type { RenewalItem } from '@/domain/renewal/renewal-list';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
-
-export function renewalUrgencyTone(
-  urgency: RenewalUrgency,
-): 'danger' | 'warning' | 'neutral' {
-  if (urgency === 'INSUFFICIENT_FOR_NEXT_PREPARATION') return 'danger';
-  if (urgency === 'RUNS_OUT_SOON') return 'warning';
-  return 'neutral';
-}
 
 export function renewalAvailabilityLabel(item: RenewalItem): string {
   if (item.usableBoxCount !== null) {

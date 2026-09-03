@@ -133,6 +133,7 @@ PillBox utilise la Base de données publique des médicaments française comme r
 
 - `PROJECT.md` décrit le produit, les règles métier et le périmètre
 - `AGENTS.md` contient les règles suivies par les agents de développement utilisés sur le projet
+- [`docs/charte-graphique.md`](docs/charte-graphique.md) fixe les couleurs de marque et le système d'interface
 - [`docs/RELEASE.md`](docs/RELEASE.md) décrit la publication de l'APK signé
 - [`docs/`](docs/) rassemble les autres notes techniques et scénarios de test
 

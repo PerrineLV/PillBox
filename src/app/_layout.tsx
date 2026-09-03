@@ -8,7 +8,6 @@ import {
 import { useEffect } from 'react';
 import { AppState, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   DatabaseProvider,
@@ -16,6 +15,10 @@ import {
 } from '@/infrastructure/database/database-provider';
 import { MedicationReferenceProvider } from '@/infrastructure/medications/medication-reference-provider';
 import { AppLockGate } from '@/components/privacy/app-lock-gate';
+import {
+  UpdateNoticeProvider,
+  useUpdateNoticeState,
+} from '@/components/updates/update-notice-provider';
 import { BottomNavigation, colors, ToastProvider, typography } from '@/ui';
 import {
   createDeferredNotificationNavigation,
@@ -81,41 +84,57 @@ Notifications.setNotificationHandler({
 
 export default function RootLayout() {
   useNotificationNavigation();
-  const pathname = usePathname();
-  const rootScreen = ['/', '/treatments', '/inventory', '/more'].includes(
-    pathname,
-  );
   return (
     <MedicationReferenceProvider>
       <DatabaseProvider>
         <ToastProvider>
-          <ReminderCoordinator />
-          <TodayWidgetCoordinator />
-          <IntakeActionCoordinator />
-          <AppLockGate>
-            <View style={{ flex: 1 }}>
-              <SafeAreaView
-                edges={rootScreen ? ['top'] : []}
-                style={styles.navigationContent}
-              >
-                <Stack
-                  screenOptions={{
-                    contentStyle: { backgroundColor: colors.background },
-                    headerBackButtonDisplayMode: 'minimal',
-                    headerShadowVisible: false,
-                    headerStyle: { backgroundColor: colors.background },
-                    headerTintColor: colors.brand,
-                    headerTitleStyle: typography.heading,
-                    headerShown: false,
-                  }}
-                />
-              </SafeAreaView>
-              <BottomNavigation />
-            </View>
-          </AppLockGate>
+          {/*
+            Au-dessus du verrou : le verrou démonte son contenu à chaque
+            passage en arrière-plan, ce qui relancerait la vérification de
+            version et rallumerait une pastille déjà écartée.
+          */}
+          <UpdateNoticeProvider>
+            <ReminderCoordinator />
+            <TodayWidgetCoordinator />
+            <IntakeActionCoordinator />
+            <AppLockGate>
+              <View style={{ flex: 1 }}>
+                {/*
+                  La marge de sécurité haute n'est plus posée ici : chaque
+                  écran la prend à son compte, avec la couleur de son propre
+                  en-tête (crème, ou vert profond pour l'accueil, la
+                  préparation et le scan).
+                */}
+                <View style={styles.navigationContent}>
+                  <Stack
+                    screenOptions={{
+                      contentStyle: { backgroundColor: colors.background },
+                      headerBackButtonDisplayMode: 'minimal',
+                      headerShadowVisible: false,
+                      headerStyle: { backgroundColor: colors.background },
+                      headerTintColor: colors.brand,
+                      headerTitleStyle: typography.stackTitle,
+                      headerShown: false,
+                    }}
+                  />
+                </View>
+                <NavigationBar />
+              </View>
+            </AppLockGate>
+          </UpdateNoticeProvider>
         </ToastProvider>
       </DatabaseProvider>
     </MedicationReferenceProvider>
+  );
+}
+
+/** La pastille de l'onglet Plus s'éteint dès que la carte est écartée. */
+function NavigationBar() {
+  const { notice } = useUpdateNoticeState();
+  return (
+    <BottomNavigation
+      badges={notice === null ? undefined : new Set(['/more'])}
+    />
   );
 }
 

@@ -2,10 +2,12 @@ import type { BarcodeScanningResult } from 'expo-camera';
 import { CameraView } from 'expo-camera';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { useBarcodeScanner } from '@/components/scanning/use-barcode-scanner';
+import { StockBoxChoice } from '@/components/preparations/stock-box-choice';
 import { parseGs1DataMatrix } from '@/domain/datamatrix/parse-gs1';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import {
@@ -16,7 +18,6 @@ import {
 import { normalizeScannedGtinToCip13 } from '@/domain/medications/normalize-scanned-identifier';
 import {
   effectiveUsableBoxes,
-  evaluateBoxAvailability,
   listBoxesForMedication,
   matchScannedBox,
   verifyPreparationBox,
@@ -33,20 +34,26 @@ import {
 import { cancelPendingCompletionReminderFor } from '@/infrastructure/reminders/pending-completion-reminder-scheduler';
 import { listGenericEquivalenceConfirmations } from '@/infrastructure/treatments/generic-equivalence-repository';
 import {
-  AppButton,
-  Badge,
-  Card,
+  AppCard,
+  AppScreen,
+  Banner,
+  DenseList,
+  DenseRow,
   EmptyState,
   INTAKE_SLOT_LABELS,
   Message,
-  Screen,
-  SectionTitle,
+  PillButton,
+  Section,
+  SeverityBadge,
+  StackHeader,
+  Tile,
+  TileRow,
   colors,
   radii,
-  spacing,
   typography,
   useToast,
 } from '@/ui';
+import { ScanHeader, Viewfinder } from '@/components/scanning/viewfinder';
 
 type PendingBox = Readonly<{
   method: BoxVerificationMethod;
@@ -70,6 +77,7 @@ export default function CompletePendingCaseScreen() {
   const database = useSQLiteContext();
   const { showToast } = useToast();
   const scanner = useBarcodeScanner();
+  const insets = useSafeAreaInsets();
   const [pendingCase, setPendingCase] = useState<PendingCompletionCase | null>(
     null,
   );
@@ -299,24 +307,22 @@ export default function CompletePendingCaseScreen() {
   if (loading) return <Centered text="Chargement…" />;
   if (notFound)
     return (
-      <Screen>
-        <Stack.Screen options={{ headerShown: true, title: 'Compléter' }} />
+      <AppScreen header={<StackHeader title="Compléter" />}>
         <EmptyState
-          title="Rien à compléter"
           description="Cette case n’est plus en attente de complément, ou n’existe pas."
+          title="Rien à compléter"
         />
-      </Screen>
+      </AppScreen>
     );
 
   if (resolved || (pendingCase && pendingCase.pendingHalfUnits === 0)) {
     return (
-      <Screen>
-        <Stack.Screen options={{ headerShown: true, title: 'Compléter' }} />
-        <Message tone="success" title="Case complétée">
+      <AppScreen header={<StackHeader title="Compléter" />}>
+        <Banner level="ok" title="Case complétée">
           Il ne reste plus aucune case en attente de complément pour ce
           médicament sur cette préparation.
-        </Message>
-      </Screen>
+        </Banner>
+      </AppScreen>
     );
   }
 
@@ -328,61 +334,102 @@ export default function CompletePendingCaseScreen() {
     if (!scanner.permission.granted)
       return (
         <Centered text="La caméra est nécessaire pour vérifier la boîte.">
-          <AppButton
+          <PillButton
             label="Autoriser la caméra"
             onPress={() => void scanner.requestPermission()}
+          />
+          <PillButton
+            label="Annuler"
+            onPress={() => setScanning(false)}
+            tone="outline"
           />
         </Centered>
       );
     return (
       <View style={styles.cameraContainer}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={{ height: insets.top }} />
+        <ScanHeader
+          onBack={() => setScanning(false)}
+          title="Compléter la case"
+        />
         <CameraView
           barcodeScannerSettings={{ barcodeTypes: ['datamatrix'] }}
           onBarcodeScanned={handleScan}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <AppButton
-          label="Annuler"
-          variant="secondary"
-          onPress={() => setScanning(false)}
-        />
+          style={styles.camera}
+        >
+          <Viewfinder caption="Scannez la boîte qui complète cette case" />
+        </CameraView>
       </View>
     );
   }
 
   return (
-    <Screen
-      stickyFooter={
+    <AppScreen
+      footer={
         !pending && !choosing ? (
           <View style={styles.footerActions}>
-            <AppButton label="Scanner la boîte utilisée" onPress={beginScan} />
-            <AppButton
-              label="Choisir la boîte dans le stock"
-              variant="secondary"
-              onPress={beginChoice}
+            <PillButton
+              height={54}
+              label="Scanner la boîte utilisée"
+              onPress={beginScan}
+              tone="accent"
             />
+            <PillButton
+              height={46}
+              label="Choisir la boîte dans le stock"
+              onPress={beginChoice}
+              tone="outline"
+            />
+            <Text style={styles.stockNotice}>
+              Le stock ne sera décrémenté qu’à la validation de ce complément.
+            </Text>
           </View>
         ) : undefined
       }
+      header={
+        <StackHeader
+          subtitle={pendingCase.specialtyName}
+          title="Compléter une case"
+        />
+      }
     >
-      <Stack.Screen options={{ headerShown: true, title: 'Compléter' }} />
-      <SectionTitle>{pendingCase.specialtyName}</SectionTitle>
-      {pendingCase.theoreticalRenewalDate ? (
-        <Text style={typography.caption}>
-          Renouvellement théorique (délivrance encadrée) :{' '}
-          {formatLongFrenchCivilDate(pendingCase.theoreticalRenewalDate)}
-        </Text>
-      ) : null}
-      <Text style={typography.body}>
-        Reste à couvrir : {formatHalfUnits(pendingCase.pendingHalfUnits)}
-      </Text>
-      <Text style={styles.casesTitle}>Cases encore en attente</Text>
-      {pendingCase.pendingItems.map((item) => (
-        <Text key={`${item.date}-${item.slot}`} style={typography.caption}>
-          • {formatLongFrenchCivilDate(item.date)} ·{' '}
-          {INTAKE_SLOT_LABELS[item.slot]}
-        </Text>
-      ))}
+      <Stack.Screen options={{ headerShown: false }} />
+      <AppCard>
+        <TileRow>
+          <Tile
+            label="Reste à couvrir"
+            tone="tint"
+            value={formatHalfUnits(pendingCase.pendingHalfUnits)}
+          />
+          <Tile
+            label="Cases"
+            tone="tint"
+            value={String(pendingCase.pendingItems.length)}
+          />
+        </TileRow>
+        {pendingCase.theoreticalRenewalDate ? (
+          <Text style={typography.micro}>
+            Renouvellement théorique (délivrance encadrée) :{' '}
+            {formatLongFrenchCivilDate(pendingCase.theoreticalRenewalDate)}.
+            Cette date est indicative et ne garantit pas une délivrance.
+          </Text>
+        ) : null}
+      </AppCard>
+      <Section
+        aside={String(pendingCase.pendingItems.length)}
+        label="Cases encore en attente"
+      >
+        <DenseList>
+          {pendingCase.pendingItems.map((item, index) => (
+            <DenseRow
+              first={index === 0}
+              key={`${item.date}-${item.slot}`}
+              title={`${formatLongFrenchCivilDate(item.date)} · ${INTAKE_SLOT_LABELS[item.slot]}`}
+            />
+          ))}
+        </DenseList>
+      </Section>
       {error ? (
         <Message tone="error" title="Action impossible">
           {error}
@@ -411,80 +458,7 @@ export default function CompletePendingCaseScreen() {
           onConfirm={() => void confirmContribution()}
         />
       ) : null}
-    </Screen>
-  );
-}
-
-function StockBoxChoice({
-  boxes,
-  expectedSpecialtyCis,
-  requiredHalfUnits,
-  onCancel,
-  onSelect,
-}: {
-  boxes: readonly MedicationBox[];
-  expectedSpecialtyCis: string;
-  requiredHalfUnits: number;
-  onCancel(): void;
-  onSelect(box: MedicationBox): void;
-}) {
-  const today = todayIso();
-  return (
-    <Card style={styles.card}>
-      <Text style={styles.casesTitle}>Boîtes enregistrées dans le stock</Text>
-      {boxes.length === 0 ? (
-        <Text>
-          Aucune boîte de ce médicament n’est enregistrée dans le stock.
-        </Text>
-      ) : null}
-      {boxes.map((box) => {
-        const availability = evaluateBoxAvailability(
-          box,
-          requiredHalfUnits,
-          today,
-        );
-        return (
-          <Pressable
-            accessibilityLabel={`Boîte numéro ${box.id}, lot ${box.lot ?? 'non renseigné'}, péremption ${formatLongFrenchCivilDate(box.expirationDate)}, reste ${box.remainingQuantity}${
-              availability === 'EXPIRED'
-                ? ', périmée'
-                : availability === 'INSUFFICIENT'
-                  ? ', quantité insuffisante seule'
-                  : ''
-            }${
-              box.specialtyCis !== expectedSpecialtyCis
-                ? `, équivalence générique déjà confirmée : ${box.specialtyName}`
-                : ''
-            }`}
-            accessibilityRole="button"
-            key={box.id}
-            onPress={() => onSelect(box)}
-            style={styles.stockOption}
-          >
-            <Text style={styles.stockOptionTitle}>
-              Boîte #{box.id} · lot {box.lot ?? 'non renseigné'}
-            </Text>
-            <Text>
-              Péremption {formatLongFrenchCivilDate(box.expirationDate)} · reste{' '}
-              {box.remainingQuantity}
-            </Text>
-            {availability === 'EXPIRED' ? (
-              <Badge label="Périmée" tone="danger" />
-            ) : null}
-            {availability === 'INSUFFICIENT' ? (
-              <Badge label="Quantité insuffisante seule" tone="warning" />
-            ) : null}
-            {box.specialtyCis !== expectedSpecialtyCis ? (
-              <Badge
-                label={`Équivalence générique déjà confirmée : ${box.specialtyName}`}
-                tone="warning"
-              />
-            ) : null}
-          </Pressable>
-        );
-      })}
-      <AppButton label="Annuler" variant="quiet" onPress={onCancel} />
-    </Card>
+    </AppScreen>
   );
 }
 
@@ -504,44 +478,49 @@ function BoxConfirmation({
   const isPartial = verification.status === 'PARTIAL';
   return (
     <View style={styles.verified}>
-      <Text style={styles.warningTitle}>
+      <Text style={styles.verifiedTitle}>
         {isPartial
           ? 'Boîte insuffisante seule : contribution partielle'
-          : 'Boîte vérifiée'}
+          : `Boîte vérifiée · lot ${verification.box.lot ?? 'non renseigné'}`}
       </Text>
-      <Badge
+      <SeverityBadge
         label={
           scanned
             ? 'Vérifiée par scan DataMatrix'
             : 'Choisie dans le stock, sans scan'
         }
-        tone={scanned ? 'success' : 'warning'}
+        level={scanned ? 'ok' : 'warning'}
       />
-      <Text>
-        Lot {verification.box.lot ?? 'non renseigné'} · péremption{' '}
-        {formatLongFrenchCivilDate(verification.box.expirationDate)}
+      <Text style={styles.verifiedBody}>
+        {scanned
+          ? 'Vérifiez le lot et la péremption imprimés sur la boîte que vous avez en main.'
+          : 'Boîte choisie dans le stock : vérifiez le lot et la péremption sur la boîte que vous avez en main.'}{' '}
+        Péremption {formatLongFrenchCivilDate(verification.box.expirationDate)}.
       </Text>
       {pending.matchedSpecialtyName ? (
-        <Badge
+        <SeverityBadge
           label={`Équivalence générique confirmée : ${pending.matchedSpecialtyName}`}
-          tone="warning"
+          level="warning"
         />
       ) : null}
-      <Text>
+      <Text style={styles.verifiedBody}>
         Cette boîte couvre {formatHalfUnits(verification.quantityHalfUnits)}
         {isPartial
           ? ` ; il restera ${formatHalfUnits(verification.remainingAfterHalfUnits)} à couvrir ensuite.`
           : '.'}
       </Text>
-      <AppButton
-        loading={saving}
+      <PillButton
+        disabled={saving}
+        height={54}
         label="Compléter avec cette boîte"
         onPress={onConfirm}
+        tone="accent"
       />
-      <AppButton
+      <PillButton
+        height={44}
         label={scanned ? 'Scanner une autre boîte' : 'Choisir une autre boîte'}
-        variant="secondary"
         onPress={onRestart}
+        tone="outline"
       />
     </View>
   );
@@ -556,7 +535,7 @@ function Centered({
 }) {
   return (
     <View style={styles.centered}>
-      <Text>{text}</Text>
+      <Text style={typography.detail}>{text}</Text>
       {children}
     </View>
   );
@@ -567,31 +546,34 @@ function message(reason: unknown, fallback: string): string {
 }
 
 const styles = StyleSheet.create({
-  cameraContainer: { flex: 1, gap: spacing.sm, padding: spacing.md },
-  card: { gap: spacing.sm },
-  casesTitle: { fontWeight: '700', marginTop: spacing.sm },
+  camera: { flex: 1 },
+  cameraContainer: { backgroundColor: colors.headerDark, flex: 1 },
   centered: {
     alignItems: 'center',
+    backgroundColor: colors.background,
     flex: 1,
-    gap: spacing.md,
+    gap: 12,
     justifyContent: 'center',
-    padding: spacing.lg,
+    padding: 20,
   },
-  footerActions: { gap: spacing.sm },
-  stockOption: {
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    gap: 4,
-    marginTop: spacing.sm,
-    padding: spacing.md,
-  },
-  stockOptionTitle: { fontWeight: '700' },
+  footerActions: { gap: 9 },
+  stockNotice: { ...typography.micro, textAlign: 'center' },
   verified: {
     backgroundColor: colors.brandSoft,
-    borderRadius: radii.lg,
-    gap: spacing.sm,
-    padding: spacing.md,
+    borderRadius: radii.card,
+    gap: 9,
+    padding: 14,
   },
-  warningTitle: { fontWeight: '700' },
+  verifiedTitle: {
+    color: colors.brandPressed,
+    fontSize: 13.5,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  verifiedBody: {
+    color: colors.brandPressed,
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 17,
+  },
 });

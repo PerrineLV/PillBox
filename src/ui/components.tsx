@@ -3,22 +3,23 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   type TextInputProps,
-  type StyleProp,
   type TextStyle,
   View,
   type ViewStyle,
 } from 'react-native';
 import { router, usePathname } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 
-import { colors, radii, shadows, sizes, spacing, typography } from './theme';
+import { colors, layout, radii, sizes, typography } from './theme';
 
-type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'quiet';
+type ButtonVariant = 'primary' | 'danger' | 'quiet';
 
 export function AppButton({
   label,
@@ -107,36 +108,6 @@ export function AppField({
   );
 }
 
-export function Card({
-  children,
-  tone = 'default',
-  style,
-}: {
-  children: ReactNode;
-  tone?: 'default' | 'muted';
-  style?: StyleProp<ViewStyle>;
-}) {
-  return (
-    <View style={[styles.card, tone === 'muted' && styles.cardMuted, style]}>
-      {children}
-    </View>
-  );
-}
-
-export function Badge({
-  label,
-  tone = 'neutral',
-}: {
-  label: string;
-  tone?: 'neutral' | 'success' | 'warning' | 'danger';
-}) {
-  return (
-    <View style={[styles.badge, badgeStyles[tone]]}>
-      <Text style={[styles.badgeText, badgeTextStyles[tone]]}>{label}</Text>
-    </View>
-  );
-}
-
 export function Message({
   title,
   children,
@@ -151,18 +122,15 @@ export function Message({
       accessibilityRole={tone === 'error' ? 'alert' : undefined}
       style={[styles.message, messageStyles[tone]]}
     >
-      <Text style={styles.messageSymbol} accessibilityElementsHidden>
-        {tone === 'success'
-          ? '✓'
-          : tone === 'warning'
-            ? '!'
-            : tone === 'error'
-              ? '×'
-              : 'i'}
-      </Text>
       <View style={styles.messageContent}>
-        {title ? <Text style={styles.messageTitle}>{title}</Text> : null}
-        <Text style={styles.messageBody}>{children}</Text>
+        {title ? (
+          <Text style={[styles.messageTitle, messageTextStyles[tone]]}>
+            {title}
+          </Text>
+        ) : null}
+        <Text style={[styles.messageBody, messageTextStyles[tone]]}>
+          {children}
+        </Text>
       </View>
     </View>
   );
@@ -196,17 +164,6 @@ export function LoadingState({ label = 'Chargement…' }: { label?: string }) {
       <ActivityIndicator color={colors.brand} />
       <Text style={styles.help}>{label}</Text>
     </View>
-  );
-}
-
-export function Divider() {
-  return <View accessibilityElementsHidden style={styles.divider} />;
-}
-export function SectionTitle({ children }: { children: ReactNode }) {
-  return (
-    <Text accessibilityRole="header" style={styles.sectionTitle}>
-      {children}
-    </Text>
   );
 }
 
@@ -252,7 +209,7 @@ export function SelectField<Value extends string>({
         </Text>
       </Pressable>
       {open ? (
-        <Card style={styles.selectMenu}>
+        <View style={styles.selectMenu}>
           {options.map((option) => {
             const isSelected = option.value === value;
             return (
@@ -281,64 +238,6 @@ export function SelectField<Value extends string>({
               </Pressable>
             );
           })}
-        </Card>
-      ) : null}
-    </View>
-  );
-}
-
-/** Grille des quatre temps de prise : matin, midi, soir, coucher. */
-export function SlotGrid({ children }: { children: ReactNode }) {
-  return <View style={styles.slotGrid}>{children}</View>;
-}
-
-export function SlotCard({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <View style={styles.slotCard}>
-      <Text style={styles.label}>{label}</Text>
-      {children}
-    </View>
-  );
-}
-
-export function Screen({
-  children,
-  scroll = true,
-  fixedHeader,
-  stickyFooter,
-  stickyFooterStyle,
-}: {
-  children: ReactNode;
-  scroll?: boolean;
-  fixedHeader?: ReactNode;
-  stickyFooter?: ReactNode;
-  stickyFooterStyle?: ViewStyle;
-}) {
-  const content = scroll ? (
-    <ScrollView
-      contentContainerStyle={styles.screenContent}
-      keyboardShouldPersistTaps="handled"
-    >
-      {children}
-    </ScrollView>
-  ) : (
-    <View style={styles.screenContent}>{children}</View>
-  );
-  return (
-    <View style={styles.screen}>
-      {fixedHeader ? (
-        <View style={styles.fixedHeader}>{fixedHeader}</View>
-      ) : null}
-      {content}
-      {stickyFooter ? (
-        <View style={[styles.stickyFooter, stickyFooterStyle]}>
-          {stickyFooter}
         </View>
       ) : null}
     </View>
@@ -352,13 +251,28 @@ const NAV_ITEMS = [
   { href: '/more' as const, label: 'Plus' },
 ];
 
-export function BottomNavigation() {
-  const pathname = usePathname();
-  const visible =
+/**
+ * Écrans qui gardent la barre d'onglets. Exportée pour que les écrans sachent
+ * si la marge de sécurité basse est déjà consommée par la barre.
+ */
+export function isBottomNavigationVisible(pathname: string): boolean {
+  return (
     NAV_ITEMS.some(({ href }) => pathname === href) ||
     pathname === '/preparations/new' ||
-    pathname === '/inventory/new';
-  if (!visible) return null;
+    pathname === '/inventory/new'
+  );
+}
+
+/**
+ * `badges` porte les destinations qui réclament l'attention. La barre reste
+ * ignorante de ce qui les motive : elle affiche une pastille, la raison
+ * appartient à qui la lui passe.
+ */
+export function BottomNavigation({
+  badges,
+}: Readonly<{ badges?: ReadonlySet<string> }> = {}) {
+  const pathname = usePathname();
+  if (!isBottomNavigationVisible(pathname)) return null;
   return (
     <SafeAreaView edges={['bottom']} style={styles.navigationSafeArea}>
       <View accessibilityRole="tablist" style={styles.bottomNavigation}>
@@ -376,11 +290,17 @@ export function BottomNavigation() {
                 pressed && styles.navItemPressed,
               ]}
             >
-              <View accessibilityElementsHidden style={styles.navIconArea}>
+              <View
+                accessibilityElementsHidden
+                style={[styles.navIconArea, selected && styles.navIconActive]}
+              >
                 <NavigationIcon
                   kind={item.href}
-                  color={selected ? colors.brand : colors.textMuted}
+                  color={selected ? colors.brandPressed : colors.textTertiary}
                 />
+                {badges?.has(item.href) ? (
+                  <View style={styles.navBadge} />
+                ) : null}
               </View>
               <Text
                 adjustsFontSizeToFit
@@ -454,6 +374,7 @@ export function AppModal({
   destructive?: boolean;
   busy?: boolean;
 }) {
+  const insets = useSafeAreaInsets();
   return (
     <Modal
       animationType="fade"
@@ -462,8 +383,12 @@ export function AppModal({
       onRequestClose={onCancel}
     >
       <View style={styles.modalOverlay}>
-        <View accessibilityViewIsModal style={styles.modal}>
-          <Text accessibilityRole="header" style={typography.title}>
+        <View
+          accessibilityViewIsModal
+          style={[styles.modal, { paddingBottom: insets.bottom + 26 }]}
+        >
+          <View accessibilityElementsHidden style={styles.modalHandle} />
+          <Text accessibilityRole="header" style={typography.stackTitle}>
             {title}
           </Text>
           <View>{children}</View>
@@ -487,43 +412,30 @@ export function AppModal({
 
 const buttonStyles: Record<ButtonVariant, ViewStyle> = {
   primary: { backgroundColor: colors.brand },
-  secondary: {
-    backgroundColor: colors.surface,
-    borderColor: colors.brand,
-    borderWidth: 1.5,
-  },
-  danger: { backgroundColor: colors.danger },
+  danger: { borderColor: colors.destructive, borderWidth: 1.5 },
   quiet: { backgroundColor: 'transparent' },
 };
 const pressedStyles: Record<ButtonVariant, ViewStyle> = {
   primary: { backgroundColor: colors.brandPressed },
-  secondary: { backgroundColor: colors.brandSoft },
-  danger: { backgroundColor: colors.dangerPressed },
+  danger: { backgroundColor: colors.destructive },
   quiet: { backgroundColor: colors.surfaceMuted },
 };
 const buttonTextStyles: Record<ButtonVariant, TextStyle> = {
-  primary: { color: colors.surface },
-  secondary: { color: colors.brand },
-  danger: { color: colors.surface },
+  primary: { color: colors.onDark },
+  danger: { color: colors.destructive },
   quiet: { color: colors.brand },
 };
-const badgeStyles = {
-  neutral: { backgroundColor: colors.surfaceMuted },
+const messageStyles = {
+  info: { backgroundColor: colors.brandSoft },
   success: { backgroundColor: colors.successSoft },
   warning: { backgroundColor: colors.warningSoft },
-  danger: { backgroundColor: colors.dangerSoft },
+  error: { backgroundColor: colors.destructiveSoft },
 };
-const badgeTextStyles = {
-  neutral: { color: colors.textMuted },
+const messageTextStyles = {
+  info: { color: colors.brandPressed },
   success: { color: colors.success },
   warning: { color: colors.warning },
-  danger: { color: colors.danger },
-};
-const messageStyles = {
-  info: { backgroundColor: colors.brandSoft, borderColor: colors.brand },
-  success: { backgroundColor: colors.successSoft, borderColor: colors.success },
-  warning: { backgroundColor: colors.warningSoft, borderColor: colors.warning },
-  error: { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
+  error: { color: colors.destructive },
 };
 
 const styles = StyleSheet.create({
@@ -531,192 +443,225 @@ const styles = StyleSheet.create({
   fixedHeader: {
     alignSelf: 'center',
     backgroundColor: colors.background,
-    gap: spacing.lg,
+    gap: 12,
     maxWidth: sizes.screenMaxWidth,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: 6,
     width: '100%',
   },
   screenContent: {
     alignSelf: 'center',
     flexGrow: 1,
-    gap: spacing.lg,
+    gap: layout.sectionGap,
     maxWidth: sizes.screenMaxWidth,
-    padding: spacing.lg,
-    paddingBottom: spacing.xxl,
+    paddingBottom: 22,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: layout.sectionGap,
     width: '100%',
   },
   stickyFooter: {
     backgroundColor: colors.surface,
-    borderTopColor: colors.border,
+    borderTopColor: colors.cardBorder,
     borderTopWidth: 1,
-    padding: spacing.md,
+    padding: 12,
   },
   button: {
     alignItems: 'center',
-    borderRadius: radii.md,
+    borderRadius: radii.pill,
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: 9,
     justifyContent: 'center',
-    minHeight: sizes.touch,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    minHeight: 46,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   buttonDisabled: {
     backgroundColor: colors.disabled,
     borderColor: colors.disabled,
   },
-  buttonText: { fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  buttonText: { ...typography.buttonLabel, textAlign: 'center' },
   buttonTextDisabled: { color: colors.disabledText },
-  field: { gap: spacing.sm },
-  label: typography.label,
+  field: { gap: 6 },
+  label: {
+    color: colors.text,
+    fontSize: 13.5,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
   input: {
     backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.md,
+    borderColor: colors.cardBorder,
+    borderRadius: radii.tile,
     borderWidth: 1,
     color: colors.text,
-    fontSize: 16,
-    minHeight: sizes.touch,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    fontSize: 14.5,
+    fontWeight: '600',
+    minHeight: sizes.minTouch,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
   },
-  multiline: { minHeight: 96, textAlignVertical: 'top' },
-  inputError: { borderColor: colors.danger, borderWidth: 2 },
-  fieldError: { ...typography.caption, color: colors.danger },
-  help: typography.caption,
+  multiline: { minHeight: 88, textAlignVertical: 'top' },
+  inputError: { borderColor: colors.destructive, borderWidth: 1.5 },
+  fieldError: { ...typography.micro, color: colors.destructive },
+  help: typography.micro,
   card: {
-    ...shadows.card,
     backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radii.lg,
+    borderColor: colors.cardBorder,
+    borderRadius: radii.card,
     borderWidth: 1,
-    gap: spacing.sm,
-    padding: spacing.lg,
+    gap: 11,
+    padding: 16,
   },
-  cardMuted: { backgroundColor: colors.surfaceMuted },
+  cardMuted: { backgroundColor: colors.surfaceMuted, borderWidth: 0 },
   badge: {
     alignSelf: 'flex-start',
     borderRadius: radii.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  badgeText: { fontSize: 13, fontWeight: '700' },
+  badgeText: { fontSize: 11, fontWeight: '700', lineHeight: 14 },
   message: {
-    borderLeftWidth: 4,
-    borderRadius: radii.md,
+    borderRadius: radii.banner,
     flexDirection: 'row',
-    gap: spacing.md,
-    padding: spacing.md,
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  messageSymbol: { fontSize: 18, fontWeight: '900' },
-  messageContent: { flex: 1, gap: spacing.xs },
-  messageTitle: typography.label,
-  messageBody: typography.body,
+  messageContent: { flex: 1, gap: 3 },
+  messageTitle: { fontSize: 13, fontWeight: '700', lineHeight: 17 },
+  messageBody: { fontSize: 12.5, fontWeight: '500', lineHeight: 18 },
   empty: {
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.xxl,
+    gap: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 28,
   },
-  emptyTitle: { ...typography.heading, textAlign: 'center' },
+  emptyTitle: { ...typography.cardTitle, textAlign: 'center' },
   loading: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: 9,
     justifyContent: 'center',
-    padding: spacing.xl,
+    padding: 22,
   },
-  divider: {
-    backgroundColor: colors.border,
-    height: 1,
-    marginVertical: spacing.sm,
-  },
-  sectionTitle: typography.heading,
+  sectionTitle: typography.sectionLabel,
   selectButton: {
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.md,
+    borderColor: colors.cardBorder,
+    borderRadius: radii.tile,
     borderWidth: 1,
     flexDirection: 'row',
-    minHeight: sizes.touch,
-    paddingHorizontal: spacing.lg,
+    minHeight: sizes.minTouch,
+    paddingHorizontal: 14,
   },
-  selectText: { ...typography.body, flex: 1, fontWeight: '700' },
-  selectMuted: { color: colors.textMuted, fontWeight: '400' },
-  selectChevron: { color: colors.brand, fontSize: 22 },
-  selectMenu: { gap: 0, padding: spacing.xs },
+  selectText: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 14.5,
+    fontWeight: '600',
+  },
+  selectMuted: { color: colors.textTertiary, fontWeight: '500' },
+  selectChevron: { color: colors.textTertiary, fontSize: 20 },
+  selectMenu: {
+    backgroundColor: colors.surface,
+    borderColor: colors.cardBorder,
+    borderRadius: radii.card,
+    borderWidth: 1,
+    overflow: 'hidden',
+    padding: 4,
+  },
   selectOption: {
     alignItems: 'center',
-    borderRadius: radii.md,
+    borderRadius: radii.tile,
     flexDirection: 'row',
-    minHeight: sizes.touch,
-    paddingHorizontal: spacing.md,
+    minHeight: sizes.minTouch,
+    paddingHorizontal: 12,
   },
   selectOptionSelected: { backgroundColor: colors.brandSoft },
-  selectOptionText: { ...typography.body, flex: 1 },
-  selectOptionTextSelected: { color: colors.brand, fontWeight: '700' },
-  selectCheck: { color: colors.success, fontSize: 18, fontWeight: '800' },
-  slotGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  slotCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    gap: spacing.sm,
-    minWidth: 140,
-    padding: spacing.md,
-    width: '48%',
+  selectOptionText: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
   },
+  selectOptionTextSelected: { color: colors.brandPressed, fontWeight: '700' },
+  selectCheck: { color: colors.brand, fontSize: 16, fontWeight: '800' },
   modalOverlay: {
     backgroundColor: colors.overlay,
     flex: 1,
-    justifyContent: 'center',
-    padding: spacing.lg,
+    justifyContent: 'flex-end',
   },
   modal: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    gap: spacing.lg,
-    maxWidth: 520,
-    padding: spacing.xl,
-    width: '100%',
     alignSelf: 'center',
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radii.sheet,
+    borderTopRightRadius: radii.sheet,
+    gap: 12,
+    maxWidth: 520,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    width: '100%',
+  },
+  modalHandle: {
+    alignSelf: 'center',
+    backgroundColor: colors.border,
+    borderRadius: radii.pill,
+    height: 4,
+    marginBottom: 2,
+    width: 38,
   },
   navigationSafeArea: {
     backgroundColor: colors.surface,
-    borderTopColor: colors.border,
+    borderTopColor: colors.cardBorder,
     borderTopWidth: 1,
   },
   bottomNavigation: {
     alignSelf: 'center',
     flexDirection: 'row',
-    height: 60,
     maxWidth: sizes.screenMaxWidth,
-    paddingHorizontal: spacing.sm,
+    paddingBottom: 14,
+    paddingHorizontal: 10,
+    paddingTop: 8,
     width: '100%',
   },
   navItem: {
     alignItems: 'center',
+    gap: 4,
     justifyContent: 'center',
-    minHeight: sizes.touch,
+    minHeight: sizes.minTouch,
     minWidth: 0,
-    overflow: 'hidden',
-    paddingHorizontal: spacing.xs,
     width: '25%',
   },
   navItemPressed: { opacity: 0.72 },
-  navIconArea: { alignItems: 'center', height: 25, justifyContent: 'center' },
+  navIconArea: {
+    alignItems: 'center',
+    borderRadius: radii.pill,
+    height: 28,
+    justifyContent: 'center',
+    width: 52,
+  },
+  navIconActive: { backgroundColor: colors.brandSoft },
+  navBadge: {
+    backgroundColor: colors.accent,
+    borderColor: colors.surface,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
+    height: 8,
+    position: 'absolute',
+    right: 12,
+    top: 2,
+    width: 8,
+  },
   navLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 18,
+    color: colors.textTertiary,
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 13,
     maxWidth: '100%',
     textAlign: 'center',
   },
-  navTextSelected: { color: colors.brand },
+  navTextSelected: { color: colors.brandPressed, fontWeight: '700' },
   homeIcon: { height: 20, width: 22 },
   homeRoof: {
     borderLeftWidth: 2,

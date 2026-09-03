@@ -1,19 +1,20 @@
 import {
-  Stack,
   useFocusEffect,
   useLocalSearchParams,
   useRouter,
   type Href,
 } from 'expo-router';
-import { useSQLiteContext } from 'expo-sqlite';
-import type { SQLiteDatabase } from 'expo-sqlite';
+import { useSQLiteContext, type SQLiteDatabase } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Text } from 'react-native';
 
 import { TreatmentBoxGenericMatch } from '@/components/medications/treatment-box-generic-match';
 import { AsNeededTreatmentForm } from '@/components/treatments/as-needed-treatment-form';
 import { TreatmentForm } from '@/components/treatments/treatment-form';
-import type { TreatmentDosageKind } from '@/domain/treatments/treatment';
+import {
+  TREATMENT_CATEGORY_LABELS,
+  type TreatmentCategory,
+} from '@/components/treatments/treatment-summary';
 import { queueCreatedTreatmentForPrescription } from '@/infrastructure/prescriptions/pending-new-treatment-for-prescription';
 import { synchronizeTreatmentIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
 import { confirmGenericEquivalence } from '@/infrastructure/treatments/generic-equivalence-repository';
@@ -22,7 +23,14 @@ import {
   type PendingGenericEquivalenceDraft,
 } from '@/infrastructure/treatments/pending-generic-equivalence-draft';
 import { createTreatment } from '@/infrastructure/treatments/treatment-repository';
-import { AppButton, colors, spacing } from '@/ui';
+import {
+  AppScreen,
+  ChoicePills,
+  Message,
+  Section,
+  StackHeader,
+  typography,
+} from '@/ui';
 
 type SpecialtyBase = {
   specialtyCis: string;
@@ -30,28 +38,34 @@ type SpecialtyBase = {
   pharmaceuticalForm: string | null;
 };
 
+const CATEGORY_OPTIONS: readonly {
+  value: TreatmentCategory;
+  label: string;
+}[] = [
+  { value: 'PILLBOX', label: TREATMENT_CATEGORY_LABELS.PILLBOX },
+  { value: 'OUTSIDE', label: TREATMENT_CATEGORY_LABELS.OUTSIDE },
+  { value: 'AS_NEEDED', label: TREATMENT_CATEGORY_LABELS.AS_NEEDED },
+];
+
 export default function NewTreatmentScreen() {
   const params = useLocalSearchParams<{
     cis?: string;
     name?: string;
     form?: string;
     /**
-     * Présent lorsque cet écran est atteint depuis une ligne d'ordonnance
-     * (ticket 46) : le traitement créé doit revenir vers cet écran plutôt
-     * que vers la liste des traitements, sans perdre le brouillon
-     * d'ordonnance déjà saisi (voir `PrescriptionForm`).
+     * Présent lorsque cet écran est atteint depuis une ligne d'ordonnance :
+     * le traitement créé doit revenir vers cet écran plutôt que vers la liste
+     * des traitements, sans perdre le brouillon d'ordonnance déjà saisi.
      */
     returnTo?: string;
   }>();
   const database = useSQLiteContext();
   const router = useRouter();
+  const [category, setCategory] = useState<TreatmentCategory>('PILLBOX');
 
   // `dismissTo` plutôt que `replace` : cet écran est toujours atteint via
-  // `/medications/search` (poussé par-dessus la liste des traitements), que
-  // `replace` laisserait dans la pile sous le nouvel écran remplacé. `dismissTo`
-  // dépile jusqu'à l'écran des traitements déjà existant plus bas dans la
-  // pile, qu'il s'agisse du cas normal ou du retour vers une ordonnance en
-  // cours (ticket 46).
+  // `/medications/search`, poussé par-dessus la liste des traitements, que
+  // `replace` laisserait dans la pile sous l'écran remplacé.
   function finishTreatmentCreation(treatmentId: number): void {
     if (params.returnTo) {
       queueCreatedTreatmentForPrescription(treatmentId);
@@ -60,10 +74,16 @@ export default function NewTreatmentScreen() {
     }
     router.dismissTo('/treatments');
   }
-  const [kind, setKind] = useState<TreatmentDosageKind>('SCHEDULED');
 
-  if (!params.cis || !params.name)
-    return <Text>Spécialité manquante. Revenez à la recherche.</Text>;
+  if (!params.cis || !params.name) {
+    return (
+      <AppScreen header={<StackHeader title="Nouveau traitement" />}>
+        <Message tone="error" title="Spécialité manquante">
+          Revenez à la recherche pour choisir un médicament du référentiel.
+        </Message>
+      </AppScreen>
+    );
+  }
 
   const base: SpecialtyBase = {
     specialtyCis: params.cis,
@@ -72,15 +92,27 @@ export default function NewTreatmentScreen() {
   };
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
+    <AppScreen
+      header={
+        <StackHeader subtitle={base.specialtyName} title="Nouveau traitement" />
+      }
     >
-      <Stack.Screen
-        options={{ headerShown: true, title: 'Nouveau traitement' }}
-      />
-      <DosageKindPicker kind={kind} onChange={setKind} />
-      {kind === 'AS_NEEDED' ? (
+      <Section label="Type de posologie">
+        <ChoicePills
+          onChange={(next) => setCategory(next)}
+          options={CATEGORY_OPTIONS}
+          value={category}
+        />
+        <Text style={typography.micro}>
+          {category === 'AS_NEEDED'
+            ? 'Aucun créneau n’est planifié : la prise est enregistrée au moment où elle a lieu.'
+            : category === 'OUTSIDE'
+              ? 'La prise reste suivie et rappelée, mais le médicament n’est pas déposé dans le pilulier.'
+              : 'Le médicament est déposé dans le pilulier lors de la préparation hebdomadaire.'}
+        </Text>
+      </Section>
+
+      {category === 'AS_NEEDED' ? (
         <AsNeededTreatmentForm
           initialValue={{
             ...base,
@@ -92,32 +124,36 @@ export default function NewTreatmentScreen() {
               minIntervalHours: null,
             },
           }}
-          submitLabel="Créer le traitement"
           onSubmit={async (draft) => {
             const treatmentId = await createTreatment(database, draft);
             finishTreatmentCreation(treatmentId);
           }}
+          submitLabel="Créer le traitement"
         />
       ) : (
         <ScheduledTreatmentCreation
-          database={database}
           base={base}
+          database={database}
           finishTreatmentCreation={finishTreatmentCreation}
+          includedInPillbox={category === 'PILLBOX'}
+          key={category}
         />
       )}
-    </ScrollView>
+    </AppScreen>
   );
 }
 
 function ScheduledTreatmentCreation({
   database,
   base,
+  includedInPillbox,
   finishTreatmentCreation,
-}: {
+}: Readonly<{
   database: SQLiteDatabase;
   base: SpecialtyBase;
+  includedInPillbox: boolean;
   finishTreatmentCreation: (treatmentId: number) => void;
-}) {
+}>) {
   const [createdTreatment, setCreatedTreatment] = useState<{
     id: number;
     specialtyCis: string;
@@ -128,8 +164,8 @@ function ScheduledTreatmentCreation({
   >([]);
 
   // Dépile les équivalences confirmées pendant un aller-retour vers l'ajout
-  // de boîte (ticket 29) : elles ne peuvent être enregistrées qu'une fois le
-  // traitement effectivement créé, faute d'identifiant avant cela.
+  // de boîte : elles ne peuvent être enregistrées qu'une fois le traitement
+  // effectivement créé, faute d'identifiant avant cela.
   useFocusEffect(
     useCallback(() => {
       const drained = drainPendingGenericEquivalenceDrafts();
@@ -141,22 +177,16 @@ function ScheduledTreatmentCreation({
   return (
     <>
       <TreatmentForm
-        personalDatabase={database}
-        treatmentId={null}
-        pendingEquivalenceCis={pendingEquivalences.map(
-          (equivalence) => equivalence.cis,
-        )}
         initialValue={{
           ...base,
           dosageKind: 'SCHEDULED',
-          includedInPillbox: true,
+          includedInPillbox,
           phases: [],
           asNeededInfo: {
             maxQuantityPerDayHalfUnits: null,
             minIntervalHours: null,
           },
         }}
-        submitLabel="Créer le traitement"
         onSubmit={async (draft) => {
           const treatmentId = await createTreatment(database, draft);
           await synchronizeTreatmentIntakeReminders(database, treatmentId);
@@ -174,48 +204,23 @@ function ScheduledTreatmentCreation({
             specialtyName: draft.specialtyName,
           });
         }}
+        pendingEquivalenceCis={pendingEquivalences.map(
+          (equivalence) => equivalence.cis,
+        )}
+        personalDatabase={database}
+        showPillboxToggle={false}
+        submitLabel="Créer le traitement"
+        treatmentId={null}
       />
       {createdTreatment ? (
         <TreatmentBoxGenericMatch
+          onDone={() => finishTreatmentCreation(createdTreatment.id)}
           personalDatabase={database}
-          treatmentId={createdTreatment.id}
           specialtyCis={createdTreatment.specialtyCis}
           specialtyName={createdTreatment.specialtyName}
-          onDone={() => finishTreatmentCreation(createdTreatment.id)}
+          treatmentId={createdTreatment.id}
         />
       ) : null}
     </>
   );
 }
-
-function DosageKindPicker({
-  kind,
-  onChange,
-}: {
-  kind: TreatmentDosageKind;
-  onChange: (kind: TreatmentDosageKind) => void;
-}) {
-  return (
-    <View style={styles.kindPicker}>
-      <AppButton
-        label="Posologie planifiée"
-        variant={kind === 'SCHEDULED' ? 'primary' : 'secondary'}
-        onPress={() => onChange('SCHEDULED')}
-      />
-      <AppButton
-        label="Si besoin"
-        variant={kind === 'AS_NEEDED' ? 'primary' : 'secondary'}
-        onPress={() => onChange('AS_NEEDED')}
-      />
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: colors.background,
-    flexGrow: 1,
-    padding: spacing.lg,
-  },
-  kindPicker: { flexDirection: 'row', gap: spacing.sm },
-});

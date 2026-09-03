@@ -7,7 +7,7 @@ import {
   type GenericGroupMember,
 } from '@/infrastructure/medications/medication-reference';
 import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
-import { Card, colors, spacing, typography } from '@/ui';
+import { AppCard, colors, typography } from '@/ui';
 
 /**
  * Section purement informative : liste les autres membres du groupe
@@ -43,7 +43,7 @@ export function GenericGroupSection({ cis }: { cis: string }) {
   const action = expanded ? 'Replier' : 'Déplier';
 
   return (
-    <Card tone="muted" style={styles.card}>
+    <AppCard tone="muted">
       <Pressable
         accessibilityLabel={`${action} la section Groupe générique, ${memberCount} spécialité${memberCount > 1 ? 's' : ''}`}
         accessibilityRole="button"
@@ -86,7 +86,7 @@ export function GenericGroupSection({ cis }: { cis: string }) {
           ))}
         </>
       ) : null}
-    </Card>
+    </AppCard>
   );
 }
 
@@ -99,29 +99,39 @@ export function GenericGroupSectionWithDatabase({ cis }: { cis: string }) {
 }
 
 const styles = StyleSheet.create({
-  card: { marginTop: spacing.sm },
   chevron: {
-    color: colors.brand,
+    color: colors.textTertiary,
     flexShrink: 0,
-    fontSize: 22,
-    marginLeft: spacing.xs,
+    fontSize: 20,
+    marginLeft: 4,
   },
   chevronExpanded: { transform: [{ rotate: '90deg' }] },
-  count: { color: colors.textMuted, fontSize: 13 },
-  disclaimer: {
-    color: colors.textMuted,
-    fontSize: 13,
-    marginBottom: spacing.sm,
-    marginTop: spacing.sm,
+  count: {
+    ...typography.numeric,
+    color: colors.textTertiary,
+    fontSize: 11.5,
+    fontWeight: '700',
+    lineHeight: 14,
   },
-  group: { marginTop: spacing.xs },
-  groupLabel: { fontWeight: '700' },
+  disclaimer: { ...typography.micro, marginTop: 3 },
+  group: { gap: 3, marginTop: 6 },
+  groupLabel: {
+    color: colors.text,
+    fontSize: 12.5,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
   header: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  headerRight: { alignItems: 'center', flexDirection: 'row' },
-  member: { color: colors.text, marginTop: 2 },
-  title: { ...typography.heading },
+  headerRight: { alignItems: 'center', flexDirection: 'row', gap: 4 },
+  member: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 16,
+  },
+  title: typography.sectionLabel,
 });

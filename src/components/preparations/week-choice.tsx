@@ -8,7 +8,7 @@ import {
   type PreparationWeekChoice,
   type PreparationWeekState,
 } from '@/domain/preparations/preparation';
-import { AppButton, Badge, Card, Message, SectionTitle } from '@/ui';
+import { AppCard, Banner, PillButton, SectionLabel, SeverityBadge } from '@/ui';
 
 import { WEEK_LABELS } from './labels';
 import { styles } from './styles';
@@ -33,8 +33,8 @@ export function WeekChoice({
   onStart(): void;
 }) {
   return (
-    <Card style={styles.card}>
-      <SectionTitle>Quelle semaine préparer ?</SectionTitle>
+    <AppCard>
+      <SectionLabel>Quelle semaine préparer ?</SectionLabel>
       <View accessibilityRole="radiogroup" style={styles.weekOptions}>
         {options.map((option) => {
           const state = preparationWeekState(option.startDate, weeks);
@@ -56,32 +56,32 @@ export function WeekChoice({
                 {formatFrenchCivilPeriod(option.startDate, option.endDate)}
               </Text>
               {state === 'ALREADY_PREPARED' ? (
-                <Badge label="Déjà préparée" tone="success" />
+                <SeverityBadge label="Déjà préparée" level="ok" />
               ) : null}
               {state === 'IN_PROGRESS' ? (
-                <Badge label="Préparation en cours" tone="warning" />
+                <SeverityBadge label="Préparation en cours" level="warning" />
               ) : null}
             </Pressable>
           );
         })}
       </View>
       {selectedState === 'ALREADY_PREPARED' ? (
-        <Message tone="warning" title="Semaine déjà préparée">
+        <Banner level="warning" title="Semaine déjà préparée">
           Une préparation validée existe déjà pour cette période. Choisissez une
           autre semaine plutôt que de créer un doublon.
-        </Message>
+        </Banner>
       ) : null}
       {selectedState === 'IN_PROGRESS' ? (
-        <Message tone="warning" title="Préparation déjà commencée">
+        <Banner level="warning" title="Préparation déjà commencée">
           Une préparation incomplète existe pour cette période. Reprenez-la
           depuis l’accueil plutôt que d’en créer une nouvelle.
-        </Message>
+        </Banner>
       ) : null}
-      <AppButton
-        label="Générer la préparation de 7 jours"
+      <PillButton
         disabled={selectedState !== 'AVAILABLE'}
+        label="Générer la préparation de 7 jours"
         onPress={onStart}
       />
-    </Card>
+    </AppCard>
   );
 }
