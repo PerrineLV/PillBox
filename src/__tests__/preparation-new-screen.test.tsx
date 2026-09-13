@@ -231,6 +231,26 @@ beforeEach(() => {
   mockedListPrescriptionItems.mockResolvedValue([]);
 });
 
+describe('démarrage de la prochaine préparation', () => {
+  it('ouvre directement les sept jours à venir sans demander de choisir une semaine', async () => {
+    const single = treatment();
+    const stockBox = box();
+    mockedGetLatestDraftPreparation.mockResolvedValue(null);
+    mockedListMedicationBoxes.mockResolvedValue([stockBox]);
+    mockedListPreparationWeeks.mockResolvedValue([]);
+    mockedListTreatments.mockResolvedValue([single]);
+    mockedCreatePreparation.mockResolvedValue(88);
+
+    const renderer = await renderScreen();
+
+    expect(mockedCreatePreparation).toHaveBeenCalledTimes(1);
+    expect(textOf(renderer)).not.toContain('Quelle semaine préparer');
+    expect(textOf(renderer)).toContain('Médicament ');
+    expect(textOf(renderer)).toContain('du 14 au 20 septembre');
+    expect(textOf(renderer)).toContain('Alpha');
+  });
+});
+
 describe('validation finale d’une préparation', () => {
   it('valide une préparation entièrement couverte et affiche la confirmation', async () => {
     const single = treatment();

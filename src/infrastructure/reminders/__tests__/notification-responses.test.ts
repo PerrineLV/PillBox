@@ -21,7 +21,7 @@ const mockScheduleNotificationAsync = jest.fn<Promise<string>, [unknown]>();
 
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 
-jest.mock('expo-notifications', () => ({
+jest.mock('../expo-local-notifications', () => ({
   AndroidImportance: { DEFAULT: 3 },
   AndroidNotificationVisibility: { PRIVATE: 0 },
   DEFAULT_ACTION_IDENTIFIER: 'expo.modules.notifications.actions.DEFAULT',

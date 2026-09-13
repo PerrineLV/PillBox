@@ -19,6 +19,17 @@ function week(
   }));
 }
 
+function quantifiedWeek(
+  slot: IntakeSlot,
+  specialtyCis: string,
+  days = 7,
+): WeeklyGridItem[] {
+  return week(slot, specialtyCis, days).map((item) => ({
+    ...item,
+    quantityHalfUnits: 2,
+  }));
+}
+
 describe('grille de la semaine', () => {
   const items = [
     ...week('morning', '60000001'),
@@ -53,6 +64,56 @@ describe('grille de la semaine', () => {
     expect(grid.rows[0][0]).toBe('READY');
     // Le midi porte aussi 60000003, encore à déposer.
     expect(grid.rows[1][0]).toBe('TO_PREPARE');
+  });
+
+  it('ne marque que les prises réellement couvertes par une contribution partielle', () => {
+    const grid = buildWeeklyGrid({
+      startDate: START,
+      items: quantifiedWeek('morning', '60000001', 3),
+      preparedContributions: [
+        { specialtyCis: '60000001', quantityHalfUnits: 2 },
+      ],
+      currentCis: '60000001',
+    });
+
+    expect(grid.preparedCases).toBe(1);
+    expect(grid.rows[0]).toEqual([
+      'READY',
+      'CURRENT',
+      'CURRENT',
+      'EMPTY',
+      'EMPTY',
+      'EMPTY',
+      'EMPTY',
+    ]);
+  });
+
+  it('ne reporte pas le reliquat d’une prise partielle sur une prise plus petite', () => {
+    const items: WeeklyGridItem[] = [
+      {
+        date: START,
+        slot: 'morning',
+        specialtyCis: '60000001',
+        quantityHalfUnits: 4,
+      },
+      {
+        date: addCivilDays(START, 1),
+        slot: 'morning',
+        specialtyCis: '60000001',
+        quantityHalfUnits: 2,
+      },
+    ];
+    const grid = buildWeeklyGrid({
+      startDate: START,
+      items,
+      preparedContributions: [
+        { specialtyCis: '60000001', quantityHalfUnits: 3 },
+      ],
+      currentCis: '60000001',
+    });
+
+    expect(grid.preparedCases).toBe(0);
+    expect(grid.rows[0].slice(0, 2)).toEqual(['CURRENT', 'CURRENT']);
   });
 
   it('laisse vide un jour sans prise, sans le compter comme à préparer', () => {

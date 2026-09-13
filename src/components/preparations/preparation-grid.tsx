@@ -19,7 +19,7 @@ export function PreparationGrid({ grid }: Readonly<{ grid: WeeklyGrid }>) {
   if (grid.slots.length === 0) return null;
   return (
     <View
-      accessibilityLabel={`Grille du pilulier : ${grid.preparedCases} cases remplies sur ${grid.totalCases}`}
+      accessibilityLabel={`Grille du pilulier : ${grid.preparedCases} prises déposées sur ${grid.totalCases}`}
       style={styles.grid}
     >
       <View style={styles.row}>
@@ -40,15 +40,47 @@ export function PreparationGrid({ grid }: Readonly<{ grid: WeeklyGrid }>) {
           </Text>
           {row.map((cell, dayIndex) => (
             <View
+              accessibilityLabel={`${formatFrenchWeekday(grid.days[dayIndex])}, ${INTAKE_SLOT_LABELS[grid.slots[rowIndex]]} : ${cellLabels[cell]}`}
               key={grid.days[dayIndex]}
               style={[styles.cell, cellStyles[cell]]}
-            />
+            >
+              {cell === 'EMPTY' ? null : (
+                <Text style={[styles.cellSymbol, cellSymbolStyles[cell]]}>
+                  {cellSymbols[cell]}
+                </Text>
+              )}
+            </View>
           ))}
         </View>
       ))}
+      <View style={styles.legend}>
+        {(['CURRENT', 'READY', 'TO_PREPARE'] as const).map((cell) => (
+          <View key={cell} style={styles.legendItem}>
+            <View style={[styles.legendCell, cellStyles[cell]]}>
+              <Text style={[styles.legendSymbol, cellSymbolStyles[cell]]}>
+                {cellSymbols[cell]}
+              </Text>
+            </View>
+            <Text style={styles.legendLabel}>{cellLabels[cell]}</Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
+
+const cellSymbols: Record<Exclude<WeeklyGridCell, 'EMPTY'>, string> = {
+  TO_PREPARE: '·',
+  CURRENT: '→',
+  READY: '✓',
+};
+
+const cellLabels: Record<WeeklyGridCell, string> = {
+  EMPTY: 'aucune prise',
+  TO_PREPARE: 'plus tard',
+  CURRENT: 'à remplir maintenant',
+  READY: 'complète',
+};
 
 const cellStyles: Record<WeeklyGridCell, object> = {
   EMPTY: {
@@ -62,7 +94,18 @@ const cellStyles: Record<WeeklyGridCell, object> = {
     borderColor: onDarkSurfaces.cellBorder,
     borderWidth: 1,
   },
+  CURRENT: {
+    backgroundColor: onDarkSurfaces.control,
+    borderColor: colors.accentOnDark,
+    borderWidth: 2,
+  },
   READY: { backgroundColor: colors.onDarkMuted },
+};
+
+const cellSymbolStyles: Record<Exclude<WeeklyGridCell, 'EMPTY'>, object> = {
+  TO_PREPARE: { color: colors.onDarkSoft },
+  CURRENT: { color: colors.accentOnDark },
+  READY: { color: colors.headerDark },
 };
 
 const styles = StyleSheet.create({
@@ -93,5 +136,34 @@ const styles = StyleSheet.create({
     lineHeight: 12,
     textAlign: 'center',
   },
-  cell: { borderRadius: radii.cellLarge, flex: 1, height: 24 },
+  cell: {
+    alignItems: 'center',
+    borderRadius: radii.cellLarge,
+    flex: 1,
+    height: 24,
+    justifyContent: 'center',
+  },
+  cellSymbol: { fontSize: 14, fontWeight: '900', lineHeight: 17 },
+  legend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginLeft: 25,
+    marginTop: 4,
+  },
+  legendItem: { alignItems: 'center', flexDirection: 'row', gap: 4 },
+  legendCell: {
+    alignItems: 'center',
+    borderRadius: 4,
+    height: 15,
+    justifyContent: 'center',
+    width: 20,
+  },
+  legendSymbol: { fontSize: 10, fontWeight: '900', lineHeight: 12 },
+  legendLabel: {
+    color: colors.onDarkSoft,
+    fontSize: 8.5,
+    fontWeight: '600',
+    lineHeight: 11,
+  },
 });

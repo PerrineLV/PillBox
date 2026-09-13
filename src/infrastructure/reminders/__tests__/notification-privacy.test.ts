@@ -4,7 +4,7 @@ import {
   PREPARATION_REMINDER_CONTENT,
 } from '../local-notifications';
 
-jest.mock('expo-notifications', () => ({
+jest.mock('../expo-local-notifications', () => ({
   AndroidImportance: { DEFAULT: 3 },
   AndroidNotificationVisibility: { PRIVATE: 0 },
   SchedulableTriggerInputTypes: { WEEKLY: 'weekly' },

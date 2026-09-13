@@ -44,7 +44,7 @@ export function buildWeeklyPillbox({
       grid: buildWeeklyGrid({
         startDate: draft.snapshot.startDate,
         items: draft.snapshot.items,
-        preparedCis: draft.progress.map((entry) => entry.specialtyCis),
+        preparedContributions: draft.progress,
       }),
       state: 'IN_PROGRESS',
     };
