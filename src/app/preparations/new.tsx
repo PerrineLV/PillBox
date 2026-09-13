@@ -4,8 +4,8 @@ import { router, Stack } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useEffect, useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Text, type ScrollView, View } from 'react-native';
 
 import { GenericMatchConfirmation } from '@/components/medications/generic-match-confirmation';
 import {
@@ -53,7 +53,6 @@ import {
   type BoxVerificationMethod,
   type KnownPreparation,
   type PreparationSnapshot,
-  type PreparationWeekChoice,
 } from '@/domain/preparations/preparation';
 import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
 import { type Treatment } from '@/domain/treatments/treatment';
@@ -117,6 +116,8 @@ function NewPreparationScreenContent({
   const referenceDatabase = useMedicationReferenceDatabase();
   const scanner = useBarcodeScanner();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  const autoStartAttempted = useRef(false);
   const [snapshot, setSnapshot] = useState<PreparationSnapshot | null>(null);
   const [preparationId, setPreparationId] = useState<number | null>(null);
   const [boxes, setBoxes] = useState<MedicationBox[]>([]);
@@ -125,7 +126,6 @@ function NewPreparationScreenContent({
     PrescriptionItem[]
   >([]);
   const [weeks, setWeeks] = useState<KnownPreparation[]>([]);
-  const [choice, setChoice] = useState<PreparationWeekChoice>('CURRENT');
   const [progress, setProgress] = useState<SavedPreparationProgress[]>([]);
   const [pending, setPending] = useState<PendingBox | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -154,55 +154,75 @@ function NewPreparationScreenContent({
   const [pendingGenericMatch, setPendingGenericMatch] =
     useState<PendingGenericMatch | null>(null);
   const [confirmingGenericMatch, setConfirmingGenericMatch] = useState(false);
-  const options = useMemo(() => preparationWeeks(todayIso()), []);
+  const upcomingWeek = useMemo(() => preparationWeeks(todayIso())[0], []);
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      getLatestDraftPreparation(personalDatabase),
-      listMedicationBoxes(personalDatabase),
-      listPreparationWeeks(personalDatabase),
-      listTreatments(personalDatabase),
-      listPrescriptionItems(personalDatabase),
-    ])
-      .then(
-        ([
+    void (async () => {
+      try {
+        const [
           saved,
           inventory,
           knownWeeks,
           allTreatments,
           allPrescriptionItems,
-        ]) => {
-          if (!active) return;
-          setBoxes(inventory);
-          setWeeks(knownWeeks);
-          setTreatments(allTreatments);
-          setPrescriptionItems(allPrescriptionItems);
-          if (saved) {
-            setSnapshot(saved.snapshot);
-            setPreparationId(saved.id);
-            setProgress([...saved.progress]);
-            return;
-          }
-          const available = options.find(
-            (option) =>
-              preparationWeekState(option.startDate, knownWeeks) ===
-              'AVAILABLE',
+          equivalenceConfirmations,
+        ] = await Promise.all([
+          getLatestDraftPreparation(personalDatabase),
+          listMedicationBoxes(personalDatabase),
+          listPreparationWeeks(personalDatabase),
+          listTreatments(personalDatabase),
+          listPrescriptionItems(personalDatabase),
+          listAllGenericEquivalenceConfirmations(personalDatabase),
+        ]);
+        if (!active) return;
+        setBoxes(inventory);
+        setWeeks(knownWeeks);
+        setTreatments(allTreatments);
+        setPrescriptionItems(allPrescriptionItems);
+        if (saved) {
+          setSnapshot(saved.snapshot);
+          setPreparationId(saved.id);
+          setProgress([...saved.progress]);
+          return;
+        }
+        if (
+          !autoStartAttempted.current &&
+          preparationWeekState(upcomingWeek.startDate, knownWeeks) ===
+            'AVAILABLE'
+        ) {
+          autoStartAttempted.current = true;
+          const referenceDate = todayIso();
+          const generated = generatePreparationSnapshot(
+            allTreatments,
+            inventory,
+            upcomingWeek.startDate,
+            referenceDate,
+            equivalenceConfirmations.map((confirmation) => ({
+              treatmentId: confirmation.treatmentId,
+              cis: confirmation.cis,
+            })),
           );
-          setChoice(available?.choice ?? 'CURRENT');
-        },
-      )
-      .catch((reason: unknown) => {
+          const id = await createPreparation(personalDatabase, generated);
+          if (!active) return;
+          setSnapshot(generated);
+          setPreparationId(id);
+          setWeeks([
+            ...knownWeeks,
+            { id, startDate: generated.startDate, status: 'DRAFT' },
+          ]);
+        }
+      } catch (reason: unknown) {
         if (active)
           setError(message(reason, 'Chargement de la préparation impossible.'));
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    })();
     return () => {
       active = false;
     };
-  }, [personalDatabase, options]);
+  }, [personalDatabase, upcomingWeek]);
 
   /**
    * CIS des traitements couverts par au moins une ligne d'ordonnance en mode
@@ -341,9 +361,7 @@ function NewPreparationScreenContent({
     ).length;
   }, [progress, snapshot, skippedCis]);
 
-  const selectedWeek =
-    options.find((week) => week.choice === choice) ?? options[0];
-  const selectedWeekState = preparationWeekState(selectedWeek.startDate, weeks);
+  const selectedWeekState = preparationWeekState(upcomingWeek.startDate, weeks);
 
   async function generate(): Promise<void> {
     if (loading || preparationId !== null) return;
@@ -358,7 +376,7 @@ function NewPreparationScreenContent({
       const generated = generatePreparationSnapshot(
         currentTreatments,
         boxes,
-        selectedWeek.startDate,
+        upcomingWeek.startDate,
         referenceDate,
         equivalenceConfirmations.map((confirmation) => ({
           treatmentId: confirmation.treatmentId,
@@ -383,28 +401,6 @@ function NewPreparationScreenContent({
     }
   }
 
-  /** Ramène l'écran au choix de la semaine sans toucher au stock. */
-  function resetToWeekChoice(): void {
-    setSnapshot(null);
-    setPreparationId(null);
-    setProgress([]);
-    setPending(null);
-    setChoosing(false);
-    setScanning(false);
-    setFinalized(false);
-    setSkippedCis(new Set());
-    setPendingAfterValidation([]);
-    setError(null);
-  }
-
-  /** La semaine à venir reste le défaut tant qu'elle n'est pas déjà préparée. */
-  function selectFirstAvailableWeek(known: readonly KnownPreparation[]): void {
-    const available = options.find(
-      (option) => preparationWeekState(option.startDate, known) === 'AVAILABLE',
-    );
-    setChoice(available?.choice ?? 'CURRENT');
-  }
-
   function requestCancel(): void {
     if (preparationId === null || saving) return;
     if (progress.length > 0 || pending !== null) {
@@ -421,25 +417,11 @@ function NewPreparationScreenContent({
     try {
       await cancelPreparation(personalDatabase, preparationId);
       setCancelConfirmationVisible(false);
-      resetToWeekChoice();
-      const known = await listPreparationWeeks(personalDatabase);
-      setWeeks(known);
-      selectFirstAvailableWeek(known);
+      router.replace('/');
     } catch (reason: unknown) {
       setError(message(reason, 'Annulation impossible.'));
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function prepareAnotherWeek(): Promise<void> {
-    resetToWeekChoice();
-    try {
-      const known = await listPreparationWeeks(personalDatabase);
-      setWeeks(known);
-      selectFirstAvailableWeek(known);
-    } catch (reason: unknown) {
-      setError(message(reason, 'Chargement des semaines impossible.'));
     }
   }
 
@@ -670,6 +652,9 @@ function NewPreparationScreenContent({
       await savePreparationProgress(personalDatabase, preparationId, entry);
       setProgress((previous) => [...previous, entry]);
       setPending(null);
+      requestAnimationFrame(() =>
+        scrollRef.current?.scrollTo({ y: 0, animated: true }),
+      );
       // Une contribution partielle laisse le médicament ouvert : les boutons
       // scanner/choisir réapparaissent pour couvrir le reste, sans imposer la
       // liste manuelle alors qu'un second scan suffit le plus souvent.
@@ -775,7 +760,8 @@ function NewPreparationScreenContent({
     ? buildWeeklyGrid({
         startDate: snapshot.startDate,
         items: snapshot.items,
-        preparedCis: progress.map((item) => item.specialtyCis),
+        preparedContributions: progress,
+        currentCis: current?.specialtyCis ?? null,
       })
     : null;
   const medicationIndex =
@@ -787,6 +773,7 @@ function NewPreparationScreenContent({
 
   return (
     <AppScreen
+      scrollRef={scrollRef}
       footer={
         current && !pending && !choosing ? (
           <View style={styles.footerActions}>
@@ -825,7 +812,7 @@ function NewPreparationScreenContent({
               {formatFrenchCivilPeriod(snapshot.startDate, snapshot.endDate)}
             </Text>
             <Text style={styles.darkProgress}>
-              {grid.preparedCases} sur {grid.totalCases} cases ·{' '}
+              {grid.preparedCases} sur {grid.totalCases} prises déposées ·{' '}
               {completedRequirementsCount}/{snapshot.requirements.length}{' '}
               médicaments
             </Text>
@@ -848,11 +835,8 @@ function NewPreparationScreenContent({
       ) : null}
       {preparationId === null ? (
         <WeekChoice
-          options={options}
-          weeks={weeks}
-          choice={choice}
+          week={upcomingWeek}
           selectedState={selectedWeekState}
-          onChoose={setChoice}
           onStart={() => void generate()}
         />
       ) : null}
@@ -932,7 +916,9 @@ function NewPreparationScreenContent({
               <Text style={styles.finalMarkText}>✓</Text>
             </View>
             <Text accessibilityRole="header" style={styles.finalTitle}>
-              {grid ? `${grid.totalCases} cases remplies` : 'Cases remplies'}
+              {grid
+                ? `${grid.totalCases} prises déposées`
+                : 'Toutes les prises sont déposées'}
             </Text>
             <Text style={styles.finalBody}>
               {snapshot.requirements.length} médicament
@@ -999,8 +985,8 @@ function NewPreparationScreenContent({
           />
           <PillButton
             height={46}
-            label="Préparer une autre semaine"
-            onPress={() => void prepareAnotherWeek()}
+            label="Retour à l’accueil"
+            onPress={() => router.replace('/')}
             tone="outline"
           />
         </>

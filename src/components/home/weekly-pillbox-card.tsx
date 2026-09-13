@@ -27,7 +27,7 @@ export function WeeklyPillboxCard({
   const action = ACTIONS[state];
   const status =
     state === 'IN_PROGRESS'
-      ? `${grid.preparedCases} / ${grid.totalCases} cases`
+      ? `${grid.preparedCases} / ${grid.totalCases} prises déposées`
       : 'À préparer';
   return (
     <Pressable
@@ -71,6 +71,7 @@ export function WeeklyPillboxCard({
 const cellStyles: Record<WeeklyGridCell, { backgroundColor: string }> = {
   EMPTY: { backgroundColor: colors.hairline },
   TO_PREPARE: { backgroundColor: colors.gridPending },
+  CURRENT: { backgroundColor: colors.accent },
   READY: { backgroundColor: colors.gridReady },
 };
 

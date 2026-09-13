@@ -307,7 +307,7 @@ describe('accueil', () => {
       now: NOON,
     });
     expect(rendered).toContain('2 septembre');
-    expect(rendered).toContain('2 / 2 cases');
+    expect(rendered).toContain('2 / 2 prises déposées');
     expect(rendered).toContain('Reprendre');
   });
 });

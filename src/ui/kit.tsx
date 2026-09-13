@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, type ReactNode, type Ref } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -41,6 +41,7 @@ export function AppScreen({
   footer,
   floatingAction,
   bodyStyle,
+  scrollRef,
   insetColor = colors.background,
 }: Readonly<{
   header?: ReactNode;
@@ -50,6 +51,7 @@ export function AppScreen({
   /** Bouton flottant, superposé au contenu : la colonne lui réserve sa place. */
   floatingAction?: ReactNode;
   bodyStyle?: StyleProp<ViewStyle>;
+  scrollRef?: Ref<ScrollView>;
   /**
    * Couleur de la bande sous la barre d'état, quand l'en-tête n'est pas sur
    * le fond d'écran habituel (en-tête vert profond).
@@ -73,6 +75,7 @@ export function AppScreen({
           bodyStyle,
         ]}
         keyboardShouldPersistTaps="handled"
+        ref={scrollRef}
         style={styles.bodyScroll}
       >
         {children}

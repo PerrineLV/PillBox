@@ -1,4 +1,3 @@
-import * as Notifications from 'expo-notifications';
 import {
   router,
   Stack,
@@ -36,6 +35,7 @@ import {
   notificationTargetOf,
 } from '@/infrastructure/reminders/local-notifications';
 import { runNotificationCommand } from '@/domain/reminders/notification-actions';
+import * as Notifications from '@/infrastructure/reminders/expo-local-notifications';
 import { synchronizeIntakeReminders } from '@/infrastructure/reminders/intake-reminder-scheduler';
 import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 import { markPendingIntakesTakenForGroups } from '@/infrastructure/intakes/intake-repository';

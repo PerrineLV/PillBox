@@ -146,25 +146,6 @@ export const styles = StyleSheet.create({
     lineHeight: 18,
   },
   weekOptions: { gap: 7 },
-  weekOption: {
-    borderColor: colors.cardBorder,
-    borderRadius: radii.tile,
-    borderWidth: 1.5,
-    gap: 4,
-    padding: 12,
-  },
-  weekOptionSelected: {
-    backgroundColor: colors.brandSoft,
-    borderColor: colors.brand,
-  },
-  weekOptionTitle: {
-    color: colors.textTertiary,
-    fontSize: 10.5,
-    fontWeight: '700',
-    letterSpacing: 1.1,
-    lineHeight: 13,
-    textTransform: 'uppercase',
-  },
   weekOptionPeriod: {
     ...typography.numeric,
     fontSize: 15.5,

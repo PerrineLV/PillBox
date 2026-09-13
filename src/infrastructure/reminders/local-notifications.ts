@@ -1,4 +1,4 @@
-import * as Notifications from 'expo-notifications';
+import * as Notifications from './expo-local-notifications';
 import { Platform } from 'react-native';
 
 import {

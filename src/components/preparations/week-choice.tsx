@@ -1,87 +1,49 @@
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { formatFrenchCivilPeriod } from '@/components/treatments/civil-date';
-import {
-  preparationWeekState,
-  type KnownPreparation,
-  type PreparationWeek,
-  type PreparationWeekChoice,
-  type PreparationWeekState,
+import type {
+  PreparationWeek,
+  PreparationWeekState,
 } from '@/domain/preparations/preparation';
-import { AppCard, Banner, PillButton, SectionLabel, SeverityBadge } from '@/ui';
-
-import { WEEK_LABELS } from './labels';
+import { AppCard, Banner, PillButton, SectionLabel } from '@/ui';
 import { styles } from './styles';
 
 /**
- * Choix explicite de la semaine à préparer. La semaine à venir reste
- * sélectionnée par défaut ; une semaine déjà validée ne peut pas être relancée.
+ * Période unique à préparer. Le démarrage normal est automatique ; ce panneau
+ * sert d'état explicite si la période est déjà traitée ou si une génération
+ * automatique doit être retentée après une erreur.
  */
 export function WeekChoice({
-  options,
-  weeks,
-  choice,
+  week,
   selectedState,
-  onChoose,
   onStart,
 }: {
-  options: readonly PreparationWeek[];
-  weeks: readonly KnownPreparation[];
-  choice: PreparationWeekChoice;
+  week: PreparationWeek;
   selectedState: PreparationWeekState;
-  onChoose(choice: PreparationWeekChoice): void;
   onStart(): void;
 }) {
   return (
     <AppCard>
-      <SectionLabel>Quelle semaine préparer ?</SectionLabel>
-      <View accessibilityRole="radiogroup" style={styles.weekOptions}>
-        {options.map((option) => {
-          const state = preparationWeekState(option.startDate, weeks);
-          const selected = option.choice === choice;
-          return (
-            <Pressable
-              accessibilityLabel={`${WEEK_LABELS[option.choice]}, semaine ${formatFrenchCivilPeriod(option.startDate, option.endDate)}`}
-              accessibilityRole="radio"
-              accessibilityState={{ selected }}
-              key={option.choice}
-              onPress={() => onChoose(option.choice)}
-              style={[styles.weekOption, selected && styles.weekOptionSelected]}
-            >
-              <Text style={styles.weekOptionTitle}>
-                {WEEK_LABELS[option.choice]}
-              </Text>
-              <Text style={styles.weekOptionPeriod}>
-                Semaine{' '}
-                {formatFrenchCivilPeriod(option.startDate, option.endDate)}
-              </Text>
-              {state === 'ALREADY_PREPARED' ? (
-                <SeverityBadge label="Déjà préparée" level="ok" />
-              ) : null}
-              {state === 'IN_PROGRESS' ? (
-                <SeverityBadge label="Préparation en cours" level="warning" />
-              ) : null}
-            </Pressable>
-          );
-        })}
+      <SectionLabel>Prochaine préparation</SectionLabel>
+      <View style={styles.weekOptions}>
+        <Text style={styles.weekOptionPeriod}>
+          {formatFrenchCivilPeriod(week.startDate, week.endDate)}
+        </Text>
       </View>
       {selectedState === 'ALREADY_PREPARED' ? (
         <Banner level="warning" title="Semaine déjà préparée">
-          Une préparation validée existe déjà pour cette période. Choisissez une
-          autre semaine plutôt que de créer un doublon.
+          Une préparation validée existe déjà pour cette période.
         </Banner>
       ) : null}
       {selectedState === 'IN_PROGRESS' ? (
         <Banner level="warning" title="Préparation déjà commencée">
-          Une préparation incomplète existe pour cette période. Reprenez-la
-          depuis l’accueil plutôt que d’en créer une nouvelle.
+          Une préparation incomplète existe pour cette période. Elle est reprise
+          automatiquement à l’ouverture de cet écran.
         </Banner>
       ) : null}
-      <PillButton
-        disabled={selectedState !== 'AVAILABLE'}
-        label="Générer la préparation de 7 jours"
-        onPress={onStart}
-      />
+      {selectedState === 'AVAILABLE' ? (
+        <PillButton label="Réessayer" onPress={onStart} />
+      ) : null}
     </AppCard>
   );
 }

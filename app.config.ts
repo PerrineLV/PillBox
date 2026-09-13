@@ -68,6 +68,8 @@ const ADDED_PLUGINS: readonly (string | [string, unknown])[] = [
   'expo-notifications',
   'expo-local-authentication',
   'expo-mail-composer',
+  'expo-sharing',
+  'expo-status-bar',
   ['@react-native-community/datetimepicker', DATE_TIME_PICKER_OPTIONS],
   './plugins/withAndroidLightTheme',
   './plugins/withPillBoxTodayWidget',
