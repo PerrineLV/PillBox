@@ -269,11 +269,17 @@ export async function markPendingIntakesTaken(
  * Même validation, étendue à plusieurs créneaux traités ensemble : c'est le cas
  * d'un rappel qui couvre deux créneaux programmés à la même heure.
  *
- * L'horodatage est lu une seule fois dans la transaction puis appliqué tel quel
- * à chaque instruction, de sorte que toutes les prises validées ensemble
- * portent la même heure de validation. La condition `status = 'UNSET'` rend
- * l'opération idempotente : rejouer la même action ne revalide rien et ne
- * réécrit pas l'heure des prises déjà renseignées.
+ * Une seule instruction met à jour tous les groupes : l'opération est atomique
+ * et SQLite évalue `CURRENT_TIMESTAMP` une seule fois pour l'instruction, de
+ * sorte que toutes les prises validées ensemble portent la même heure. Cette
+ * écriture passe par la connexion partagée, qui bénéficie de `busy_timeout`,
+ * plutôt que d'ouvrir la connexion temporaire d'une transaction exclusive :
+ * elle peut ainsi attendre une synchronisation de rappels déjà en cours au lieu
+ * d'échouer immédiatement avec « database is locked ».
+ *
+ * La condition `status = 'UNSET'` rend l'opération idempotente : rejouer la
+ * même action ne revalide rien et ne réécrit pas l'heure des prises déjà
+ * renseignées.
  */
 export async function markPendingIntakesTakenForGroups(
   database: SQLiteDatabase,
@@ -285,34 +291,24 @@ export async function markPendingIntakesTakenForGroups(
     ).values(),
   ];
   if (unique.length === 0) return 0;
-  let validated = 0;
-  await database.withExclusiveTransactionAsync(async (transaction) => {
-    const stamp = await transaction.getFirstAsync<{ value: string }>(
-      'SELECT CURRENT_TIMESTAMP AS value',
-    );
-    if (stamp === null)
-      throw new Error('Validation impossible : horodatage indisponible.');
-    let total = 0;
-    for (const group of unique) {
-      const result = await transaction.runAsync(
-        `UPDATE intake_records SET status = 'TAKEN', updated_at = ?
-         WHERE intake_date = ? AND slot = ? AND status = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM treatments
-             WHERE treatments.id = intake_records.source_treatment_id
-               AND treatments.dosage_kind = 'SCHEDULED'
-               AND treatments.included_in_pillbox = 0
-           )`,
-        stamp.value,
-        group.date,
-        group.slot,
-        PENDING_INTAKE_STATUS,
-      );
-      total += result.changes;
-    }
-    validated = total;
-  });
-  return validated;
+  const groupCondition = unique
+    .map(() => '(intake_date = ? AND slot = ?)')
+    .join(' OR ');
+  const groupParameters = unique.flatMap((group) => [group.date, group.slot]);
+  const result = await database.runAsync(
+    `UPDATE intake_records
+     SET status = 'TAKEN', updated_at = CURRENT_TIMESTAMP
+     WHERE status = ? AND (${groupCondition})
+       AND NOT EXISTS (
+         SELECT 1 FROM treatments
+         WHERE treatments.id = intake_records.source_treatment_id
+           AND treatments.dosage_kind = 'SCHEDULED'
+           AND treatments.included_in_pillbox = 0
+       )`,
+    PENDING_INTAKE_STATUS,
+    ...groupParameters,
+  );
+  return result.changes;
 }
 
 /**
