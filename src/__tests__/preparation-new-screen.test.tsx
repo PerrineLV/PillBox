@@ -48,6 +48,13 @@ jest.mock('expo-router', () => ({
   usePathname: () => '/preparations/new',
 }));
 
+// Cet écran calcule les sept jours à venir au montage. Figer la date métier
+// évite que l'attendu change selon le jour où la CI exécute ce test.
+jest.mock('@/domain/inventory/inventory', () => ({
+  ...jest.requireActual('@/domain/inventory/inventory'),
+  todayIso: () => '2026-09-13',
+}));
+
 jest.mock('@/infrastructure/inventory/inventory-repository', () => ({
   listMedicationBoxes: jest.fn(),
 }));

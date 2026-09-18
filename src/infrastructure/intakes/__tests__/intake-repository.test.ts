@@ -271,6 +271,38 @@ describe('suivi local des prises', () => {
     raw.close();
   });
 
+  it('valide plusieurs créneaux par une seule écriture sur la connexion partagée', async () => {
+    const runAsync = jest.fn().mockResolvedValue({
+      changes: 3,
+      lastInsertRowId: 0,
+    });
+    const withExclusiveTransactionAsync = jest.fn(() =>
+      Promise.reject(new Error('database is locked')),
+    );
+    const database = {
+      runAsync,
+      withExclusiveTransactionAsync,
+    } as unknown as SQLiteDatabase;
+
+    await expect(
+      markPendingIntakesTakenForGroups(database, [
+        { date: '2026-08-10', slot: 'morning' },
+        { date: '2026-08-10', slot: 'noon' },
+        { date: '2026-08-10', slot: 'morning' },
+      ]),
+    ).resolves.toBe(3);
+
+    expect(withExclusiveTransactionAsync).not.toHaveBeenCalled();
+    expect(runAsync).toHaveBeenCalledTimes(1);
+    expect(runAsync.mock.calls[0].slice(1)).toEqual([
+      'UNSET',
+      '2026-08-10',
+      'morning',
+      '2026-08-10',
+      'noon',
+    ]);
+  });
+
   it('ne modifie ni les prises déjà validées ni les prises ignorées du créneau', async () => {
     const { raw, database } = await setup();
     await materializeIntakeSnapshots(database, [
