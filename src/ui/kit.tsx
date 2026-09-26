@@ -336,7 +336,7 @@ export type PillOption<Value extends string> = Readonly<{
 }>;
 
 /**
- * Pastilles de filtre. Hauteur et `boxSizing` identiques dans les deux états :
+ * Pastilles de filtre. Hauteur et graisse identiques dans les deux états :
  * la mise en page ne doit pas sauter au changement de sélection.
  *
  * Toujours sur une seule ligne : un filtre qui passe à la ligne se lit comme
@@ -959,7 +959,9 @@ const styles = StyleSheet.create({
   cardPressed: { borderColor: colors.gridPending },
   pillRow: { flexDirection: 'row', gap: 7 },
   pill: {
-    alignItems: 'center',
+    // Contraindre le texte à la largeur intérieure, même après flexShrink,
+    // pour que l'ajustement Android mesure toute la ligne du libellé.
+    alignItems: 'stretch',
     borderRadius: radii.pill,
     borderWidth: 1,
     flexShrink: 1,
@@ -973,9 +975,14 @@ const styles = StyleSheet.create({
     borderColor: colors.headerDark,
   },
   pillIdle: { backgroundColor: colors.surface, borderColor: colors.cardBorder },
-  pillText: { fontSize: 12.5, lineHeight: 15 },
-  pillTextSelected: { color: colors.onDark, fontWeight: '700' },
-  pillTextIdle: { color: colors.textMuted, fontWeight: '600' },
+  pillText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    lineHeight: 15,
+    textAlign: 'center',
+  },
+  pillTextSelected: { color: colors.onDark },
+  pillTextIdle: { color: colors.textMuted },
   choicePill: {
     alignItems: 'center',
     borderRadius: radii.pill,
