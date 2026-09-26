@@ -31,7 +31,7 @@ updates:
           - '@expo/*'
     ignore:
       # Les versions d'Expo, de React, de React Native et des modules natifs sont
-      # imposées par le SDK Expo 54, pas choisies dépendance par dépendance. Même
+      # imposées par le SDK Expo installé, pas choisies dépendance par dépendance. Même
       # un correctif proposé isolément par Dependabot sortirait de l'ensemble
       # validé par Expo : ces paquets sont donc entièrement exclus des mises à
       # jour de version. Ils évoluent uniquement par un ticket de migration de
@@ -64,6 +64,16 @@ updates:
           - version-update:semver-minor
           - version-update:semver-major
       - dependency-name: react-native
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: react-native-reanimated
+        update-types:
+          - version-update:semver-patch
+          - version-update:semver-minor
+          - version-update:semver-major
+      - dependency-name: react-native-worklets
         update-types:
           - version-update:semver-patch
           - version-update:semver-minor
