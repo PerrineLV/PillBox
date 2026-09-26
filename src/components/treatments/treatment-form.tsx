@@ -9,6 +9,7 @@ import {
   assertValidTreatmentPhases,
   formatHalfUnits,
   isLegacyTreatmentPhase,
+  productSourceFromKey,
   type IntakeSlot,
   type ScheduledTreatmentPhase,
   type TreatmentDraft,
@@ -96,6 +97,9 @@ export function TreatmentForm({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [withoutStock, setWithoutStock] = useState<boolean | null>(null);
+  const productSource =
+    initialValue.productSource ??
+    productSourceFromKey(initialValue.specialtyCis);
   // Recréé à chaque rendu par l'écran de création : comparer son contenu
   // plutôt que sa référence évite de recharger le stock à chaque frappe.
   const pendingEquivalenceCisKey = pendingEquivalenceCis.join(',');
@@ -167,32 +171,38 @@ export function TreatmentForm({
   return (
     <View style={styles.form}>
       <Banner level="warning" title="Posologie à vérifier">
-        La posologie est saisie par vous. Elle n’est jamais déduite du
-        médicament.
+        La posologie est saisie par vous. Elle n’est jamais déduite du produit.
       </Banner>
       {withoutStock && included ? (
         <>
           <Banner level="warning" title="Aucune boîte en stock">
-            Aucune boîte en stock ne correspond actuellement à cette spécialité.
+            Aucune boîte en stock ne correspond actuellement à ce produit.
           </Banner>
-          <PillButton
-            height={46}
-            label="Ajouter une boîte au stock"
-            onPress={() =>
-              router.push(
-                treatmentId === null
-                  ? {
-                      pathname: '/inventory/new',
-                      params: {
-                        draftTreatmentCis: initialValue.specialtyCis,
-                        draftTreatmentName: initialValue.specialtyName,
-                      },
-                    }
-                  : '/inventory/new',
-              )
-            }
-            tone="outline"
-          />
+          {productSource !== 'BDPM' && treatmentId === null ? null : (
+            <PillButton
+              height={46}
+              label="Ajouter une boîte au stock"
+              onPress={() =>
+                router.push(
+                  productSource !== 'BDPM'
+                    ? {
+                        pathname: '/inventory/non-bdpm',
+                        params: { treatmentId: String(treatmentId) },
+                      }
+                    : treatmentId === null
+                      ? {
+                          pathname: '/inventory/new',
+                          params: {
+                            draftTreatmentCis: initialValue.specialtyCis,
+                            draftTreatmentName: initialValue.specialtyName,
+                          },
+                        }
+                      : '/inventory/new',
+                )
+              }
+              tone="outline"
+            />
+          )}
         </>
       ) : null}
 

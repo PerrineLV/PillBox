@@ -55,7 +55,10 @@ import {
   type PreparationSnapshot,
 } from '@/domain/preparations/preparation';
 import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
-import { type Treatment } from '@/domain/treatments/treatment';
+import {
+  productSourceFromKey,
+  type Treatment,
+} from '@/domain/treatments/treatment';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
   getGenericGroupMembers,
@@ -304,7 +307,10 @@ function NewPreparationScreenContent({
   const currentSpecialtyCis = current?.specialtyCis ?? null;
   useEffect(() => {
     let active = true;
-    if (currentSpecialtyCis === null) {
+    if (
+      currentSpecialtyCis === null ||
+      productSourceFromKey(currentSpecialtyCis) !== 'BDPM'
+    ) {
       setGenericCandidates([]);
       return;
     }
@@ -454,6 +460,13 @@ function NewPreparationScreenContent({
     if (current === null) return;
     if (box.specialtyCis === current.specialtyCis) {
       runVerification(box, method, raw, null);
+      return;
+    }
+    if (productSourceFromKey(current.specialtyCis) !== 'BDPM') {
+      rejectBox(
+        `Produit différent détecté : ${box.specialtyName}. Boîte refusée.`,
+        method,
+      );
       return;
     }
     const candidate = genericCandidatesByCis.get(box.specialtyCis);
@@ -777,12 +790,14 @@ function NewPreparationScreenContent({
       footer={
         current && !pending && !choosing ? (
           <View style={styles.footerActions}>
-            <PillButton
-              height={54}
-              label="Scanner la boîte utilisée"
-              onPress={beginScan}
-              tone="accent"
-            />
+            {productSourceFromKey(current.specialtyCis) === 'BDPM' ? (
+              <PillButton
+                height={54}
+                label="Scanner la boîte utilisée"
+                onPress={beginScan}
+                tone="accent"
+              />
+            ) : null}
             <PillButton
               height={46}
               label="Choisir la boîte dans le stock"
@@ -814,7 +829,11 @@ function NewPreparationScreenContent({
             <Text style={styles.darkProgress}>
               {grid.preparedCases} sur {grid.totalCases} prises déposées ·{' '}
               {completedRequirementsCount}/{snapshot.requirements.length}{' '}
-              médicaments
+              {snapshot.requirements.some(
+                (item) => productSourceFromKey(item.specialtyCis) !== 'BDPM',
+              )
+                ? 'produits'
+                : 'médicaments'}
             </Text>
             <PreparationGrid grid={grid} />
           </View>
@@ -830,7 +849,10 @@ function NewPreparationScreenContent({
       ) : null}
       {current && snapshot ? (
         <Text style={styles.eyebrow}>
-          Médicament {medicationIndex} sur {snapshot.requirements.length}
+          {productSourceFromKey(current.specialtyCis) === 'BDPM'
+            ? 'Médicament '
+            : 'Produit '}
+          {medicationIndex} sur {snapshot.requirements.length}
         </Text>
       ) : null}
       {preparationId === null ? (
@@ -882,7 +904,9 @@ function NewPreparationScreenContent({
             current.remainingHalfUnits,
             effectiveBoxes,
             todayIso(),
-            [...genericCandidatesByCis.keys()],
+            productSourceFromKey(current.specialtyCis) === 'BDPM'
+              ? [...genericCandidatesByCis.keys()]
+              : [],
           )}
           expectedSpecialtyCis={current.specialtyCis}
           requiredHalfUnits={current.remainingHalfUnits}

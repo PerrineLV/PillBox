@@ -108,6 +108,7 @@ temp/
 
 *.db
 !assets/medications/medications.db
+!assets/medications/compl-alim.db
 *.db-journal
 *.sqlite
 *.sqlite3

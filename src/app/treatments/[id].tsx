@@ -172,7 +172,15 @@ export default function TreatmentDetailScreen() {
                 label={TREATMENT_CATEGORY_LABELS[treatmentCategory(treatment)]}
                 level="ok"
               />
-              <MetaBadge label={`CIS ${treatment.specialtyCis}`} />
+              <MetaBadge
+                label={
+                  treatment.productSource === 'COMPL_ALIM'
+                    ? 'Complément · Compl’Alim'
+                    : treatment.productSource === 'MANUAL'
+                      ? `Saisie manuelle · ${treatment.productType === 'SUPPLEMENT' ? 'complément' : treatment.productType === 'MEDICATION' ? 'médicament' : 'autre produit'}`
+                      : `CIS ${treatment.specialtyCis}`
+                }
+              />
               {treatment.archivedAt ? (
                 <SeverityBadge label="Archivé" level="neutral" />
               ) : null}

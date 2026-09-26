@@ -63,11 +63,40 @@ export type AsNeededInfo = {
   minIntervalHours: number | null;
 };
 
+export const PRODUCT_SOURCES = ['BDPM', 'COMPL_ALIM', 'MANUAL'] as const;
+export type ProductSource = (typeof PRODUCT_SOURCES)[number];
+export const PRODUCT_TYPES = ['MEDICATION', 'SUPPLEMENT', 'OTHER'] as const;
+export type ProductType = (typeof PRODUCT_TYPES)[number];
+
+/**
+ * La clé interne des produits hors BDPM est préfixée et ne représente jamais
+ * un CIS. Elle empêche toute correspondance accidentelle avec un médicament.
+ */
+export function nonBdpmProductKey(
+  source: Exclude<ProductSource, 'BDPM'>,
+  identifier: string,
+): string {
+  if (!identifier.trim()) throw new Error('Identifiant de produit manquant.');
+  return `${source}:${identifier}`;
+}
+
+export function productSourceFromKey(key: string): ProductSource {
+  if (key.startsWith('COMPL_ALIM:')) return 'COMPL_ALIM';
+  if (key.startsWith('MANUAL:')) return 'MANUAL';
+  return 'BDPM';
+}
+
 export type Treatment = {
   id: number;
+  /** Clé interne héritée du schéma initial : CIS réel uniquement pour BDPM. */
   specialtyCis: string;
   specialtyName: string;
   pharmaceuticalForm: string | null;
+  productSource?: ProductSource;
+  productType?: ProductType;
+  externalId?: string | null;
+  barcode?: string | null;
+  productNotes?: string | null;
   dosageKind: TreatmentDosageKind;
   includedInPillbox: boolean;
   archivedAt: string | null;

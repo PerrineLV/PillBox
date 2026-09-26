@@ -9,6 +9,11 @@ import {
 } from '@/infrastructure/medications/medication-reference';
 import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 import {
+  searchSupplementReference,
+  type SupplementSearchResult,
+} from '@/infrastructure/supplements/supplement-reference';
+import { useSupplementReferenceDatabase } from '@/infrastructure/supplements/supplement-reference-provider';
+import {
   AppCard,
   AppScreen,
   EmptyState,
@@ -24,6 +29,7 @@ import {
 
 export default function MedicationSearchScreen() {
   const database = useMedicationReferenceDatabase();
+  const supplementDatabase = useSupplementReferenceDatabase();
   /**
    * Présent lorsque la recherche est atteinte depuis la saisie d'une ligne
    * d'ordonnance : transmis à `/treatments/new` pour qu'il revienne vers cet
@@ -32,6 +38,7 @@ export default function MedicationSearchScreen() {
   const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MedicationSearchResult[]>([]);
+  const [supplements, setSupplements] = useState<SupplementSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,15 +46,20 @@ export default function MedicationSearchScreen() {
     let cancelled = false;
     const timer = setTimeout(() => {
       setIsSearching(query.trim().length > 0);
-      searchMedicationReference(database, query)
-        .then((nextResults) => {
+      Promise.all([
+        searchMedicationReference(database, query),
+        searchSupplementReference(supplementDatabase, query),
+      ])
+        .then(([nextResults, nextSupplements]) => {
           if (cancelled) return;
           setResults(nextResults);
+          setSupplements(nextSupplements);
           setError(null);
         })
         .catch((reason: unknown) => {
           if (cancelled) return;
           setResults([]);
+          setSupplements([]);
           setError(
             reason instanceof Error ? reason.message : 'Recherche impossible.',
           );
@@ -60,15 +72,15 @@ export default function MedicationSearchScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [database, query]);
+  }, [database, supplementDatabase, query]);
 
   return (
-    <AppScreen header={<StackHeader title="Médicaments" />}>
+    <AppScreen header={<StackHeader title="Rechercher un produit" />}>
       <SearchField
-        accessibilityLabel="Rechercher un médicament"
+        accessibilityLabel="Rechercher un médicament ou complément"
         autoCapitalize="none"
         autoCorrect={false}
-        help="Nom, dosage ou forme · base de référence hors ligne"
+        help="Médicaments BDPM et compléments Compl’Alim · hors ligne"
         onChangeText={setQuery}
         placeholder="Nom, dosage ou forme"
         value={query}
@@ -78,10 +90,11 @@ export default function MedicationSearchScreen() {
       {query.trim().length > 0 &&
       !isSearching &&
       error === null &&
-      results.length === 0 ? (
+      results.length === 0 &&
+      supplements.length === 0 ? (
         <EmptyState
-          description="Vérifiez l’orthographe, le dosage ou la forme."
-          title="Aucun médicament trouvé"
+          description="Vérifiez le nom ou ajoutez le produit manuellement."
+          title="Aucun produit trouvé"
         />
       ) : null}
       {results.map((result) => (
@@ -91,11 +104,60 @@ export default function MedicationSearchScreen() {
           returnTo={returnTo}
         />
       ))}
+      {supplements.map((result) => (
+        <SupplementResult
+          key={result.externalId}
+          result={result}
+          returnTo={returnTo}
+        />
+      ))}
+      <PillButton
+        label="Ajouter manuellement"
+        tone="outline"
+        onPress={() =>
+          router.push({
+            pathname: '/treatments/new',
+            params: { source: 'MANUAL', ...(returnTo ? { returnTo } : {}) },
+          })
+        }
+      />
       <Text style={typography.micro}>
         PillBox ne propose aucune correspondance incertaine : si le dosage ne
         figure pas, il n’apparaît pas.
       </Text>
     </AppScreen>
+  );
+}
+
+function SupplementResult({
+  result,
+  returnTo,
+}: Readonly<{ result: SupplementSearchResult; returnTo?: string }>) {
+  return (
+    <AppCard>
+      <Text style={styles.name}>{result.name}</Text>
+      <View style={styles.badges}>
+        <MetaBadge label="Complément · Compl’Alim" />
+        {result.brand ? <MetaBadge label={result.brand} /> : null}
+        {result.form ? <MetaBadge label={result.form} /> : null}
+      </View>
+      <PillButton
+        height={46}
+        label="Créer un traitement"
+        onPress={() =>
+          router.push({
+            pathname: '/treatments/new',
+            params: {
+              source: 'COMPL_ALIM',
+              externalId: result.externalId,
+              name: result.name,
+              form: result.form ?? '',
+              ...(returnTo ? { returnTo } : {}),
+            },
+          })
+        }
+      />
+    </AppCard>
   );
 }
 

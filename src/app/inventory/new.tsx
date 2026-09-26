@@ -170,6 +170,18 @@ function ModeChoice({ onSelect }: { onSelect(mode: AddBoxMode): void }) {
           tone="outline"
         />
       </AppCard>
+      <AppCard>
+        <Text style={typography.cardTitle}>Produit hors BDPM</Text>
+        <Text style={typography.detail}>
+          Ajouter une boîte à un complément ou à un traitement saisi
+          manuellement.
+        </Text>
+        <PillButton
+          label="Choisir un traitement hors BDPM"
+          onPress={() => router.push('/inventory/non-bdpm')}
+          tone="outline"
+        />
+      </AppCard>
     </AppScreen>
   );
 }

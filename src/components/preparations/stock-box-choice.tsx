@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import { todayIso, type MedicationBox } from '@/domain/inventory/inventory';
 import { evaluateBoxAvailability } from '@/domain/preparations/preparation';
+import { productSourceFromKey } from '@/domain/treatments/treatment';
 import {
   AppCard,
   DenseList,
@@ -15,7 +16,7 @@ import {
 } from '@/ui';
 
 /**
- * Boîtes déjà enregistrées pour ce médicament, du lot à utiliser en priorité
+ * Boîtes déjà enregistrées pour ce produit, du lot à utiliser en priorité
  * vers les boîtes inutilisables. Rien n'est masqué silencieusement : une
  * quantité insuffisante est signalée avant même la sélection, pour permettre
  * de choisir directement une seconde boîte lorsque la première est presque
@@ -35,6 +36,7 @@ export function StockBoxChoice({
   onSelect(box: MedicationBox): void;
 }) {
   const today = todayIso();
+  const isBdpm = productSourceFromKey(expectedSpecialtyCis) === 'BDPM';
   return (
     <AppCard>
       <Text style={typography.cardTitle}>
@@ -42,14 +44,16 @@ export function StockBoxChoice({
       </Text>
       <Text style={typography.micro}>
         Aucune lecture de DataMatrix ne sera enregistrée : les contrôles de
-        médicament, de lot et de péremption restent appliqués. Un autre membre
-        du même groupe générique officiel exige une confirmation explicite. La
-        liste privilégie les boîtes qui couvrent le besoin puis la péremption la
-        plus proche ; la boîte que vous confirmez est celle retenue.
+        produit, de lot et de péremption restent appliqués.
+        {isBdpm
+          ? ' Un autre membre du même groupe générique officiel exige une confirmation explicite.'
+          : ''}{' '}
+        La liste privilégie les boîtes qui couvrent le besoin puis la péremption
+        la plus proche ; la boîte que vous confirmez est celle retenue.
       </Text>
       {boxes.length === 0 ? (
         <Text style={typography.detail}>
-          Aucune boîte de ce médicament n’est enregistrée dans le stock.
+          Aucune boîte de ce produit n’est enregistrée dans le stock.
         </Text>
       ) : (
         <DenseList>

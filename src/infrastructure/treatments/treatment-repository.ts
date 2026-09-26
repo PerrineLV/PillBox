@@ -6,12 +6,15 @@ import {
   isIntakeSlot,
   isTreatmentDosageKind,
   isWeekday,
+  productSourceFromKey,
   treatmentPhasesEqual,
   type LegacyDosage,
   type PhaseDosage,
   type Treatment,
   type TreatmentDraft,
   type TreatmentPhase,
+  type ProductSource,
+  type ProductType,
 } from '@/domain/treatments/treatment';
 
 type TreatmentRow = {
@@ -19,6 +22,11 @@ type TreatmentRow = {
   specialty_cis: string;
   specialty_name: string;
   pharmaceutical_form: string | null;
+  product_source: ProductSource;
+  product_type: ProductType;
+  external_id: string | null;
+  barcode: string | null;
+  product_notes: string | null;
   dosage_kind: string;
   included_in_pillbox: number;
   archived_at: string | null;
@@ -174,8 +182,9 @@ export async function createTreatment(
     result = await transaction.runAsync(
       `INSERT INTO treatments
        (specialty_cis, specialty_name, pharmaceutical_form, dosage_kind, included_in_pillbox,
-        as_needed_max_quantity_half_units, as_needed_min_interval_hours)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        as_needed_max_quantity_half_units, as_needed_min_interval_hours,
+        product_source, product_type, external_id, barcode, product_notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       draft.specialtyCis,
       draft.specialtyName,
       draft.pharmaceuticalForm,
@@ -183,6 +192,11 @@ export async function createTreatment(
       draft.includedInPillbox ? 1 : 0,
       draft.asNeededInfo.maxQuantityPerDayHalfUnits,
       draft.asNeededInfo.minIntervalHours,
+      draft.productSource ?? 'BDPM',
+      draft.productType ?? 'MEDICATION',
+      draft.externalId ?? null,
+      draft.barcode ?? null,
+      draft.productNotes ?? null,
     );
     await insertPhases(transaction, result.lastInsertRowId, draft.phases);
   });
@@ -200,7 +214,9 @@ export async function updateTreatment(
     const result = await transaction.runAsync(
       `UPDATE treatments SET specialty_cis = ?, specialty_name = ?, pharmaceutical_form = ?,
        dosage_kind = ?, included_in_pillbox = ?, as_needed_max_quantity_half_units = ?,
-       as_needed_min_interval_hours = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+       as_needed_min_interval_hours = ?, product_source = ?, product_type = ?,
+       external_id = ?, barcode = ?, product_notes = ?,
+       updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       treatment.specialtyCis,
       treatment.specialtyName,
       treatment.pharmaceuticalForm,
@@ -208,6 +224,11 @@ export async function updateTreatment(
       treatment.includedInPillbox ? 1 : 0,
       treatment.asNeededInfo.maxQuantityPerDayHalfUnits,
       treatment.asNeededInfo.minIntervalHours,
+      treatment.productSource ?? productSourceFromKey(treatment.specialtyCis),
+      treatment.productType ?? existing?.productType ?? 'MEDICATION',
+      treatment.externalId ?? existing?.externalId ?? null,
+      treatment.barcode ?? existing?.barcode ?? null,
+      treatment.productNotes ?? existing?.productNotes ?? null,
       treatment.id,
     );
     if (result.changes !== 1) throw new Error('Traitement introuvable.');
@@ -379,6 +400,11 @@ async function hydrateTreatments(
       specialtyCis: row.specialty_cis,
       specialtyName: row.specialty_name,
       pharmaceuticalForm: row.pharmaceutical_form,
+      productSource: row.product_source,
+      productType: row.product_type,
+      externalId: row.external_id,
+      barcode: row.barcode,
+      productNotes: row.product_notes,
       dosageKind: row.dosage_kind,
       includedInPillbox: row.included_in_pillbox === 1,
       archivedAt: row.archived_at,
@@ -393,11 +419,29 @@ async function hydrateTreatments(
 
 function validateDraft(draft: TreatmentDraft): void {
   if (draft.specialtyCis.trim() === '' || draft.specialtyName.trim() === '')
-    throw new Error('La spécialité doit provenir du référentiel.');
+    throw new Error('Le nom et l’identifiant du produit sont requis.');
+  const source =
+    draft.productSource ?? productSourceFromKey(draft.specialtyCis);
+  if (source !== productSourceFromKey(draft.specialtyCis))
+    throw new Error(
+      'La provenance du produit ne correspond pas à son identifiant.',
+    );
+  if (
+    source === 'COMPL_ALIM' &&
+    (!draft.externalId ||
+      draft.specialtyCis !== `COMPL_ALIM:${draft.externalId}` ||
+      draft.productType !== 'SUPPLEMENT')
+  )
+    throw new Error(
+      'Le complément Compl’Alim doit conserver son identifiant et son type.',
+    );
+  if (source === 'MANUAL' && !draft.productType)
+    throw new Error('Choisissez le type du produit saisi manuellement.');
   if (draft.dosageKind === 'AS_NEEDED') assertValidAsNeededTreatment(draft);
   else assertValidTreatmentPhases(draft.phases);
 }
 
-const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form, dosage_kind,
+const TREATMENT_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form,
+  product_source, product_type, external_id, barcode, product_notes, dosage_kind,
   included_in_pillbox, archived_at, as_needed_max_quantity_half_units, as_needed_min_interval_hours
   FROM treatments`;
