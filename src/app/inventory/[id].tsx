@@ -220,6 +220,13 @@ export default function BoxDetailScreen() {
           />
         </TileRow>
         <Text style={typography.micro}>{box.presentationLabel}</Text>
+        {box.productSource !== 'BDPM' ? (
+          <Text style={typography.micro}>
+            {box.productSource === 'COMPL_ALIM'
+              ? 'Complément · Compl’Alim'
+              : 'Produit saisi manuellement'}
+          </Text>
+        ) : null}
       </AppCard>
 
       {expired ? (
@@ -230,24 +237,27 @@ export default function BoxDetailScreen() {
       ) : null}
       {orphan ? (
         <Banner level="warning" title="Aucun traitement actif associé">
-          Ce médicament ne correspond, ni par CIS exact ni par équivalence
-          générique confirmée, à aucun traitement actif : cette boîte ne
+          Aucun traitement actif ne correspond à ce produit : cette boîte ne
           participe à aucun calcul de besoin pour l’instant.
         </Banner>
       ) : null}
-      <OrphanBoxGenericMatch
-        onConfirmed={() => {
-          void load();
-          showToast(
-            'Équivalence générique confirmée pour ce traitement.',
-            'success',
-          );
-        }}
-        personalDatabase={database}
-        specialtyCis={box.specialtyCis}
-        specialtyName={box.specialtyName}
-      />
-      <GenericGroupSection cis={box.specialtyCis} />
+      {box.productSource === 'BDPM' ? (
+        <OrphanBoxGenericMatch
+          onConfirmed={() => {
+            void load();
+            showToast(
+              'Équivalence générique confirmée pour ce traitement.',
+              'success',
+            );
+          }}
+          personalDatabase={database}
+          specialtyCis={box.specialtyCis}
+          specialtyName={box.specialtyName}
+        />
+      ) : null}
+      {box.productSource === 'BDPM' ? (
+        <GenericGroupSection cis={box.specialtyCis} />
+      ) : null}
 
       <Section label="Ajuster le stock physique">
         <AppCard>

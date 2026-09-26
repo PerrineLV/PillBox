@@ -13,6 +13,7 @@ import {
   useDatabaseTaskQueue,
 } from '@/infrastructure/database/database-provider';
 import { MedicationReferenceProvider } from '@/infrastructure/medications/medication-reference-provider';
+import { SupplementReferenceProvider } from '@/infrastructure/supplements/supplement-reference-provider';
 import { AppLockGate } from '@/components/privacy/app-lock-gate';
 import {
   UpdateNoticeProvider,
@@ -85,46 +86,48 @@ Notifications.setNotificationHandler({
 export default function RootLayout() {
   useNotificationNavigation();
   return (
-    <MedicationReferenceProvider>
-      <DatabaseProvider>
-        <ToastProvider>
-          {/*
+    <SupplementReferenceProvider>
+      <MedicationReferenceProvider>
+        <DatabaseProvider>
+          <ToastProvider>
+            {/*
             Au-dessus du verrou : le verrou démonte son contenu à chaque
             passage en arrière-plan, ce qui relancerait la vérification de
             version et rallumerait une pastille déjà écartée.
           */}
-          <UpdateNoticeProvider>
-            <ReminderCoordinator />
-            <TodayWidgetCoordinator />
-            <IntakeActionCoordinator />
-            <AppLockGate>
-              <View style={{ flex: 1 }}>
-                {/*
+            <UpdateNoticeProvider>
+              <ReminderCoordinator />
+              <TodayWidgetCoordinator />
+              <IntakeActionCoordinator />
+              <AppLockGate>
+                <View style={{ flex: 1 }}>
+                  {/*
                   La marge de sécurité haute n'est plus posée ici : chaque
                   écran la prend à son compte, avec la couleur de son propre
                   en-tête (crème, ou vert profond pour l'accueil, la
                   préparation et le scan).
                 */}
-                <View style={styles.navigationContent}>
-                  <Stack
-                    screenOptions={{
-                      contentStyle: { backgroundColor: colors.background },
-                      headerBackButtonDisplayMode: 'minimal',
-                      headerShadowVisible: false,
-                      headerStyle: { backgroundColor: colors.background },
-                      headerTintColor: colors.brand,
-                      headerTitleStyle: typography.stackTitle,
-                      headerShown: false,
-                    }}
-                  />
+                  <View style={styles.navigationContent}>
+                    <Stack
+                      screenOptions={{
+                        contentStyle: { backgroundColor: colors.background },
+                        headerBackButtonDisplayMode: 'minimal',
+                        headerShadowVisible: false,
+                        headerStyle: { backgroundColor: colors.background },
+                        headerTintColor: colors.brand,
+                        headerTitleStyle: typography.stackTitle,
+                        headerShown: false,
+                      }}
+                    />
+                  </View>
+                  <NavigationBar />
                 </View>
-                <NavigationBar />
-              </View>
-            </AppLockGate>
-          </UpdateNoticeProvider>
-        </ToastProvider>
-      </DatabaseProvider>
-    </MedicationReferenceProvider>
+              </AppLockGate>
+            </UpdateNoticeProvider>
+          </ToastProvider>
+        </DatabaseProvider>
+      </MedicationReferenceProvider>
+    </SupplementReferenceProvider>
   );
 }
 

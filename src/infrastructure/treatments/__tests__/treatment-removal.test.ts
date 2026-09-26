@@ -7,12 +7,54 @@ import { isLegacyTreatmentPhase } from '@/domain/treatments/treatment';
 import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 import {
   archiveTreatment,
+  createTreatment,
   deleteUnusedTreatment,
   getTreatment,
   getTreatmentRemovalAction,
   restoreArchivedTreatment,
   updateTreatment,
 } from '../treatment-repository';
+
+it('crée et relit un traitement Compl’Alim sans le confondre avec un CIS', async () => {
+  const { raw, database } = await setup();
+  try {
+    const id = await createTreatment(database, {
+      specialtyCis: 'COMPL_ALIM:123',
+      specialtyName: 'Complément déclaré',
+      pharmaceuticalForm: 'gélule',
+      productSource: 'COMPL_ALIM',
+      productType: 'SUPPLEMENT',
+      externalId: '123',
+      dosageKind: 'SCHEDULED',
+      includedInPillbox: true,
+      phases: [
+        {
+          id: null,
+          startDate: '2026-09-01',
+          endDate: null,
+          frequency: { type: 'daily' },
+          dosage: [{ slot: 'morning', quantityHalfUnits: 2 }],
+        },
+      ],
+      asNeededInfo: {
+        maxQuantityPerDayHalfUnits: null,
+        minIntervalHours: null,
+      },
+    });
+    expect(await getTreatment(database, id)).toMatchObject({
+      specialtyCis: 'COMPL_ALIM:123',
+      productSource: 'COMPL_ALIM',
+      productType: 'SUPPLEMENT',
+      externalId: '123',
+      phases: [expect.objectContaining({ frequency: { type: 'daily' } })],
+    });
+    expect(
+      raw.prepare('SELECT product_source FROM treatments WHERE id = ?').get(id),
+    ).toEqual({ product_source: 'COMPL_ALIM' });
+  } finally {
+    raw.close();
+  }
+});
 
 type Parameters = readonly (string | number | null)[];
 type TestDatabase = {

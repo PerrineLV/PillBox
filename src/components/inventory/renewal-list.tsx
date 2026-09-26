@@ -78,12 +78,13 @@ export function RenewalList({
 const styles = StyleSheet.create({
   list: { gap: 12 },
   head: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
+    // Le nom garde toute la largeur ; le badge occupe sa propre ligne et
+    // peut grandir en hauteur sans comprimer la dénomination BDPM.
+    alignItems: 'stretch',
+    flexDirection: 'column',
     gap: 10,
-    justifyContent: 'space-between',
   },
-  name: { ...typography.itemTitle, flex: 1, fontSize: 15.5, minWidth: 0 },
+  name: { ...typography.itemTitle, fontSize: 15.5 },
   blocked: {
     ...typography.micro,
     color: colors.destructive,

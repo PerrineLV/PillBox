@@ -84,6 +84,36 @@ const manualDraft = {
 } as const;
 
 describe('ajout d’une boîte au stock local', () => {
+  it('conserve une boîte Compl’Alim sans CIP, avec son lot et sa provenance', async () => {
+    const { raw, database } = await createDatabase();
+    try {
+      const id = await addMedicationBox(database, {
+        ...manualDraft,
+        specialtyCis: 'COMPL_ALIM:123',
+        specialtyName: 'Complément déclaré',
+        productSource: 'COMPL_ALIM',
+        presentationCip13: '',
+      });
+      expect(await listMedicationBoxes(database)).toEqual([
+        expect.objectContaining({
+          id,
+          specialtyCis: 'COMPL_ALIM:123',
+          productSource: 'COMPL_ALIM',
+          presentationCip13: '',
+          lot: 'LOT-MANUEL',
+          remainingQuantity: 30,
+        }),
+      ]);
+      expect(
+        raw
+          .prepare('SELECT type FROM stock_movements WHERE box_id = ?')
+          .get(id),
+      ).toEqual({ type: 'BOX_ADDED' });
+    } finally {
+      raw.close();
+    }
+  });
+
   it('enregistre une boîte sans DataMatrix et la rend utilisable', async () => {
     const { raw, database } = await createDatabase();
 

@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 28;
+export const LATEST_SCHEMA_VERSION = 29;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -916,6 +916,23 @@ export const SCHEMA_MIGRATIONS = [
           ON stock_movements(preparation_id);
         CREATE INDEX stock_movements_intake_idx
           ON stock_movements(intake_key);
+      `);
+    },
+  },
+  {
+    version: 29,
+    name: 'provenance des traitements et boîtes hors BDPM',
+    async up(transaction) {
+      await transaction.execute(`
+        ALTER TABLE treatments ADD COLUMN product_source TEXT NOT NULL DEFAULT 'BDPM'
+          CHECK (product_source IN ('BDPM', 'COMPL_ALIM', 'MANUAL'));
+        ALTER TABLE treatments ADD COLUMN product_type TEXT NOT NULL DEFAULT 'MEDICATION'
+          CHECK (product_type IN ('MEDICATION', 'SUPPLEMENT', 'OTHER'));
+        ALTER TABLE treatments ADD COLUMN external_id TEXT;
+        ALTER TABLE treatments ADD COLUMN barcode TEXT;
+        ALTER TABLE treatments ADD COLUMN product_notes TEXT;
+        ALTER TABLE medication_boxes ADD COLUMN product_source TEXT NOT NULL DEFAULT 'BDPM'
+          CHECK (product_source IN ('BDPM', 'COMPL_ALIM', 'MANUAL'));
       `);
     },
   },

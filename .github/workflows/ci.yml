@@ -42,7 +42,7 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       # Expo pilote les versions de React, React Native et des modules natifs du
-      # SDK 54. Cette vérification échoue si le lockfile s'écarte de ces versions.
+      # SDK installé. Cette vérification échoue si le lockfile s'écarte de ces versions.
       - name: Check Expo dependency versions
         run: npx expo install --check
 

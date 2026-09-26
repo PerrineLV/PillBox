@@ -1,3 +1,5 @@
+import { productSourceFromKey } from '@/domain/treatments/treatment';
+
 export const STOCK_MOVEMENT_TYPES = [
   'BOX_ADDED',
   'MANUAL_ADJUSTMENT',
@@ -18,7 +20,9 @@ export type MedicationBoxOrigin = (typeof MEDICATION_BOX_ORIGINS)[number];
 
 export type MedicationBox = {
   id: number;
+  /** Clé interne : CIS uniquement pour une boîte BDPM. */
   specialtyCis: string;
+  productSource?: 'BDPM' | 'COMPL_ALIM' | 'MANUAL';
   specialtyName: string;
   pharmaceuticalForm: string | null;
   presentationCip13: string;
@@ -80,12 +84,17 @@ export function parseGs1Expiration(value: string): string | null {
 }
 
 export function assertValidBoxDraft(draft: MedicationBoxDraft): void {
+  const source =
+    draft.productSource ?? productSourceFromKey(draft.specialtyCis);
+  const isBdpm = source === 'BDPM';
   if (
     draft.specialtyCis.trim() === '' ||
     draft.specialtyName.trim() === '' ||
-    !/^\d{13}$/.test(draft.presentationCip13)
+    source !== productSourceFromKey(draft.specialtyCis) ||
+    (isBdpm && !/^\d{13}$/.test(draft.presentationCip13)) ||
+    (!isBdpm && (draft.presentationCip13 !== '' || draft.origin !== 'MANUAL'))
   ) {
-    throw new Error('Le médicament doit être identifié sans ambiguïté.');
+    throw new Error('Le produit doit être identifié sans ambiguïté.');
   }
   assertIsoDate(draft.expirationDate);
   if (!Number.isInteger(draft.initialQuantity) || draft.initialQuantity <= 0) {

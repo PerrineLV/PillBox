@@ -10,10 +10,12 @@ import {
   type StockMovement,
   type StockMovementType,
 } from '@/domain/inventory/inventory';
+import { productSourceFromKey } from '@/domain/treatments/treatment';
 
 type BoxRow = {
   id: number;
   specialty_cis: string;
+  product_source: 'BDPM' | 'COMPL_ALIM' | 'MANUAL';
   specialty_name: string;
   pharmaceutical_form: string | null;
   presentation_cip13: string;
@@ -67,8 +69,8 @@ export async function addMedicationBox(
       `INSERT INTO medication_boxes
        (specialty_cis, specialty_name, pharmaceutical_form, presentation_cip13,
         presentation_label, lot, expiration_date, initial_quantity,
-        remaining_quantity, source, scan_raw)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        remaining_quantity, source, scan_raw, product_source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       draft.specialtyCis,
       draft.specialtyName,
       draft.pharmaceuticalForm,
@@ -80,6 +82,7 @@ export async function addMedicationBox(
       draft.initialQuantity,
       draft.origin,
       draft.scanRaw ?? '',
+      draft.productSource ?? productSourceFromKey(draft.specialtyCis),
     );
     await transaction.runAsync(
       `INSERT INTO stock_movements
@@ -274,6 +277,7 @@ function hydrateBox(row: BoxRow): MedicationBox {
   return {
     id: row.id,
     specialtyCis: row.specialty_cis,
+    productSource: row.product_source,
     specialtyName: row.specialty_name,
     pharmaceuticalForm: row.pharmaceutical_form,
     presentationCip13: row.presentation_cip13,
@@ -301,5 +305,5 @@ function isBoxOrigin(value: string): value is MedicationBoxOrigin {
 }
 
 const BOX_SELECT = `SELECT id, specialty_cis, specialty_name, pharmaceutical_form,
-  presentation_cip13, presentation_label, lot, expiration_date,
+  product_source, presentation_cip13, presentation_label, lot, expiration_date,
   initial_quantity, remaining_quantity, source, scan_raw FROM medication_boxes`;

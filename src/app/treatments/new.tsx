@@ -5,6 +5,7 @@ import {
   type Href,
 } from 'expo-router';
 import { useSQLiteContext, type SQLiteDatabase } from 'expo-sqlite';
+import { randomUUID } from 'expo-crypto';
 import { useCallback, useState } from 'react';
 import { Text } from 'react-native';
 
@@ -24,6 +25,11 @@ import {
 } from '@/infrastructure/treatments/pending-generic-equivalence-draft';
 import { createTreatment } from '@/infrastructure/treatments/treatment-repository';
 import {
+  nonBdpmProductKey,
+  type ProductType,
+} from '@/domain/treatments/treatment';
+import {
+  AppField,
   AppScreen,
   ChoicePills,
   Message,
@@ -36,7 +42,17 @@ type SpecialtyBase = {
   specialtyCis: string;
   specialtyName: string;
   pharmaceuticalForm: string | null;
+  productSource?: 'BDPM' | 'COMPL_ALIM' | 'MANUAL';
+  productType?: ProductType;
+  externalId?: string | null;
+  productNotes?: string | null;
 };
+
+const MANUAL_TYPES: readonly { value: ProductType; label: string }[] = [
+  { value: 'SUPPLEMENT', label: 'Complément' },
+  { value: 'MEDICATION', label: 'Médicament' },
+  { value: 'OTHER', label: 'Autre' },
+];
 
 const CATEGORY_OPTIONS: readonly {
   value: TreatmentCategory;
@@ -52,6 +68,8 @@ export default function NewTreatmentScreen() {
     cis?: string;
     name?: string;
     form?: string;
+    source?: string;
+    externalId?: string;
     /**
      * Présent lorsque cet écran est atteint depuis une ligne d'ordonnance :
      * le traitement créé doit revenir vers cet écran plutôt que vers la liste
@@ -62,6 +80,11 @@ export default function NewTreatmentScreen() {
   const database = useSQLiteContext();
   const router = useRouter();
   const [category, setCategory] = useState<TreatmentCategory>('PILLBOX');
+  const [manualKey] = useState(() => nonBdpmProductKey('MANUAL', randomUUID()));
+  const [manualName, setManualName] = useState('');
+  const [manualForm, setManualForm] = useState('');
+  const [manualNotes, setManualNotes] = useState('');
+  const [manualType, setManualType] = useState<ProductType>('OTHER');
 
   // `dismissTo` plutôt que `replace` : cet écran est toujours atteint via
   // `/medications/search`, poussé par-dessus la liste des traitements, que
@@ -75,28 +98,86 @@ export default function NewTreatmentScreen() {
     router.dismissTo('/treatments');
   }
 
-  if (!params.cis || !params.name) {
+  if (
+    params.source !== 'MANUAL' &&
+    (params.source === 'COMPL_ALIM'
+      ? !params.externalId || !params.name
+      : !params.cis || !params.name)
+  ) {
     return (
       <AppScreen header={<StackHeader title="Nouveau traitement" />}>
-        <Message tone="error" title="Spécialité manquante">
-          Revenez à la recherche pour choisir un médicament du référentiel.
+        <Message tone="error" title="Produit manquant">
+          Revenez à la recherche pour choisir un produit du référentiel.
         </Message>
       </AppScreen>
     );
   }
 
   const base: SpecialtyBase = {
-    specialtyCis: params.cis,
-    specialtyName: params.name,
-    pharmaceuticalForm: params.form || null,
+    specialtyCis:
+      params.source === 'MANUAL'
+        ? manualKey
+        : params.source === 'COMPL_ALIM'
+          ? nonBdpmProductKey('COMPL_ALIM', params.externalId ?? '')
+          : (params.cis ?? ''),
+    specialtyName:
+      params.source === 'MANUAL' ? manualName.trim() : (params.name ?? ''),
+    pharmaceuticalForm:
+      (params.source === 'MANUAL' ? manualForm : params.form)?.trim() || null,
+    productSource:
+      params.source === 'MANUAL' || params.source === 'COMPL_ALIM'
+        ? params.source
+        : 'BDPM',
+    productType:
+      params.source === 'MANUAL'
+        ? manualType
+        : params.source === 'COMPL_ALIM'
+          ? 'SUPPLEMENT'
+          : 'MEDICATION',
+    externalId:
+      params.source === 'COMPL_ALIM' ? (params.externalId ?? null) : null,
+    productNotes:
+      params.source === 'MANUAL' ? manualNotes.trim() || null : null,
   };
 
   return (
     <AppScreen
       header={
-        <StackHeader subtitle={base.specialtyName} title="Nouveau traitement" />
+        <StackHeader
+          subtitle={base.specialtyName || undefined}
+          title="Nouveau traitement"
+        />
       }
     >
+      {params.source === 'MANUAL' ? (
+        <Section label="Produit saisi manuellement">
+          <AppField
+            label="Nom du produit"
+            value={manualName}
+            onChangeText={setManualName}
+          />
+          <ChoicePills<ProductType>
+            options={MANUAL_TYPES}
+            value={manualType}
+            onChange={setManualType}
+          />
+          <AppField
+            label="Forme ou présentation (facultatif)"
+            value={manualForm}
+            onChangeText={setManualForm}
+          />
+          <AppField
+            label="Informations complémentaires (facultatif)"
+            value={manualNotes}
+            onChangeText={setManualNotes}
+          />
+        </Section>
+      ) : null}
+      {params.source === 'COMPL_ALIM' ? (
+        <Text style={typography.micro}>
+          Complément alimentaire · Compl’Alim
+        </Text>
+      ) : null}
       <Section label="Type de posologie">
         <ChoicePills
           onChange={(next) => setCategory(next)}
@@ -107,8 +188,8 @@ export default function NewTreatmentScreen() {
           {category === 'AS_NEEDED'
             ? 'Aucun créneau n’est planifié : la prise est enregistrée au moment où elle a lieu.'
             : category === 'OUTSIDE'
-              ? 'La prise reste suivie et rappelée, mais le médicament n’est pas déposé dans le pilulier.'
-              : 'Le médicament est déposé dans le pilulier lors de la préparation hebdomadaire.'}
+              ? 'La prise reste suivie et rappelée, mais le produit n’est pas déposé dans le pilulier.'
+              : 'Le produit est déposé dans le pilulier lors de la préparation hebdomadaire.'}
         </Text>
       </Section>
 
@@ -136,7 +217,7 @@ export default function NewTreatmentScreen() {
           database={database}
           finishTreatmentCreation={finishTreatmentCreation}
           includedInPillbox={category === 'PILLBOX'}
-          key={category}
+          key={`${category}-${base.specialtyCis}`}
         />
       )}
     </AppScreen>
@@ -197,6 +278,10 @@ function ScheduledTreatmentCreation({
               specialtyName: equivalence.specialtyName,
               groupLabel: equivalence.groupLabel,
             });
+          }
+          if (base.productSource !== 'BDPM') {
+            finishTreatmentCreation(treatmentId);
+            return;
           }
           setCreatedTreatment({
             id: treatmentId,
