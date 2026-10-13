@@ -3,11 +3,13 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import {
   cancelIntakePostponement,
   replaceIntakePostponement,
+  reconcileIntakePostponements,
 } from '../intake-postponement-service';
 import {
   deleteIntakePostponement,
   getIntakePostponement,
   listPendingIntakeCounts,
+  listIntakePostponements,
   saveIntakePostponement,
 } from '../intake-repository';
 import {
@@ -96,4 +98,88 @@ describe('service de report de prise', () => {
       'noon',
     );
   });
+});
+
+it('refuse de reporter un créneau sans prise applicable', async () => {
+  await expect(
+    replaceIntakePostponement(
+      database,
+      '2099-08-10',
+      'morning',
+      new Date('2099-08-10T09:00:00Z'),
+    ),
+  ).rejects.toThrow('Aucune prise applicable');
+  expect(mockedSchedule).not.toHaveBeenCalled();
+});
+
+it('annule un report déjà programmé devenu inapplicable après archivage ou fin', async () => {
+  const value = {
+    date: '2099-08-10',
+    slot: 'morning' as const,
+    scheduledAt: '2099-08-10T09:00:00Z',
+    notificationId: 'old-native-id',
+  };
+  jest.mocked(listIntakePostponements).mockResolvedValue([value]);
+  mockedGet.mockResolvedValue(value);
+  await reconcileIntakePostponements(
+    database,
+    new Date('2099-08-10T08:00:00Z'),
+  );
+  expect(cancelScheduledNotifications).toHaveBeenCalledWith(['old-native-id']);
+  expect(deleteIntakePostponement).toHaveBeenCalledWith(
+    database,
+    value.date,
+    value.slot,
+  );
+  expect(mockedSchedule).not.toHaveBeenCalled();
+});
+
+it('réactualise le compteur du report après modification des traitements', async () => {
+  const value = {
+    date: '2099-08-10',
+    slot: 'morning' as const,
+    scheduledAt: '2099-08-10T09:00:00Z',
+    notificationId: 'old-native-id',
+  };
+  jest.mocked(listIntakePostponements).mockResolvedValue([value]);
+  mockedPending.mockResolvedValue([
+    { date: value.date, slot: value.slot, pending: 1 },
+  ]);
+  await reconcileIntakePostponements(
+    database,
+    new Date('2099-08-10T08:00:00Z'),
+    true,
+  );
+  expect(mockedSchedule).toHaveBeenCalledWith(
+    new Date(value.scheduledAt),
+    value.date,
+    value.slot,
+    1,
+  );
+  expect(cancelScheduledNotifications).toHaveBeenCalledWith(['old-native-id']);
+});
+
+it('conserve l’ancien report si la sauvegarde du remplacement échoue', async () => {
+  const value = {
+    date: '2099-08-10',
+    slot: 'morning' as const,
+    scheduledAt: '2099-08-10T09:00:00Z',
+    notificationId: 'old-native-id',
+  };
+  jest.mocked(listIntakePostponements).mockResolvedValue([value]);
+  mockedPending.mockResolvedValue([
+    { date: value.date, slot: value.slot, pending: 1 },
+  ]);
+  jest
+    .mocked(saveIntakePostponement)
+    .mockRejectedValueOnce(new Error('écriture impossible'));
+  await expect(
+    reconcileIntakePostponements(
+      database,
+      new Date('2099-08-10T08:00:00Z'),
+      true,
+    ),
+  ).rejects.toThrow('écriture impossible');
+  expect(cancelScheduledNotifications).toHaveBeenCalledTimes(1);
+  expect(cancelScheduledNotifications).toHaveBeenCalledWith(['new-native-id']);
 });

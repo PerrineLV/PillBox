@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import type { Treatment } from '@/domain/treatments/treatment';
+import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 import { listPendingIntakeCounts } from '@/infrastructure/intakes/intake-repository';
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
@@ -18,6 +19,10 @@ import {
   getLocalNotificationPermission,
   scheduleIntakeReminder,
 } from '../local-notifications';
+
+jest.mock('@/infrastructure/intakes/intake-postponement-service', () => ({
+  reconcileIntakePostponements: jest.fn(async () => undefined),
+}));
 
 // `jest.mock` est remonté au-dessus des imports par Babel : les modules réels
 // ne sont jamais chargés ici.
@@ -209,3 +214,47 @@ describe('synchronisation ciblée sur un traitement', () => {
     expect(mocked.replaceManifest).toHaveBeenCalledWith(database, []);
   });
 });
+
+it.each(['archived', 'ended'])(
+  'retire le traitement %s des rappels et conserve le témoin actif',
+  async (reason) => {
+    const inactive = treatment(1);
+    if (reason === 'archived') inactive.archivedAt = '2026-03-01T12:00:00Z';
+    else
+      inactive.phases = [
+        {
+          id: null,
+          startDate: '2026-02-01',
+          endDate: '2026-03-01',
+          frequency: { type: 'daily' },
+          dosage: [{ slot: 'morning', quantityHalfUnits: 2 }],
+        },
+      ];
+    mocked.treatments.mockResolvedValue([inactive, treatment(2)]);
+    mocked.manifest.mockResolvedValue([
+      {
+        notificationId: 'old-reminder',
+        scheduledAt: new Date(2026, 2, 2, 8, 0).toISOString(),
+        treatmentIds: [1, 2],
+      },
+    ]);
+    mocked.pending.mockResolvedValue([
+      { date: '2026-03-02', slot: 'morning', pending: 1 },
+    ]);
+    await synchronizeTreatmentIntakeReminders(database, 1, NOW);
+    expect(mocked.cancelSome).toHaveBeenCalledWith(['old-reminder']);
+    expect(mocked.schedule).toHaveBeenCalledWith(
+      new Date(2026, 2, 2, 8, 0),
+      [{ date: '2026-03-02', slot: 'morning' }],
+      1,
+    );
+    expect(mocked.replaceManifest).toHaveBeenCalledWith(database, [
+      expect.objectContaining({ treatmentIds: [2] }),
+    ]);
+    expect(reconcileIntakePostponements).toHaveBeenCalledWith(
+      database,
+      NOW,
+      true,
+    );
+  },
+);

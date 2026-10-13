@@ -11,6 +11,7 @@ import {
   snapshotGeneratedIntake,
 } from '@/domain/intakes/intake-tracking';
 import { generateIntakes } from '@/domain/treatments/generate-intakes';
+import { reconcileIntakePostponements } from '@/infrastructure/intakes/intake-postponement-service';
 import type { Treatment } from '@/domain/treatments/treatment';
 import {
   listPendingIntakeCounts,
@@ -116,6 +117,7 @@ export async function synchronizeTreatmentIntakeReminders(
   if ((await getLocalNotificationPermission()) !== 'granted') {
     return existing.length;
   }
+  await reconcileIntakePostponements(database, now, true);
   const until = new Date(now);
   until.setDate(until.getDate() + INTAKE_REMINDER_HORIZON_DAYS);
   const treatments = await listTreatments(database);
