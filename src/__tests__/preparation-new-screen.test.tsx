@@ -4,6 +4,9 @@ import { CameraView } from 'expo-camera';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { generatePreparationSnapshot } from '@/domain/preparations/preparation';
+import { todayIso } from '@/domain/inventory/inventory';
+import { listIntakeHistory } from '@/infrastructure/intakes/intake-repository';
+import { intakeRecordKey } from '@/domain/intakes/intake-tracking';
 import type { MedicationBox } from '@/domain/inventory/inventory';
 import type { PrescriptionItem } from '@/domain/prescriptions/prescription';
 import type { Treatment } from '@/domain/treatments/treatment';
@@ -54,7 +57,11 @@ jest.mock('expo-router', () => ({
 // évite que l'attendu change selon le jour où la CI exécute ce test.
 jest.mock('@/domain/inventory/inventory', () => ({
   ...jest.requireActual('@/domain/inventory/inventory'),
-  todayIso: () => '2026-09-13',
+  todayIso: jest.fn(() => '2026-09-13'),
+}));
+
+jest.mock('@/infrastructure/intakes/intake-repository', () => ({
+  listIntakeHistory: jest.fn(async () => []),
 }));
 
 jest.mock('@/infrastructure/inventory/inventory-repository', () => ({
@@ -237,6 +244,8 @@ const SKIP_LABEL = 'Aucun stock disponible : laisser en attente de complément';
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(todayIso).mockReturnValue('2026-09-13');
+  jest.mocked(listIntakeHistory).mockResolvedValue([]);
   mockedListAllGenericEquivalenceConfirmations.mockResolvedValue([]);
   mockedGetGenericGroupMembers.mockResolvedValue([]);
   mockedListPrescriptionItems.mockResolvedValue([]);
@@ -682,5 +691,57 @@ describe('ticket 106 — répartition par boîte', () => {
     );
     await scan(renderer, 'LOT-A');
     expect(renderer.root.findByType(TextInput).props.value).toBe('2');
+  });
+});
+
+describe('ticket 108 — préparation du lundi', () => {
+  it.each([false, true])(
+    'inclut le lundi, même après le créneau du matin (prise renseignée : %s)',
+    async (recorded) => {
+      jest.mocked(todayIso).mockReturnValue('2026-09-14');
+      mockedGetLatestDraftPreparation.mockResolvedValue(null);
+      mockedListMedicationBoxes.mockResolvedValue([box()]);
+      mockedListPreparationWeeks.mockResolvedValue([]);
+      mockedListTreatments.mockResolvedValue([treatment()]);
+      mockedCreatePreparation.mockResolvedValue(88);
+      if (recorded)
+        jest.mocked(listIntakeHistory).mockResolvedValue([
+          {
+            key: intakeRecordKey(1, '2026-09-14', 'morning'),
+            treatmentId: 1,
+            date: '2026-09-14',
+            slot: 'morning',
+            specialtyCis: '60000001',
+            specialtyName: 'Alpha',
+            pharmaceuticalForm: null,
+            quantityHalfUnits: 2,
+            status: 'TAKEN',
+            createdAt: '',
+            updatedAt: '',
+          },
+        ]);
+      const renderer = await renderScreen();
+      const snapshot = mockedCreatePreparation.mock.calls[0][1];
+      expect(snapshot.startDate).toBe('2026-09-14');
+      expect(snapshot.endDate).toBe('2026-09-20');
+      expect(snapshot.items).toHaveLength(recorded ? 6 : 7);
+      expect(snapshot.requirements[0].requiredHalfUnits).toBe(
+        recorded ? 12 : 14,
+      );
+      expect(textOf(renderer)).toContain('Le pilulier inclut aujourd’hui');
+    },
+  );
+
+  it('ne crée pas de doublon le lundi si la période a été préparée le dimanche', async () => {
+    jest.mocked(todayIso).mockReturnValue('2026-09-14');
+    mockedGetLatestDraftPreparation.mockResolvedValue(null);
+    mockedListMedicationBoxes.mockResolvedValue([box()]);
+    mockedListPreparationWeeks.mockResolvedValue([
+      { id: 1, startDate: '2026-09-14', status: 'COMPLETED' },
+    ]);
+    mockedListTreatments.mockResolvedValue([treatment()]);
+    const renderer = await renderScreen();
+    expect(mockedCreatePreparation).not.toHaveBeenCalled();
+    expect(textOf(renderer)).toContain('Semaine déjà préparée');
   });
 });

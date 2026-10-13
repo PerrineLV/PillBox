@@ -726,3 +726,35 @@ describe('répartition d’un médicament entre plusieurs boîtes', () => {
     expect(second).toMatchObject({ status: 'VALID', quantityHalfUnits: 8 });
   });
 });
+
+describe('ticket 108 — rattrapage du lundi', () => {
+  it.each(['2026-08-10', '2026-08-31', '2026-12-28', '2027-01-04'])(
+    'garde le lundi %s inclus et couvre sept jours',
+    (monday) => {
+      expect(preparationWeeks(monday)[0]).toEqual({
+        choice: 'CURRENT',
+        startDate: monday,
+        endDate: preparationEndDate(monday),
+      });
+    },
+  );
+  it.each(['TAKEN', 'SKIPPED', 'UNSET'] as const)(
+    'ne remplit pas une occurrence déjà renseignée : %s',
+    (status) => {
+      const snapshot = generatePreparationSnapshot(
+        [treatment()],
+        [box()],
+        '2026-08-10',
+        '2026-08-10',
+        [],
+        [{ key: '1:2026-08-10:morning', status }],
+      );
+      expect(snapshot.items.some((item) => item.date === '2026-08-10')).toBe(
+        status === 'UNSET',
+      );
+      expect(snapshot.requirements[0].requiredHalfUnits).toBe(
+        status === 'UNSET' ? 14 : 12,
+      );
+    },
+  );
+});

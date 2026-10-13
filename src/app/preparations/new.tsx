@@ -59,6 +59,7 @@ import {
   productSourceFromKey,
   type Treatment,
 } from '@/domain/treatments/treatment';
+import { listIntakeHistory } from '@/infrastructure/intakes/intake-repository';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
   getGenericGroupMembers,
@@ -212,6 +213,11 @@ function NewPreparationScreenContent({
               treatmentId: confirmation.treatmentId,
               cis: confirmation.cis,
             })),
+            await listIntakeHistory(personalDatabase, {
+              startDate: upcomingWeek.startDate,
+              endDate: upcomingWeek.endDate,
+              treatmentId: null,
+            }),
           );
           const id = await createPreparation(personalDatabase, generated);
           if (!active) return;
@@ -395,6 +401,11 @@ function NewPreparationScreenContent({
           treatmentId: confirmation.treatmentId,
           cis: confirmation.cis,
         })),
+        await listIntakeHistory(personalDatabase, {
+          startDate: upcomingWeek.startDate,
+          endDate: upcomingWeek.endDate,
+          treatmentId: null,
+        }),
       );
       const id = await createPreparation(personalDatabase, generated);
       setTreatments(currentTreatments);
@@ -966,6 +977,13 @@ function NewPreparationScreenContent({
       ) : null}
       {snapshot && snapshot.requirements.length === 0 ? (
         <Text>Aucune prise prévue pour cette période.</Text>
+      ) : null}
+      {snapshot && snapshot.startDate === todayIso() ? (
+        <Banner level="warning" title="Le pilulier inclut aujourd’hui">
+          Les prises déjà marquées prises ou ignorées avant la génération sont
+          exclues. Les créneaux passés mais non renseignés restent prévus :
+          aucune prise n’est déduite de l’heure. Vérifiez les dates des cases.
+        </Banner>
       ) : null}
       {current ? (
         <MedicationStep

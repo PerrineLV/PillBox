@@ -32,7 +32,7 @@ export function WeekChoice({
       </View>
       {selectedState === 'ALREADY_PREPARED' ? (
         <Banner level="warning" title="Semaine déjà préparée">
-          Une préparation validée existe déjà pour cette période.
+          Une préparation validée couvre déjà tout ou partie de cette période.
         </Banner>
       ) : null}
       {selectedState === 'IN_PROGRESS' ? (

@@ -546,3 +546,22 @@ describe('isAttentionItemActionRequired', () => {
     ).toBe(true);
   });
 });
+
+it('maintient l’action de préparation le lundi après le rappel du dimanche', () => {
+  expect(
+    buildAttentionItems(
+      baseInput({
+        referenceDate: '2026-03-02',
+        preparationReminder: { enabled: true, weekday: 'sunday' },
+        knownPreparationWeeks: [],
+      }),
+    ),
+  ).toContainEqual(
+    expect.objectContaining({
+      type: 'PREPARATION',
+      mode: 'START',
+      startDate: '2026-03-02',
+      endDate: '2026-03-08',
+    }),
+  );
+});

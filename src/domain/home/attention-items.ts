@@ -273,7 +273,12 @@ function buildPreparationItems(
   }
   if (
     !input.preparationReminder.enabled ||
-    weekdayForDate(input.referenceDate) !== input.preparationReminder.weekday
+    (weekdayForDate(input.referenceDate) !==
+      input.preparationReminder.weekday &&
+      !(
+        input.preparationReminder.weekday === 'sunday' &&
+        weekdayForDate(input.referenceDate) === 'monday'
+      ))
   )
     return [];
   const nextWeek = preparationWeeks(input.referenceDate)[0];
