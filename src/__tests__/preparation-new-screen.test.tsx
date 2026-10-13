@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { Text } from 'react-native';
+import { TextInput } from 'react-native';
+import { CameraView } from 'expo-camera';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { generatePreparationSnapshot } from '@/domain/preparations/preparation';
@@ -14,6 +15,7 @@ import {
   getLatestDraftPreparation,
   listPreparationWeeks,
   savePreparationProgress,
+  removePreparationContribution,
   type SavedPreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
 import { listPrescriptionItems } from '@/infrastructure/prescriptions/prescription-repository';
@@ -68,6 +70,7 @@ jest.mock('@/infrastructure/preparations/preparation-repository', () => ({
   getLatestDraftPreparation: jest.fn(),
   listPreparationWeeks: jest.fn(),
   savePreparationProgress: jest.fn(),
+  removePreparationContribution: jest.fn(),
 }));
 jest.mock('@/infrastructure/prescriptions/prescription-repository', () => ({
   listPrescriptionItems: jest.fn(),
@@ -213,14 +216,15 @@ async function pressBoxRow(
   marker: string,
 ): Promise<void> {
   await act(async () => {
-    const label = renderer.root
-      .findAllByType(Text)
-      .find((node) => JSON.stringify(node.props.children).includes(marker));
-    if (!label) throw new Error(`Aucun texte contenant "${marker}" trouvé.`);
-    let node: typeof label | null = label;
-    while (node && typeof node.props.onPress !== 'function') node = node.parent;
-    if (!node) throw new Error(`Aucun bouton parent pour "${marker}".`);
-    (node.props as { onPress(): void }).onPress();
+    const expected = marker.replace('Boîte #', 'Boîte numéro ');
+    const node = renderer.root.findAll(
+      (item) =>
+        typeof item.props.accessibilityLabel === 'string' &&
+        item.props.accessibilityLabel.startsWith(expected) &&
+        typeof item.props.onPress === 'function',
+    )[0];
+    if (!node) throw new Error(`Aucune boîte ${expected}`);
+    node.props.onPress();
     await flush();
   });
 }
@@ -537,7 +541,7 @@ describe('confirmation d’une équivalence générique', () => {
     expect(textOf(renderer)).not.toContain('Correspondance générique détectée');
     expect(textOf(renderer)).toContain('Équivalence générique confirmée');
 
-    await press(renderer, 'Boîte choisie, cases remplies');
+    await press(renderer, 'Confirmer la quantité prélevée');
 
     expect(mockedSavePreparationProgress).toHaveBeenCalledWith(
       expect.anything(),
@@ -563,5 +567,120 @@ describe('confirmation d’une équivalence générique', () => {
     expect(textOf(renderer)).not.toContain('Correspondance générique détectée');
     expect(mockedConfirmGenericEquivalence).not.toHaveBeenCalled();
     expect(textOf(renderer)).toContain('Équivalence générique confirmée');
+  });
+});
+
+describe('ticket 106 — répartition par boîte', () => {
+  async function setupSplit(sameLot = false) {
+    const boxes = [
+      box({
+        id: 1,
+        presentationCip13: '3400000000005',
+        lot: 'LOT-A',
+        remainingQuantity: 10,
+      }),
+      box({
+        id: 2,
+        presentationCip13: '3400000000005',
+        lot: sameLot ? 'LOT-A' : 'LOT-B',
+        remainingQuantity: 10,
+      }),
+    ];
+    mockedGetLatestDraftPreparation.mockResolvedValue({
+      id: 3,
+      snapshot: generatePreparationSnapshot(
+        [treatment()],
+        boxes,
+        '2026-09-14',
+        '2026-09-13',
+      ),
+      progress: [],
+    });
+    mockedListMedicationBoxes.mockResolvedValue(boxes);
+    mockedListPreparationWeeks.mockResolvedValue([]);
+    mockedListTreatments.mockResolvedValue([treatment()]);
+    mockedSavePreparationProgress.mockResolvedValue(undefined);
+    jest.mocked(removePreparationContribution).mockResolvedValue(undefined);
+    return renderScreen();
+  }
+
+  async function scan(renderer: ReactTestRenderer, lot: string) {
+    await press(renderer, 'Scanner la boîte utilisée');
+    await act(async () => {
+      renderer.root.findByType(CameraView).props.onBarcodeScanned({
+        data: `]d201034000000000051727010110${lot}`,
+        type: 'datamatrix',
+      });
+      await flush();
+    });
+  }
+
+  async function quantity(renderer: ReactTestRenderer, value: string) {
+    await act(async () => {
+      renderer.root.findByType(TextInput).props.onChangeText(value);
+    });
+  }
+
+  it.each([false, true])(
+    'conserve 2 unités dans A et 5 dans B après le second scan (même lot : %s)',
+    async (sameLot) => {
+      const renderer = await setupSplit(sameLot);
+      await scan(renderer, 'LOT-A');
+      if (sameLot) await pressBoxRow(renderer, 'Boîte #1');
+      await quantity(renderer, '2');
+      await press(renderer, 'Confirmer la quantité prélevée');
+      await scan(renderer, sameLot ? 'LOT-A' : 'LOT-B');
+      if (sameLot) await pressBoxRow(renderer, 'Boîte #2');
+      expect(mockedSavePreparationProgress).toHaveBeenCalledTimes(1);
+      expect(renderer.root.findByType(TextInput).props.value).toBe('5');
+      await press(renderer, 'Confirmer le prélèvement malgré l’avertissement');
+      expect(
+        mockedSavePreparationProgress.mock.calls.map((call) => [
+          call[2].boxId,
+          call[2].quantityHalfUnits,
+        ]),
+      ).toEqual([
+        [1, 4],
+        [2, 10],
+      ]);
+      expect(textOf(renderer)).toContain('Lots retenus pour cette semaine');
+      expect(textOf(renderer)).toContain(
+        'Corriger le prélèvement dans la boîte #1',
+      );
+    },
+  );
+
+  it('cumule un second prélèvement de la même boîte sans perdre la première quantité', async () => {
+    const renderer = await setupSplit();
+    await scan(renderer, 'LOT-A');
+    await quantity(renderer, '2');
+    await press(renderer, 'Confirmer la quantité prélevée');
+    await scan(renderer, 'LOT-A');
+    await press(renderer, 'Confirmer la quantité prélevée');
+    expect(
+      mockedSavePreparationProgress.mock.calls.map(
+        (call) => call[2].quantityHalfUnits,
+      ),
+    ).toEqual([4, 14]);
+    expect(textOf(renderer)).toContain('Lots retenus pour cette semaine');
+  });
+
+  it('corrige une affectation sans supprimer celle de l’autre boîte', async () => {
+    const renderer = await setupSplit();
+    await scan(renderer, 'LOT-A');
+    await quantity(renderer, '2');
+    await press(renderer, 'Confirmer la quantité prélevée');
+    await scan(renderer, 'LOT-B');
+    await press(renderer, 'Confirmer le prélèvement malgré l’avertissement');
+    await press(renderer, 'Corriger le prélèvement dans la boîte #1');
+    await press(renderer, 'Retirer l’affectation et la ressaisir');
+    expect(removePreparationContribution).toHaveBeenCalledWith(
+      mockDatabase,
+      3,
+      '60000001',
+      1,
+    );
+    await scan(renderer, 'LOT-A');
+    expect(renderer.root.findByType(TextInput).props.value).toBe('2');
   });
 });

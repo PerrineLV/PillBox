@@ -242,12 +242,36 @@ export async function getLatestDraftPreparation(
   };
 }
 
+/** Retire une affectation du brouillon, sans toucher au stock ni au snapshot. */
+export async function removePreparationContribution(
+  database: SQLiteDatabase,
+  preparationId: number,
+  specialtyCis: string,
+  boxId: number,
+): Promise<void> {
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const editable = await transaction.getFirstAsync<{ id: number }>(
+      `SELECT id FROM preparations WHERE id = ? AND status = 'DRAFT'
+       AND NOT EXISTS (SELECT 1 FROM stock_movements WHERE preparation_id = preparations.id)`,
+      preparationId,
+    );
+    if (!editable)
+      throw new Error('Cette préparation ne peut plus être corrigée.');
+    await transaction.runAsync(
+      'DELETE FROM preparation_progress WHERE preparation_id = ? AND specialty_cis = ? AND box_id = ?',
+      preparationId,
+      specialtyCis,
+      boxId,
+    );
+  });
+}
+
 /**
  * Enregistre la contribution d'une boîte au besoin d'un médicament. Plusieurs
  * boîtes peuvent contribuer au même médicament : la ligne est identifiée par
  * boîte, pas seulement par médicament, afin qu'une boîte qui se termine en
  * cours de préparation puisse être complétée par une seconde sans écraser la
- * première.
+ * première. La quantité est le total confirmé pour cette boîte, pas un incrément.
  */
 export async function savePreparationProgress(
   database: SQLiteDatabase,

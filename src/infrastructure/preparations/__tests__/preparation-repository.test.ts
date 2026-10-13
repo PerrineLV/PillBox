@@ -17,6 +17,7 @@ import {
   listPreparationHistory,
   listPreparationWeeks,
   savePreparationProgress,
+  removePreparationContribution,
 } from '../preparation-repository';
 
 type SqlParameters = readonly (string | number | null)[];
@@ -1391,4 +1392,100 @@ describe('plusieurs préparations se succèdent sans interférence', () => {
     ).toEqual({ count: 2 });
     raw.close();
   });
+});
+
+describe('ticket 106 — prélèvements confirmés et correction', () => {
+  it.each([false, true])(
+    'consomme exactement 2 unités dans A et 5 dans B (lots identiques : %s)',
+    async (sameLot) => {
+      const { raw, database } = await createDatabase();
+      const base = weekSnapshot('2026-08-17');
+      const snapshot: PreparationSnapshot = {
+        ...base,
+        requirements: [{ ...base.requirements[0], requiredHalfUnits: 14 }],
+        items: Array.from({ length: 7 }, (_, index) => ({
+          ...base.items[0],
+          date: `2026-08-${17 + index}`,
+          quantityHalfUnits: 2,
+        })),
+      };
+      const id = await createPreparation(database, snapshot);
+      const a = insertBox(raw, {
+        specialtyCis: '60000001',
+        lot: 'A',
+        remainingQuantity: 10,
+      });
+      const b = insertBox(raw, {
+        specialtyCis: '60000001',
+        lot: sameLot ? 'A' : 'B',
+        remainingQuantity: 10,
+      });
+      const contribution = (boxId: number, quantityHalfUnits: number) => ({
+        specialtyCis: '60000001',
+        boxId,
+        quantityHalfUnits,
+        verification: 'SCAN' as const,
+        scanRaw: 'raw',
+        nonFefoAcknowledged: true,
+        matchedCis: null,
+        matchedSpecialtyName: null,
+      });
+      await savePreparationProgress(database, id, contribution(a, 6));
+      await savePreparationProgress(database, id, contribution(b, 10));
+      await removePreparationContribution(database, id, '60000001', a);
+      await removePreparationContribution(database, id, '60000001', a);
+      expect(
+        (await getLatestDraftPreparation(database))?.progress.map((p) => [
+          p.boxId,
+          p.quantityHalfUnits,
+        ]),
+      ).toEqual([[b, 10]]);
+      await savePreparationProgress(database, id, contribution(a, 4));
+      const resumed = expoAdapter(raw, false);
+      expect((await getLatestDraftPreparation(resumed))?.progress).toHaveLength(
+        2,
+      );
+      expect(countOf(raw, 'stock_movements')).toBe(0);
+      await completePreparation(resumed, id, '2026-08-16');
+      expect(
+        raw
+          .prepare(
+            'SELECT id, remaining_quantity FROM medication_boxes ORDER BY id',
+          )
+          .all(),
+      ).toEqual([
+        { id: a, remaining_quantity: 8 },
+        { id: b, remaining_quantity: 5 },
+      ]);
+      const history = await listPreparationHistory(resumed);
+      expect(
+        history[0].medications.map((m) => ({
+          boxId: m.boxId,
+          lot: m.lot,
+          quantityHalfUnits: m.quantityHalfUnits,
+        })),
+      ).toEqual([
+        { boxId: a, lot: 'A', quantityHalfUnits: 4 },
+        { boxId: b, lot: sameLot ? 'A' : 'B', quantityHalfUnits: 10 },
+      ]);
+      expect(
+        raw
+          .prepare(
+            'SELECT box_id, quantity_delta FROM stock_movements ORDER BY box_id',
+          )
+          .all(),
+      ).toEqual([
+        { box_id: a, quantity_delta: -2 },
+        { box_id: b, quantity_delta: -5 },
+      ]);
+      await expect(
+        completePreparation(resumed, id, '2026-08-16'),
+      ).rejects.toThrow();
+      await expect(
+        removePreparationContribution(resumed, id, '60000001', a),
+      ).rejects.toThrow('ne peut plus être corrigée');
+      expect(countOf(raw, 'stock_movements')).toBe(2);
+      raw.close();
+    },
+  );
 });

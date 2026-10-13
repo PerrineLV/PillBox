@@ -7,6 +7,7 @@ import { formatHalfUnits } from '@/domain/treatments/treatment';
 import type { SavedPreparationProgress } from '@/infrastructure/preparations/preparation-repository';
 
 import { styles } from './styles';
+import { PillButton } from '@/ui';
 
 /**
  * Récapitulatif des lots réellement retenus pour chaque médicament, affiché
@@ -17,10 +18,14 @@ export function UsageSummary({
   snapshot,
   progress,
   boxes,
+  onRemove,
+  saving = false,
 }: {
   snapshot: PreparationSnapshot;
   progress: readonly SavedPreparationProgress[];
   boxes: readonly MedicationBox[];
+  onRemove?(contribution: SavedPreparationProgress): void;
+  saving?: boolean;
 }) {
   return (
     <View style={styles.finalCheck}>
@@ -34,14 +39,25 @@ export function UsageSummary({
             {contributions.map((contribution) => {
               const box = boxes.find((item) => item.id === contribution.boxId);
               return (
-                <Text key={contribution.boxId} style={styles.case}>
-                  • Lot {box?.lot ?? 'non renseigné'} · péremption{' '}
-                  {box ? formatLongFrenchCivilDate(box.expirationDate) : '—'} ·{' '}
-                  {formatHalfUnits(contribution.quantityHalfUnits)} ·{' '}
-                  {contribution.verification === 'SCAN'
-                    ? 'vérifiée par scan'
-                    : 'choisie sans scan'}
-                </Text>
+                <View key={contribution.boxId}>
+                  <Text style={styles.case}>
+                    • Boîte #{contribution.boxId} · lot{' '}
+                    {box?.lot ?? 'non renseigné'} · péremption{' '}
+                    {box ? formatLongFrenchCivilDate(box.expirationDate) : '—'}{' '}
+                    · {formatHalfUnits(contribution.quantityHalfUnits)} ·{' '}
+                    {contribution.verification === 'SCAN'
+                      ? 'vérifiée par scan'
+                      : 'choisie sans scan'}
+                  </Text>
+                  {onRemove ? (
+                    <PillButton
+                      disabled={saving}
+                      tone="outline"
+                      label={`Corriger le prélèvement dans la boîte #${contribution.boxId}`}
+                      onPress={() => onRemove(contribution)}
+                    />
+                  ) : null}
+                </View>
               );
             })}
             {contributions.length === 0 ? (
