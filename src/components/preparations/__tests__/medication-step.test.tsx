@@ -149,3 +149,39 @@ describe('MedicationStep', () => {
     expect(rendered).toContain('Passez maintenant à une autre boîte');
   });
 });
+
+it('distingue les quantités déjà déposées, partielles et restantes après reprise', () => {
+  const rendered = JSON.stringify(
+    MedicationStep({
+      snapshot,
+      current: {
+        ...current(0),
+        remainingHalfUnits: 3,
+        contributions: [
+          {
+            specialtyCis: 'A',
+            boxId: 12,
+            quantityHalfUnits: 3,
+            verification: 'MANUAL',
+            scanRaw: null,
+            nonFefoAcknowledged: false,
+            matchedCis: null,
+            matchedSpecialtyName: null,
+          },
+        ],
+      },
+      boxes: [],
+      theoreticalRenewalDate: null,
+      pendingComplementEnabled: false,
+    }),
+  );
+  expect(rendered).toContain(
+    'Lundi 17 août · matin : ✓ Remplie. 1 déposée(s).',
+  );
+  expect(rendered).toContain(
+    'Mardi 18 août · matin : → À compléter. 0,5 à déposer · 0,5 déjà déposée(s).',
+  );
+  expect(rendered).toContain(
+    'Mercredi 19 août · matin : → À remplir. 1 à déposer.',
+  );
+});

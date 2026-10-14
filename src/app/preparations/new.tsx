@@ -930,12 +930,16 @@ function NewPreparationScreenContent({
                 ? 'produits'
                 : 'médicaments'}
             </Text>
-            <PreparationGrid grid={grid} />
           </View>
         ) : undefined
       }
     >
       <Stack.Screen options={{ headerShown: false }} />
+      {grid ? (
+        <View style={styles.darkHeader}>
+          <PreparationGrid grid={grid} />
+        </View>
+      ) : null}
       {snapshot === null ? (
         <Text style={styles.intro}>
           Préparation sur 7 jours. La progression est sauvegardée après chaque
