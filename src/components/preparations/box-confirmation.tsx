@@ -1,4 +1,6 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { parseBoxContribution } from '@/domain/preparations/box-filling-guide';
 
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
 import type {
@@ -36,7 +38,10 @@ export function BoxConfirmation({
   pending: PendingBox;
   saving: boolean;
   onRestart(): void;
-  onValidate(acknowledgeNonFefo: boolean): Promise<void>;
+  onValidate(
+    acknowledgeNonFefo: boolean,
+    quantityHalfUnits: number,
+  ): Promise<void>;
 }) {
   const { verification } = pending;
   const scanned = pending.method === 'SCAN';
@@ -44,6 +49,13 @@ export function BoxConfirmation({
   const isFefo = verification.status === 'VALID' && verification.isFefo;
   const level: SeverityLevel = partial || !isFefo ? 'high' : 'ok';
   const box = verification.box;
+  const [quantity, setQuantity] = useState(
+    formatHalfUnits(verification.quantityHalfUnits),
+  );
+  const quantityHalfUnits = parseBoxContribution(
+    quantity,
+    verification.quantityHalfUnits,
+  );
 
   return (
     <View
@@ -87,14 +99,13 @@ export function BoxConfirmation({
 
       {partial ? (
         <Text style={[styles.body, { color: severityScale[level].text }]}>
-          Cette boîte couvre {formatHalfUnits(verification.quantityHalfUnits)}.
-          Il restera {formatHalfUnits(verification.remainingAfterHalfUnits)} à
-          couvrir avec une seconde boîte.
+          Cette boîte peut fournir au maximum{' '}
+          {formatHalfUnits(verification.quantityHalfUnits)} unité(s).
         </Text>
       ) : isFefo ? (
         <Text style={[styles.body, { color: severityScale[level].text }]}>
-          Cette boîte couvre toutes les prises restantes. Aucune autre boîte
-          n’est nécessaire.
+          Cette boîte peut couvrir toutes les prises restantes. Confirmez
+          uniquement la quantité réellement prélevée.
         </Text>
       ) : (
         <Text style={[styles.body, { color: severityScale[level].text }]}>
@@ -107,22 +118,56 @@ export function BoxConfirmation({
         </Text>
       )}
 
+      <Text style={styles.body}>Quantité prélevée dans la boîte #{box.id}</Text>
+      <TextInput
+        accessibilityLabel="Quantité prélevée dans cette boîte"
+        editable={!saving}
+        keyboardType="decimal-pad"
+        value={quantity}
+        onChangeText={setQuantity}
+        style={styles.input}
+      />
+      <Text style={styles.notice}>
+        De 0,5 à {formatHalfUnits(verification.quantityHalfUnits)} unité(s).
+        Confirmez ce prélèvement avant de scanner ou choisir la boîte suivante.
+        Scanner une boîte ne signifie pas que la précédente est vide.
+      </Text>
+      {quantityHalfUnits === null ? (
+        <Text style={styles.notice}>
+          Saisissez une quantité valide, par pas de 0,5 unité.
+        </Text>
+      ) : null}
+      {quantityHalfUnits !== null ? (
+        <Text style={styles.body}>
+          Après confirmation :{' '}
+          {formatHalfUnits(
+            verification.quantityHalfUnits +
+              (verification.status === 'PARTIAL'
+                ? verification.remainingAfterHalfUnits
+                : 0) -
+              quantityHalfUnits,
+          )}{' '}
+          unité(s) encore à répartir.
+        </Text>
+      ) : null}
       <PillButton
-        disabled={saving}
+        disabled={saving || quantityHalfUnits === null}
         height={54}
         label={
           !partial && !isFefo
-            ? 'Utiliser quand même cette boîte'
-            : scanned
-              ? 'Boîte scannée, cases remplies'
-              : 'Boîte choisie, cases remplies'
+            ? 'Confirmer le prélèvement malgré l’avertissement'
+            : 'Confirmer la quantité prélevée'
         }
-        onPress={() => void onValidate(!partial && !isFefo)}
+        onPress={() => {
+          if (quantityHalfUnits !== null)
+            void onValidate(!partial && !isFefo, quantityHalfUnits);
+        }}
         tone="accent"
       />
       <PillButton
         height={44}
-        label={scanned ? 'Scanner une autre boîte' : 'Choisir une autre boîte'}
+        disabled={saving}
+        label="Annuler ce choix sans enregistrer de prélèvement"
         onPress={onRestart}
         tone="outline"
       />
@@ -134,6 +179,14 @@ export function BoxConfirmation({
 }
 
 const styles = StyleSheet.create({
+  input: {
+    ...typography.itemTitle,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radii.sm,
+    padding: 12,
+  },
   panel: { borderRadius: radii.md, gap: 9, padding: 14 },
   head: { alignItems: 'flex-start', flexDirection: 'row', gap: 9 },
   title: {

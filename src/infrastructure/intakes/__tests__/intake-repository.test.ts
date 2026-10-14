@@ -1,17 +1,24 @@
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import { generateIntakes } from '@/domain/treatments/generate-intakes';
+import { INTAKE_SLOTS } from '@/domain/treatments/treatment';
 import { intakeRecordKey } from '@/domain/intakes/intake-tracking';
 import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 import {
   archiveTreatment,
   getTreatmentRemovalAction,
+  getTreatment,
   updateTreatment,
 } from '@/infrastructure/treatments/treatment-repository';
 import {
   deleteIntakePostponement,
   getIntakePostponement,
   listIntakeHistory,
+  listIntakeRecordsForGroups,
   listPendingIntakeCounts,
   markPendingIntakesTaken,
   markPendingIntakesTakenForGroups,
@@ -66,7 +73,10 @@ async function setup() {
     });
   raw.exec(`INSERT INTO treatments (id, specialty_cis, specialty_name, pharmaceutical_form) VALUES (1, 'cis-1', 'Alpha', 'comprimé');
     INSERT INTO treatment_phases (id, treatment_id, position, start_date, frequency_type) VALUES (10, 1, 0, '2026-08-01', 'daily');
-    INSERT INTO treatment_phase_dosages (phase_id, slot, quantity_half_units) VALUES (10, 'morning', 2);`);
+    INSERT INTO treatment_phase_dosages (phase_id, slot, quantity_half_units) VALUES (10, 'morning', 2), (10, 'noon', 2);
+    INSERT INTO treatments (id, specialty_cis, specialty_name) VALUES (2, 'cis-2', 'Beta'), (3, 'cis-3', 'Gamma');
+    INSERT INTO treatment_phases (id, treatment_id, position, start_date, frequency_type) VALUES (20, 2, 0, '2026-08-01', 'daily'), (30, 3, 0, '2026-08-01', 'daily');
+    INSERT INTO treatment_phase_dosages (phase_id, slot, quantity_half_units) VALUES (20, 'morning', 2), (30, 'morning', 2);`);
   return { raw, database: adapter(raw) };
 }
 const snapshot = {
@@ -639,4 +649,182 @@ describe('suivi local des prises', () => {
     ]);
     raw.close();
   });
+});
+
+describe('ticket 107 — prises devenues inapplicables', () => {
+  it.each(['avant', 'après'] as const)(
+    'exclut un archivage %s matérialisation, même après fermeture et réouverture SQLite',
+    async (moment) => {
+      const initial = await setup();
+      let raw = initial.raw;
+      const database = initial.database;
+      // Une décision passée justifie l’archivage et doit être conservée.
+      const past = {
+        ...snapshot,
+        key: intakeRecordKey(1, '2026-08-09', 'morning'),
+        date: '2026-08-09',
+      };
+      await materializeIntakeSnapshots(database, [past]);
+      await updateIntakeStatus(database, past.key, 'TAKEN');
+      if (moment === 'après')
+        await materializeIntakeSnapshots(database, [snapshot]);
+      await archiveTreatment(database, 1);
+      if (moment === 'avant')
+        await materializeIntakeSnapshots(database, [snapshot]);
+      await materializeIntakeSnapshots(database, [beta]);
+      const directory = mkdtempSync(join(tmpdir(), 'pillbox-107-'));
+      const file = join(directory, 'restart.sqlite');
+      writeFileSync(file, raw.serialize());
+      raw.close();
+      raw = new Database(file);
+      const restarted = adapter(raw);
+      expect(
+        (
+          await listIntakeRecordsForGroups(restarted, snapshot.date, [
+            'morning',
+          ])
+        ).map((r) => r.key),
+      ).toEqual([beta.key]);
+      expect(
+        await listPendingIntakeCounts(restarted, snapshot.date, snapshot.date),
+      ).toEqual([{ date: snapshot.date, slot: 'morning', pending: 1 }]);
+      await expect(
+        updateIntakeStatus(restarted, snapshot.key, 'TAKEN'),
+      ).rejects.toThrow('inapplicable');
+      expect(
+        await markPendingIntakesTaken(restarted, snapshot.date, 'morning'),
+      ).toBe(1);
+      expect(
+        await listIntakeHistory(restarted, {
+          startDate: null,
+          endDate: snapshot.date,
+          treatmentId: 1,
+        }),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ key: past.key, status: 'TAKEN' }),
+          expect.objectContaining({ key: snapshot.key, status: 'UNSET' }),
+        ]),
+      );
+      expect(
+        raw.prepare('SELECT COUNT(*) count FROM stock_movements').get(),
+      ).toEqual({ count: 0 });
+      raw.close();
+      rmSync(directory, { recursive: true });
+    },
+  );
+
+  it('évalue chaque occurrence à sa date et ne reprend pas une ancienne phase du matin', async () => {
+    const { raw, database } = await setup();
+    const past = {
+      ...snapshot,
+      key: intakeRecordKey(1, '2026-08-09', 'morning'),
+      date: '2026-08-09',
+    };
+    const noon = {
+      ...snapshot,
+      key: intakeRecordKey(1, snapshot.date, 'noon'),
+      slot: 'noon' as const,
+    };
+    await materializeIntakeSnapshots(database, [past, snapshot, noon, beta]);
+    raw.exec(`UPDATE treatment_phases SET end_date = '2026-08-09' WHERE id = 10;
+      INSERT INTO treatment_phases (id, treatment_id, position, start_date, end_date, frequency_type) VALUES (11, 1, 1, '2026-08-10', '2026-08-10', 'daily');
+      INSERT INTO treatment_phase_dosages (phase_id, slot, quantity_half_units) VALUES (11, 'noon', 2);`);
+    expect(
+      (await listIntakeRecordsForGroups(database, past.date, ['morning'])).map(
+        (r) => r.key,
+      ),
+    ).toEqual([past.key]);
+    expect(
+      (
+        await listIntakeRecordsForGroups(database, snapshot.date, [
+          'morning',
+          'noon',
+        ])
+      ).map((r) => r.key),
+    ).toEqual([beta.key, noon.key]);
+    raw.exec(
+      `UPDATE treatment_phases SET end_date = '2026-08-09', start_date = '2026-08-09' WHERE id = 11`,
+    );
+    expect(
+      (
+        await listIntakeRecordsForGroups(database, snapshot.date, [
+          'morning',
+          'noon',
+        ])
+      ).map((r) => r.key),
+    ).toEqual([beta.key]);
+    expect(
+      await markPendingIntakesTakenForGroups(database, [
+        { date: snapshot.date, slot: 'morning' },
+        { date: snapshot.date, slot: 'noon' },
+      ]),
+    ).toBe(1);
+    raw.close();
+  });
+
+  it('refuse une ancienne prise hors pilulier sans consommer de stock', async () => {
+    const { raw, database } = await setup();
+    await materializeIntakeSnapshots(database, [snapshot]);
+    raw.exec(`UPDATE treatments SET included_in_pillbox = 0;
+      UPDATE treatment_phases SET end_date = '2026-08-09'`);
+    await expect(
+      takeOutsidePillboxIntake(database, snapshot.key, 123, snapshot.date),
+    ).rejects.toThrow('introuvable');
+    expect(
+      raw.prepare('SELECT COUNT(*) count FROM stock_movements').get(),
+    ).toEqual({ count: 0 });
+    raw.close();
+  });
+});
+
+it.each([
+  "frequency_type = 'daily', start_date = '2026-08-09', end_date = '2026-08-11'",
+  "frequency_type = 'weekly', weekly_weekday = 'monday'",
+  "frequency_type = 'interval', interval_days = 3, anchor_date = '2026-08-11'",
+  "frequency_type = 'legacy_weekdays', start_date = NULL",
+])('garde le filtre SQLite cohérent avec le générateur : %s', async (phase) => {
+  const { raw, database } = await setup();
+  raw.exec(`UPDATE treatment_phases SET ${phase} WHERE id = 10;
+    UPDATE treatment_phase_dosages SET weekday = 'monday' WHERE phase_id = 10`);
+  const treatment = await getTreatment(database, 1);
+  if (!treatment) throw new Error('Traitement témoin absent');
+  for (const date of [
+    '2026-08-08',
+    '2026-08-09',
+    '2026-08-10',
+    '2026-08-11',
+    '2026-08-12',
+    '2026-08-17',
+  ]) {
+    await materializeIntakeSnapshots(
+      database,
+      INTAKE_SLOTS.map((slot) => ({
+        ...snapshot,
+        date,
+        slot,
+        key: intakeRecordKey(1, date, slot),
+      })),
+    );
+    const expected = generateIntakes([treatment], date, date)
+      .map((item) => item.slot)
+      .sort();
+    expect(
+      (await listIntakeRecordsForGroups(database, date, INTAKE_SLOTS))
+        .map((item) => item.slot)
+        .sort(),
+    ).toEqual(expected);
+    expect(
+      (await listPendingIntakeCounts(database, date, date))
+        .map((item) => item.slot)
+        .sort(),
+    ).toEqual(expected);
+    expect(
+      await markPendingIntakesTakenForGroups(
+        database,
+        INTAKE_SLOTS.map((slot) => ({ date, slot })),
+      ),
+    ).toBe(expected.length);
+  }
+  raw.close();
 });

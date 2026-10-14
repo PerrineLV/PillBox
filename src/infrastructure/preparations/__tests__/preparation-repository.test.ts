@@ -17,6 +17,7 @@ import {
   listPreparationHistory,
   listPreparationWeeks,
   savePreparationProgress,
+  removePreparationContribution,
 } from '../preparation-repository';
 
 type SqlParameters = readonly (string | number | null)[];
@@ -1389,6 +1390,166 @@ describe('plusieurs préparations se succèdent sans interférence', () => {
     expect(
       raw.prepare('SELECT COUNT(*) AS count FROM stock_movements').get(),
     ).toEqual({ count: 2 });
+    raw.close();
+  });
+});
+
+describe('ticket 106 — prélèvements confirmés et correction', () => {
+  it.each([false, true])(
+    'consomme exactement 2 unités dans A et 5 dans B (lots identiques : %s)',
+    async (sameLot) => {
+      const { raw, database } = await createDatabase();
+      const base = weekSnapshot('2026-08-17');
+      const snapshot: PreparationSnapshot = {
+        ...base,
+        requirements: [{ ...base.requirements[0], requiredHalfUnits: 14 }],
+        items: Array.from({ length: 7 }, (_, index) => ({
+          ...base.items[0],
+          date: `2026-08-${17 + index}`,
+          quantityHalfUnits: 2,
+        })),
+      };
+      const id = await createPreparation(database, snapshot);
+      const a = insertBox(raw, {
+        specialtyCis: '60000001',
+        lot: 'A',
+        remainingQuantity: 10,
+      });
+      const b = insertBox(raw, {
+        specialtyCis: '60000001',
+        lot: sameLot ? 'A' : 'B',
+        remainingQuantity: 10,
+      });
+      const contribution = (boxId: number, quantityHalfUnits: number) => ({
+        specialtyCis: '60000001',
+        boxId,
+        quantityHalfUnits,
+        verification: 'SCAN' as const,
+        scanRaw: 'raw',
+        nonFefoAcknowledged: true,
+        matchedCis: null,
+        matchedSpecialtyName: null,
+      });
+      await savePreparationProgress(database, id, contribution(a, 6));
+      await savePreparationProgress(database, id, contribution(b, 10));
+      await removePreparationContribution(database, id, '60000001', a);
+      await removePreparationContribution(database, id, '60000001', a);
+      expect(
+        (await getLatestDraftPreparation(database))?.progress.map((p) => [
+          p.boxId,
+          p.quantityHalfUnits,
+        ]),
+      ).toEqual([[b, 10]]);
+      await savePreparationProgress(database, id, contribution(a, 4));
+      const resumed = expoAdapter(raw, false);
+      expect((await getLatestDraftPreparation(resumed))?.progress).toHaveLength(
+        2,
+      );
+      expect(countOf(raw, 'stock_movements')).toBe(0);
+      await completePreparation(resumed, id, '2026-08-16');
+      expect(
+        raw
+          .prepare(
+            'SELECT id, remaining_quantity FROM medication_boxes ORDER BY id',
+          )
+          .all(),
+      ).toEqual([
+        { id: a, remaining_quantity: 8 },
+        { id: b, remaining_quantity: 5 },
+      ]);
+      const history = await listPreparationHistory(resumed);
+      expect(
+        history[0].medications.map((m) => ({
+          boxId: m.boxId,
+          lot: m.lot,
+          quantityHalfUnits: m.quantityHalfUnits,
+        })),
+      ).toEqual([
+        { boxId: a, lot: 'A', quantityHalfUnits: 4 },
+        { boxId: b, lot: sameLot ? 'A' : 'B', quantityHalfUnits: 10 },
+      ]);
+      expect(
+        raw
+          .prepare(
+            'SELECT box_id, quantity_delta FROM stock_movements ORDER BY box_id',
+          )
+          .all(),
+      ).toEqual([
+        { box_id: a, quantity_delta: -2 },
+        { box_id: b, quantity_delta: -5 },
+      ]);
+      await expect(
+        completePreparation(resumed, id, '2026-08-16'),
+      ).rejects.toThrow();
+      await expect(
+        removePreparationContribution(resumed, id, '60000001', a),
+      ).rejects.toThrow('ne peut plus être corrigée');
+      expect(countOf(raw, 'stock_movements')).toBe(2);
+      raw.close();
+    },
+  );
+});
+
+describe('ticket 108 — prises déjà renseignées et doublons', () => {
+  it.each(['TAKEN', 'SKIPPED'] as const)(
+    'refuse une création contenant une prise %s, sans réécrire son historique',
+    async (status) => {
+      const { raw, database } = await createDatabase();
+      raw
+        .prepare(
+          `INSERT INTO intake_records (intake_key, source_treatment_id, intake_date, slot, specialty_cis, specialty_name, quantity_half_units, status) VALUES ('1:2026-08-10:morning', 1, '2026-08-10', 'morning', '60000001', 'Alpha', 1, ?)`,
+        )
+        .run(status);
+      await expect(
+        createPreparation(database, weekSnapshot('2026-08-10')),
+      ).rejects.toThrow('déjà renseignée');
+      expect(countOf(raw, 'preparations')).toBe(0);
+      expect(raw.prepare('SELECT status FROM intake_records').get()).toEqual({
+        status,
+      });
+      raw.close();
+    },
+  );
+
+  it('bloque sans déstockage si une prise est renseignée après la création du brouillon', async () => {
+    const { raw, database } = await createDatabase();
+    const id = await createPreparation(database, weekSnapshot('2026-08-10'));
+    const boxId = insertBox(raw, { specialtyCis: '60000001', lot: 'A' });
+    await savePreparationProgress(database, id, {
+      specialtyCis: '60000001',
+      boxId,
+      quantityHalfUnits: 7,
+      verification: 'MANUAL',
+      scanRaw: null,
+      nonFefoAcknowledged: false,
+      matchedCis: null,
+      matchedSpecialtyName: null,
+    });
+    raw.exec(
+      `INSERT INTO intake_records (intake_key, source_treatment_id, intake_date, slot, specialty_cis, specialty_name, quantity_half_units, status) VALUES ('1:2026-08-10:morning', 1, '2026-08-10', 'morning', '60000001', 'Alpha', 1, 'TAKEN')`,
+    );
+    await expect(
+      completePreparation(database, id, '2026-08-10'),
+    ).rejects.toThrow('déjà renseignée');
+    expect(countOf(raw, 'stock_movements')).toBe(0);
+    expect(
+      raw.prepare('SELECT remaining_quantity FROM medication_boxes').get(),
+    ).toEqual({ remaining_quantity: 10 });
+    expect((await getLatestDraftPreparation(database))?.snapshot).toEqual(
+      weekSnapshot('2026-08-10'),
+    );
+    raw.close();
+  });
+
+  it('refuse une nouvelle semaine qui chevauche une période déjà validée', async () => {
+    const { raw, database } = await createDatabase();
+    raw.exec(
+      `INSERT INTO preparations (start_date, end_date, status, completed_at) VALUES ('2026-08-04', '2026-08-10', 'COMPLETED', CURRENT_TIMESTAMP)`,
+    );
+    await expect(
+      createPreparation(database, weekSnapshot('2026-08-10')),
+    ).rejects.toThrow('déjà été préparée');
+    expect(countOf(raw, 'preparations')).toBe(1);
     raw.close();
   });
 });

@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { SupplementResult } from '@/components/supplements/supplement-result';
 import { GenericGroupSection } from '@/components/medications/generic-group-section';
 import {
   searchMedicationReference,
@@ -10,11 +11,15 @@ import {
 import { useMedicationReferenceDatabase } from '@/infrastructure/medications/medication-reference-provider';
 import {
   searchSupplementReference,
+  listSupplementForms,
   type SupplementSearchResult,
 } from '@/infrastructure/supplements/supplement-reference';
 import { useSupplementReferenceDatabase } from '@/infrastructure/supplements/supplement-reference-provider';
 import {
   AppCard,
+  DenseList,
+  Section,
+  SelectField,
   AppScreen,
   EmptyState,
   LoadingState,
@@ -39,6 +44,8 @@ export default function MedicationSearchScreen() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MedicationSearchResult[]>([]);
   const [supplements, setSupplements] = useState<SupplementSearchResult[]>([]);
+  const [form, setForm] = useState<string | null>(null);
+  const [forms, setForms] = useState<string[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,18 +55,21 @@ export default function MedicationSearchScreen() {
       setIsSearching(query.trim().length > 0);
       Promise.all([
         searchMedicationReference(database, query),
-        searchSupplementReference(supplementDatabase, query),
+        searchSupplementReference(supplementDatabase, query, 30, form),
+        listSupplementForms(supplementDatabase, query),
       ])
-        .then(([nextResults, nextSupplements]) => {
+        .then(([nextResults, nextSupplements, nextForms]) => {
           if (cancelled) return;
           setResults(nextResults);
           setSupplements(nextSupplements);
+          setForms(nextForms);
           setError(null);
         })
         .catch((reason: unknown) => {
           if (cancelled) return;
           setResults([]);
           setSupplements([]);
+          setForms([]);
           setError(
             reason instanceof Error ? reason.message : 'Recherche impossible.',
           );
@@ -72,7 +82,7 @@ export default function MedicationSearchScreen() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [database, supplementDatabase, query]);
+  }, [database, supplementDatabase, query, form]);
 
   return (
     <AppScreen header={<StackHeader title="Rechercher un produit" />}>
@@ -81,8 +91,11 @@ export default function MedicationSearchScreen() {
         autoCapitalize="none"
         autoCorrect={false}
         help="Médicaments BDPM et compléments Compl’Alim · hors ligne"
-        onChangeText={setQuery}
-        placeholder="Nom, dosage ou forme"
+        onChangeText={(text) => {
+          setQuery(text);
+          setForm(null);
+        }}
+        placeholder="Nom, marque, dosage ou forme"
         value={query}
       />
       {isSearching ? <LoadingState label="Recherche en cours…" /> : null}
@@ -97,20 +110,6 @@ export default function MedicationSearchScreen() {
           title="Aucun produit trouvé"
         />
       ) : null}
-      {results.map((result) => (
-        <MedicationResult
-          key={result.cis}
-          result={result}
-          returnTo={returnTo}
-        />
-      ))}
-      {supplements.map((result) => (
-        <SupplementResult
-          key={result.externalId}
-          result={result}
-          returnTo={returnTo}
-        />
-      ))}
       <PillButton
         label="Ajouter manuellement"
         tone="outline"
@@ -121,43 +120,49 @@ export default function MedicationSearchScreen() {
           })
         }
       />
+      {results.map((result) => (
+        <MedicationResult
+          key={result.cis}
+          result={result}
+          returnTo={returnTo}
+        />
+      ))}
+      {forms.length > 0 || supplements.length > 0 ? (
+        <Section label="Compléments · Compl’Alim">
+          {forms.length > 1 ? (
+            <SelectField
+              label="Forme du complément"
+              value={form ?? ''}
+              options={[
+                { value: '', label: 'Toutes les formes' },
+                ...forms.map((value) => ({ value, label: value })),
+              ]}
+              onChange={(value) => setForm(value || null)}
+            />
+          ) : null}
+          <DenseList>
+            {supplements.map((result, index) => (
+              <SupplementResult
+                first={index === 0}
+                key={result.externalId}
+                result={result}
+                returnTo={returnTo}
+              />
+            ))}
+          </DenseList>
+          {supplements.length === 30 ? (
+            <Text style={typography.detail}>
+              30 références affichées. Précisez le nom, la marque ou la forme
+              pour affiner.
+            </Text>
+          ) : null}
+        </Section>
+      ) : null}
       <Text style={typography.micro}>
         PillBox ne propose aucune correspondance incertaine : si le dosage ne
         figure pas, il n’apparaît pas.
       </Text>
     </AppScreen>
-  );
-}
-
-function SupplementResult({
-  result,
-  returnTo,
-}: Readonly<{ result: SupplementSearchResult; returnTo?: string }>) {
-  return (
-    <AppCard>
-      <Text style={styles.name}>{result.name}</Text>
-      <View style={styles.badges}>
-        <MetaBadge label="Complément · Compl’Alim" />
-        {result.brand ? <MetaBadge label={result.brand} /> : null}
-        {result.form ? <MetaBadge label={result.form} /> : null}
-      </View>
-      <PillButton
-        height={46}
-        label="Créer un traitement"
-        onPress={() =>
-          router.push({
-            pathname: '/treatments/new',
-            params: {
-              source: 'COMPL_ALIM',
-              externalId: result.externalId,
-              name: result.name,
-              form: result.form ?? '',
-              ...(returnTo ? { returnTo } : {}),
-            },
-          })
-        }
-      />
-    </AppCard>
   );
 }
 

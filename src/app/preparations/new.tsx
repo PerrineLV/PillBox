@@ -59,6 +59,7 @@ import {
   productSourceFromKey,
   type Treatment,
 } from '@/domain/treatments/treatment';
+import { listIntakeHistory } from '@/infrastructure/intakes/intake-repository';
 import { listMedicationBoxes } from '@/infrastructure/inventory/inventory-repository';
 import {
   getGenericGroupMembers,
@@ -72,6 +73,7 @@ import {
   getLatestDraftPreparation,
   listPreparationWeeks,
   savePreparationProgress,
+  removePreparationContribution,
   type SavedPreparationProgress,
 } from '@/infrastructure/preparations/preparation-repository';
 import { listPrescriptionItems } from '@/infrastructure/prescriptions/prescription-repository';
@@ -130,8 +132,14 @@ function NewPreparationScreenContent({
   >([]);
   const [weeks, setWeeks] = useState<KnownPreparation[]>([]);
   const [progress, setProgress] = useState<SavedPreparationProgress[]>([]);
+  const [contributionToCorrect, setContributionToCorrect] =
+    useState<SavedPreparationProgress | null>(null);
   const [pending, setPending] = useState<PendingBox | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanChoice, setScanChoice] = useState<{
+    boxes: MedicationBox[];
+    raw: string;
+  } | null>(null);
   const [choosing, setChoosing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -205,6 +213,11 @@ function NewPreparationScreenContent({
               treatmentId: confirmation.treatmentId,
               cis: confirmation.cis,
             })),
+            await listIntakeHistory(personalDatabase, {
+              startDate: upcomingWeek.startDate,
+              endDate: upcomingWeek.endDate,
+              treatmentId: null,
+            }),
           );
           const id = await createPreparation(personalDatabase, generated);
           if (!active) return;
@@ -388,6 +401,11 @@ function NewPreparationScreenContent({
           treatmentId: confirmation.treatmentId,
           cis: confirmation.cis,
         })),
+        await listIntakeHistory(personalDatabase, {
+          startDate: upcomingWeek.startDate,
+          endDate: upcomingWeek.endDate,
+          treatmentId: null,
+        }),
       );
       const id = await createPreparation(personalDatabase, generated);
       setTreatments(currentTreatments);
@@ -432,6 +450,7 @@ function NewPreparationScreenContent({
   }
 
   function beginScan(): void {
+    setScanChoice(null);
     setError(null);
     setPending(null);
     setChoosing(false);
@@ -440,6 +459,7 @@ function NewPreparationScreenContent({
   }
 
   function beginChoice(): void {
+    setScanChoice(null);
     setError(null);
     setPending(null);
     setChoosing(true);
@@ -608,6 +628,19 @@ function NewPreparationScreenContent({
       );
       return;
     }
+    const candidates = effectiveBoxes.filter(
+      (box) =>
+        box.presentationCip13 === cip13 &&
+        box.lot === parsed.fields.lot &&
+        box.expirationDate === expirationDate &&
+        box.remainingQuantity > 0,
+    );
+    if (candidates.length > 1) {
+      setScanning(false);
+      setChoosing(true);
+      setScanChoice({ boxes: candidates, raw: result.data });
+      return;
+    }
     const match = matchScannedBox(
       {
         presentationCip13: cip13,
@@ -639,9 +672,16 @@ function NewPreparationScreenContent({
 
   async function validateMedication(
     acknowledgeNonFefo: boolean,
+    quantityHalfUnits: number,
   ): Promise<void> {
     if (!pending || !current || preparationId === null || saving) return;
     const { verification } = pending;
+    if (
+      !Number.isSafeInteger(quantityHalfUnits) ||
+      quantityHalfUnits <= 0 ||
+      quantityHalfUnits > verification.quantityHalfUnits
+    )
+      return;
     if (
       verification.status === 'VALID' &&
       !verification.isFefo &&
@@ -654,7 +694,13 @@ function NewPreparationScreenContent({
       const entry: SavedPreparationProgress = {
         specialtyCis: current.specialtyCis,
         boxId: verification.box.id,
-        quantityHalfUnits: verification.quantityHalfUnits,
+        quantityHalfUnits:
+          quantityHalfUnits +
+          (progress.find(
+            (item) =>
+              item.specialtyCis === current.specialtyCis &&
+              item.boxId === verification.box.id,
+          )?.quantityHalfUnits ?? 0),
         verification: pending.method,
         scanRaw: pending.raw,
         nonFefoAcknowledged:
@@ -663,7 +709,21 @@ function NewPreparationScreenContent({
         matchedSpecialtyName: pending.matchedSpecialtyName,
       };
       await savePreparationProgress(personalDatabase, preparationId, entry);
-      setProgress((previous) => [...previous, entry]);
+      setProgress((previous) => {
+        const exists = previous.some(
+          (item) =>
+            item.specialtyCis === entry.specialtyCis &&
+            item.boxId === entry.boxId,
+        );
+        return exists
+          ? previous.map((item) =>
+              item.specialtyCis === entry.specialtyCis &&
+              item.boxId === entry.boxId
+                ? entry
+                : item,
+            )
+          : [...previous, entry];
+      });
       setPending(null);
       requestAnimationFrame(() =>
         scrollRef.current?.scrollTo({ y: 0, animated: true }),
@@ -673,6 +733,41 @@ function NewPreparationScreenContent({
       // liste manuelle alors qu'un second scan suffit le plus souvent.
     } catch (reason: unknown) {
       setError(message(reason, 'Sauvegarde de la progression impossible.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function correctContribution(): Promise<void> {
+    if (!contributionToCorrect || preparationId === null || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const entry = contributionToCorrect;
+      await removePreparationContribution(
+        personalDatabase,
+        preparationId,
+        entry.specialtyCis,
+        entry.boxId,
+      );
+      setProgress((previous) =>
+        previous.filter(
+          (item) =>
+            item.specialtyCis !== entry.specialtyCis ||
+            item.boxId !== entry.boxId,
+        ),
+      );
+      setSkippedCis((previous) => {
+        const next = new Set(previous);
+        next.delete(entry.specialtyCis);
+        return next;
+      });
+      setPending(null);
+      setChoosing(false);
+      setFinalConfirmationVisible(false);
+      setContributionToCorrect(null);
+    } catch (reason: unknown) {
+      setError(message(reason, 'Correction impossible.'));
     } finally {
       setSaving(false);
     }
@@ -835,12 +930,16 @@ function NewPreparationScreenContent({
                 ? 'produits'
                 : 'médicaments'}
             </Text>
-            <PreparationGrid grid={grid} />
           </View>
         ) : undefined
       }
     >
       <Stack.Screen options={{ headerShown: false }} />
+      {grid ? (
+        <View style={styles.darkHeader}>
+          <PreparationGrid grid={grid} />
+        </View>
+      ) : null}
       {snapshot === null ? (
         <Text style={styles.intro}>
           Préparation sur 7 jours. La progression est sauvegardée après chaque
@@ -883,6 +982,13 @@ function NewPreparationScreenContent({
       {snapshot && snapshot.requirements.length === 0 ? (
         <Text>Aucune prise prévue pour cette période.</Text>
       ) : null}
+      {snapshot && snapshot.startDate === todayIso() ? (
+        <Banner level="warning" title="Le pilulier inclut aujourd’hui">
+          Les prises déjà marquées prises ou ignorées avant la génération sont
+          exclues. Les créneaux passés mais non renseignés restent prévus :
+          aucune prise n’est déduite de l’heure. Vérifiez les dates des cases.
+        </Banner>
+      ) : null}
       {current ? (
         <MedicationStep
           snapshot={snapshot!}
@@ -902,7 +1008,7 @@ function NewPreparationScreenContent({
           boxes={listBoxesForMedication(
             current.specialtyCis,
             current.remainingHalfUnits,
-            effectiveBoxes,
+            scanChoice?.boxes ?? effectiveBoxes,
             todayIso(),
             productSourceFromKey(current.specialtyCis) === 'BDPM'
               ? [...genericCandidatesByCis.keys()]
@@ -910,12 +1016,32 @@ function NewPreparationScreenContent({
           )}
           expectedSpecialtyCis={current.specialtyCis}
           requiredHalfUnits={current.remainingHalfUnits}
-          onCancel={() => setChoosing(false)}
-          onSelect={(box) => void verifyBox(box, 'MANUAL', null)}
+          scannedIdentity={scanChoice !== null}
+          onCancel={() => {
+            setChoosing(false);
+            setScanChoice(null);
+          }}
+          onSelect={(box) =>
+            void verifyBox(
+              box,
+              scanChoice ? 'SCAN' : 'MANUAL',
+              scanChoice?.raw ?? null,
+            )
+          }
+        />
+      ) : null}
+      {current && snapshot && current.contributions.length > 0 && !pending ? (
+        <UsageSummary
+          snapshot={{ ...snapshot, requirements: [current] }}
+          progress={progress}
+          boxes={boxes}
+          saving={saving}
+          onRemove={setContributionToCorrect}
         />
       ) : null}
       {pending && current ? (
         <BoxConfirmation
+          key={`${current.specialtyCis}:${pending.verification.box.id}`}
           pending={pending}
           saving={saving}
           onRestart={pending.method === 'SCAN' ? beginScan : beginChoice}
@@ -973,6 +1099,8 @@ function NewPreparationScreenContent({
               boxes={boxes}
               progress={progress}
               snapshot={snapshot}
+              saving={saving}
+              onRemove={setContributionToCorrect}
             />
             <Banner level="warning">
               Cette validation décrémentera le stock une seule fois. Contrôlez
@@ -1031,6 +1159,21 @@ function NewPreparationScreenContent({
           </Text>
         </View>
       ) : null}
+      <AppModal
+        visible={contributionToCorrect !== null}
+        title="Corriger ce prélèvement ?"
+        primaryLabel="Retirer l’affectation et la ressaisir"
+        busy={saving}
+        onCancel={() => setContributionToCorrect(null)}
+        onPrimary={() => void correctContribution()}
+      >
+        <Text style={styles.intro}>
+          Seule l’affectation de cette boîte sera retirée. Les autres boîtes
+          restent enregistrées. Indiquez ensuite la quantité réellement prélevée
+          ; ne remplissez pas les cases une seconde fois. Le stock n’a pas
+          encore été décrémenté.
+        </Text>
+      </AppModal>
       <AppModal
         visible={cancelConfirmationVisible}
         title="Annuler cette préparation ?"

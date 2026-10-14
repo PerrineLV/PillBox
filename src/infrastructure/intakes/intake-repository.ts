@@ -10,6 +10,7 @@ import {
 } from '@/domain/intakes/intake-tracking';
 import { isExpired } from '@/domain/inventory/inventory';
 import { isIntakeSlot, type IntakeSlot } from '@/domain/treatments/treatment';
+import { applicableIntakeSql } from './applicable-intake-sql';
 
 type IntakeRow = {
   intake_key: string;
@@ -78,6 +79,7 @@ export async function listIntakeRecordsForGroups(
   const rows = await database.getAllAsync<IntakeRow>(
     `SELECT * FROM intake_records WHERE intake_date = ?
      AND slot IN (${slots.map(() => '?').join(', ')})
+     AND (status <> 'UNSET' OR ${applicableIntakeSql()})
      ORDER BY slot, specialty_name, source_treatment_id`,
     date,
     ...slots,
@@ -151,11 +153,12 @@ export async function updateIntakeStatus(
   }
   const result = await database.runAsync(
     `UPDATE intake_records SET status = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE intake_key = ?`,
+     WHERE intake_key = ? AND (status <> 'UNSET' OR ${applicableIntakeSql()})`,
     status,
     intakeKey,
   );
-  if (result.changes !== 1) throw new Error('Prise prévue introuvable.');
+  if (result.changes !== 1)
+    throw new Error('Prise prévue introuvable ou devenue inapplicable.');
 }
 
 /**
@@ -184,7 +187,8 @@ export async function takeOutsidePillboxIntake(
         treatment.included_in_pillbox
        FROM intake_records intake
        JOIN treatments treatment ON treatment.id = intake.source_treatment_id
-       WHERE intake.intake_key = ?`,
+       WHERE intake.intake_key = ?
+         AND (intake.status <> 'UNSET' OR ${applicableIntakeSql('intake')})`,
       intakeKey,
     );
     if (intake === null) throw new Error('Prise prévue introuvable.');
@@ -299,6 +303,7 @@ export async function markPendingIntakesTakenForGroups(
     `UPDATE intake_records
      SET status = 'TAKEN', updated_at = CURRENT_TIMESTAMP
      WHERE status = ? AND (${groupCondition})
+       AND ${applicableIntakeSql()}
        AND NOT EXISTS (
          SELECT 1 FROM treatments
          WHERE treatments.id = intake_records.source_treatment_id
@@ -327,6 +332,7 @@ export async function listPendingIntakeCounts(
   }>(
     `SELECT intake_date, slot, COUNT(*) AS pending FROM intake_records
      WHERE status = ? AND intake_date BETWEEN ? AND ?
+       AND ${applicableIntakeSql()}
      GROUP BY intake_date, slot`,
     PENDING_INTAKE_STATUS,
     startDate,

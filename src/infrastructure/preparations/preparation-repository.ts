@@ -93,11 +93,14 @@ export async function createPreparation(
   let insert: SQLiteRunResult | null = null;
   await database.withExclusiveTransactionAsync(async (transaction) => {
     const completed = await transaction.getFirstAsync<{ id: number }>(
-      `SELECT id FROM preparations WHERE start_date = ? AND status = 'COMPLETED'`,
+      `SELECT id FROM preparations WHERE start_date <= ? AND end_date >= ? AND status = 'COMPLETED'`,
+      snapshot.endDate,
       snapshot.startDate,
     );
     if (completed !== null) {
-      throw new Error('Cette semaine a déjà été préparée et validée.');
+      throw new Error(
+        'Cette semaine a déjà été préparée et validée, en totalité ou en partie.',
+      );
     }
     const draft = await transaction.getFirstAsync<{ id: number }>(
       `SELECT id FROM preparations WHERE status = 'DRAFT' ORDER BY id DESC LIMIT 1`,
@@ -143,6 +146,7 @@ export async function createPreparation(
         requirement.missingHalfUnits,
       );
     }
+    await assertNoRecordedIntakes(transaction, preparationId);
   });
   if (insert === null)
     throw new Error('La préparation n’a pas pu être enregistrée.');
@@ -242,12 +246,36 @@ export async function getLatestDraftPreparation(
   };
 }
 
+/** Retire une affectation du brouillon, sans toucher au stock ni au snapshot. */
+export async function removePreparationContribution(
+  database: SQLiteDatabase,
+  preparationId: number,
+  specialtyCis: string,
+  boxId: number,
+): Promise<void> {
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const editable = await transaction.getFirstAsync<{ id: number }>(
+      `SELECT id FROM preparations WHERE id = ? AND status = 'DRAFT'
+       AND NOT EXISTS (SELECT 1 FROM stock_movements WHERE preparation_id = preparations.id)`,
+      preparationId,
+    );
+    if (!editable)
+      throw new Error('Cette préparation ne peut plus être corrigée.');
+    await transaction.runAsync(
+      'DELETE FROM preparation_progress WHERE preparation_id = ? AND specialty_cis = ? AND box_id = ?',
+      preparationId,
+      specialtyCis,
+      boxId,
+    );
+  });
+}
+
 /**
  * Enregistre la contribution d'une boîte au besoin d'un médicament. Plusieurs
  * boîtes peuvent contribuer au même médicament : la ligne est identifiée par
  * boîte, pas seulement par médicament, afin qu'une boîte qui se termine en
  * cours de préparation puisse être complétée par une seconde sans écraser la
- * première.
+ * première. La quantité est le total confirmé pour cette boîte, pas un incrément.
  */
 export async function savePreparationProgress(
   database: SQLiteDatabase,
@@ -389,6 +417,7 @@ export async function completePreparation(
     if (preparation.status !== 'DRAFT') {
       throw new Error('Cette préparation est déjà terminée.');
     }
+    await assertNoRecordedIntakes(transaction, preparationId);
 
     const requirements = await transaction.getAllAsync<{
       specialty_cis: string;
@@ -995,4 +1024,22 @@ function toVerificationMethod(value: string | null): BoxVerificationMethod {
   if (!(BOX_VERIFICATION_METHODS as readonly (string | null)[]).includes(value))
     throw new Error('La base locale contient une vérification inconnue.');
   return value as BoxVerificationMethod;
+}
+
+/** Empêche une double consommation si une prise a été renseignée pendant la préparation. */
+async function assertNoRecordedIntakes(
+  database: SQLiteDatabase,
+  preparationId: number,
+): Promise<void> {
+  const recorded = await database.getFirstAsync<{ found: number }>(
+    `SELECT 1 AS found FROM preparation_items p
+     JOIN intake_records i ON i.source_treatment_id = p.source_treatment_id
+       AND i.intake_date = p.intake_date AND i.slot = p.slot
+     WHERE p.preparation_id = ? AND i.status <> 'UNSET' LIMIT 1`,
+    preparationId,
+  );
+  if (recorded)
+    throw new Error(
+      'Une prise de cette préparation est déjà renseignée. Si un brouillon existe, annulez-le puis relancez la préparation pour actualiser les cases. Aucun stock n’a été décrémenté.',
+    );
 }

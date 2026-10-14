@@ -73,3 +73,14 @@ describe('design system PillBox', () => {
     );
   });
 });
+
+it('garde lisibles les états et quantités de préparation', () => {
+  for (const [foreground, background] of [
+    [colors.headerDark, colors.accentOnDark],
+    [colors.onDarkSoft, colors.headerDark],
+    [colors.onDarkMuted, colors.headerDark],
+    [colors.text, colors.brandSoft],
+    [colors.textMuted, colors.brandSoft],
+  ])
+    expect(contrast(foreground, background)).toBeGreaterThanOrEqual(4.5);
+});

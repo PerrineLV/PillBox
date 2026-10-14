@@ -1,9 +1,10 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { BoxDeletionConfirmation } from '@/components/inventory/delete-confirmation';
+import { parseStockQuantity } from '@/domain/inventory/stock-quantity';
 import { GenericGroupSection } from '@/components/medications/generic-group-section';
 import { OrphanBoxGenericMatch } from '@/components/medications/orphan-box-generic-match';
 import {
@@ -68,7 +69,15 @@ export default function BoxDetailScreen() {
     TreatmentGenericEquivalence[]
   >([]);
   /** Pré-rempli avec la quantité restante réelle, jamais la quantité initiale. */
-  const [quantity, setQuantity] = useState(0);
+  const [quantityText, setQuantityText] = useState('0');
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  let quantity = NaN;
+  try {
+    quantity = parseStockQuantity(quantityText);
+  } catch {
+    // Conserver la saisie brute ; la validation affiche l’erreur à l’enregistrement.
+  }
   const [explanation, setExplanation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [removalAction, setRemovalAction] =
@@ -104,7 +113,7 @@ export default function BoxDetailScreen() {
         cis: confirmation.cis,
       })),
     );
-    if (nextBox) setQuantity(nextBox.remainingQuantity);
+    if (nextBox) setQuantityText(String(nextBox.remainingQuantity));
   };
 
   useEffect(() => {
@@ -118,11 +127,14 @@ export default function BoxDetailScreen() {
   }, [database, id]);
 
   const adjust = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
       await adjustMedicationBox(
         database,
         id,
-        quantity,
+        parseStockQuantity(quantityText),
         'MANUAL_ADJUSTMENT',
         explanation,
       );
@@ -134,6 +146,9 @@ export default function BoxDetailScreen() {
       setError(
         reason instanceof Error ? reason.message : 'Ajustement impossible.',
       );
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -264,13 +279,21 @@ export default function BoxDetailScreen() {
           <View style={styles.adjustRow}>
             <Text style={styles.adjustLabel}>Nouvelle quantité restante</Text>
             <Stepper
+              disabled={saving}
+              input={{ value: quantityText, onChangeText: setQuantityText }}
               label="nouvelle quantité restante"
               min={0}
-              onChange={setQuantity}
+              max={Number.MAX_SAFE_INTEGER / 2}
+              onChange={(value) => setQuantityText(String(value))}
               value={quantity}
             />
           </View>
+          <Text style={typography.micro}>
+            Stock final de la boîte, et non quantité à ajouter. Demi-unités
+            acceptées (exemple : 2,5).
+          </Text>
           <AppField
+            editable={!saving}
             label="Explication de l’ajustement"
             multiline
             onChangeText={setExplanation}
@@ -279,8 +302,18 @@ export default function BoxDetailScreen() {
           />
           {error ? <Message tone="error">{error}</Message> : null}
           <PillButton
+            disabled={saving}
             label="Enregistrer l’ajustement"
             onPress={() => void adjust()}
+          />
+          <PillButton
+            disabled={saving}
+            label="Annuler la saisie"
+            onPress={() => {
+              setQuantityText(String(box.remainingQuantity));
+              setExplanation('');
+              setError(null);
+            }}
           />
         </AppCard>
       </Section>
@@ -377,14 +410,12 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   adjustRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
+    alignItems: 'stretch',
     gap: 12,
     justifyContent: 'space-between',
   },
   adjustLabel: {
     ...typography.itemTitle,
-    flex: 1,
     fontSize: 14.5,
     minWidth: 0,
   },

@@ -1,5 +1,6 @@
 import * as MailComposer from 'expo-mail-composer';
 import * as Sharing from 'expo-sharing';
+import { CONTACT_EMAIL } from '@/domain/contact/feedback';
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -33,7 +34,7 @@ export default function ErrorLogScreen() {
     if (uri === null) return;
     if (await MailComposer.isAvailableAsync()) {
       await MailComposer.composeAsync({
-        recipients: ['pillbox.app@protonmail.com'],
+        recipients: [CONTACT_EMAIL],
         subject: 'PillBox — rapport de crash',
         attachments: [uri],
       });

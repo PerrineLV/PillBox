@@ -28,12 +28,14 @@ export function StockBoxChoice({
   requiredHalfUnits,
   onCancel,
   onSelect,
+  scannedIdentity = false,
 }: {
   boxes: readonly MedicationBox[];
   expectedSpecialtyCis: string;
   requiredHalfUnits: number;
   onCancel(): void;
   onSelect(box: MedicationBox): void;
+  scannedIdentity?: boolean;
 }) {
   const today = todayIso();
   const isBdpm = productSourceFromKey(expectedSpecialtyCis) === 'BDPM';
@@ -43,13 +45,20 @@ export function StockBoxChoice({
         Boîtes enregistrées dans le stock
       </Text>
       <Text style={typography.micro}>
-        Aucune lecture de DataMatrix ne sera enregistrée : les contrôles de
-        produit, de lot et de péremption restent appliqués.
-        {isBdpm
-          ? ' Un autre membre du même groupe générique officiel exige une confirmation explicite.'
-          : ''}{' '}
-        La liste privilégie les boîtes qui couvrent le besoin puis la péremption
-        la plus proche ; la boîte que vous confirmez est celle retenue.
+        {scannedIdentity ? (
+          'Plusieurs boîtes correspondent au même DataMatrix. Choisissez la boîte réellement utilisée ; le scan vérifie le produit, le lot et la péremption, mais ne distingue pas ces boîtes.'
+        ) : (
+          <>
+            Aucune lecture de DataMatrix ne sera enregistrée : les contrôles de
+            produit, de lot et de péremption restent appliqués.
+            {isBdpm
+              ? ' Un autre membre du même groupe générique officiel exige une confirmation explicite.'
+              : ''}{' '}
+            La liste privilégie les boîtes qui couvrent le besoin puis la
+            péremption la plus proche ; la boîte que vous confirmez est celle
+            retenue.
+          </>
+        )}
       </Text>
       {boxes.length === 0 ? (
         <Text style={typography.detail}>

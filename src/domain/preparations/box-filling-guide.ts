@@ -7,6 +7,21 @@ export type BoxFillingContribution = Readonly<{
   quantityHalfUnits: number;
 }>;
 
+/** Quantité explicitement confirmée, en unités entières ou demi-unités. */
+export function parseBoxContribution(
+  value: string,
+  maximumHalfUnits: number,
+): number | null {
+  const normalized = value.trim().replace(',', '.');
+  if (!/^\d+(?:\.[05])?$/.test(normalized)) return null;
+  const halfUnits = Number(normalized) * 2;
+  return Number.isSafeInteger(halfUnits) &&
+    halfUnits > 0 &&
+    halfUnits <= maximumHalfUnits
+    ? halfUnits
+    : null;
+}
+
 export type BoxFillingSegment = Readonly<{
   item: PreparationItemSnapshot;
   quantityHalfUnits: number;

@@ -181,7 +181,8 @@ export default function PreparationHistoryScreen() {
                     <View key={usage.boxId} style={styles.usage}>
                       <View style={styles.usageHead}>
                         <Text style={styles.usageLot}>
-                          Lot {usage.lot ?? 'non renseigné'} ·{' '}
+                          Boîte #{usage.boxId} · lot{' '}
+                          {usage.lot ?? 'non renseigné'} ·{' '}
                           {formatHalfUnits(usage.quantityHalfUnits)} unité(s)
                         </Text>
                         <SeverityBadge

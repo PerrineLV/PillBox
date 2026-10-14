@@ -1,4 +1,7 @@
-import { buildBoxFillingGuide } from '../box-filling-guide';
+import {
+  buildBoxFillingGuide,
+  parseBoxContribution,
+} from '../box-filling-guide';
 import type { MedicationBox } from '@/domain/inventory/inventory';
 import type { PreparationItemSnapshot } from '@/domain/preparations/preparation';
 
@@ -99,4 +102,19 @@ describe('guidage de remplissage entre plusieurs boîtes', () => {
     ]);
     expect(guide[0].remainingInBoxAfterHalfUnits).toBe(1);
   });
+});
+
+it.each([
+  ['2', 4],
+  ['0,5', 1],
+  ['2.5', 5],
+  ['7', 14],
+  ['', null],
+  ['0', null],
+  ['-1', null],
+  ['1,25', null],
+  ['8', null],
+  ['1e0', null],
+])('valide la quantité explicitement saisie %s', (value, expected) => {
+  expect(parseBoxContribution(String(value), 14)).toBe(expected);
 });

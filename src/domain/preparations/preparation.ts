@@ -7,9 +7,14 @@ import { addCivilDays } from '@/domain/shared/dates';
 import { generateIntakes } from '@/domain/treatments/generate-intakes';
 import type { IntakeSlot, Treatment } from '@/domain/treatments/treatment';
 
+import {
+  intakeRecordKey,
+  type IntakeRecord,
+} from '@/domain/intakes/intake-tracking';
+
 export const PREPARATION_DURATION_DAYS = 7;
 
-/** Le pilulier à venir commence toujours le lendemain de sa préparation. */
+/** Départ habituel au lendemain ; preparationWeeks gère le rattrapage du lundi. */
 export function preparationStartDate(referenceDate: string): string {
   return addCivilDays(referenceDate, 1);
 }
@@ -30,14 +35,18 @@ export type PreparationWeek = Readonly<{
 }>;
 
 /**
- * Semaines proposées au démarrage : celle qui commence demain, toujours par
- * défaut, et la suivante. Aucune autre période n'est proposée afin de garder
- * un choix explicite et lisible.
+ * Le lundi reste inclus pour rattraper une préparation prévue le dimanche.
+ * Les autres jours conservent le départ au lendemain. Le rappel ne fixe
+ * aucune heure limite et aucune prise n’est déduite de l’heure.
  */
 export function preparationWeeks(
   referenceDate: string,
 ): readonly PreparationWeek[] {
-  const currentStart = preparationStartDate(referenceDate);
+  const tomorrow = preparationStartDate(referenceDate);
+  const currentStart =
+    new Date(`${referenceDate}T12:00:00Z`).getUTCDay() === 1
+      ? referenceDate
+      : tomorrow;
   const nextStart = addCivilDays(currentStart, PREPARATION_DURATION_DAYS);
   return Object.freeze([
     Object.freeze({
@@ -61,7 +70,7 @@ export type KnownPreparation = Readonly<{
 }>;
 
 /**
- * `ALREADY_PREPARED` interdit un doublon pour une semaine déjà validée ;
+ * `ALREADY_PREPARED` interdit une période chevauchant une semaine déjà validée ;
  * `IN_PROGRESS` signale qu'une préparation incomplète existe déjà et doit être
  * reprise plutôt que recréée.
  */
@@ -72,7 +81,11 @@ export function preparationWeekState(
   startDate: string,
   known: readonly KnownPreparation[],
 ): PreparationWeekState {
-  const sameWeek = known.filter((item) => item.startDate === startDate);
+  const sameWeek = known.filter(
+    (item) =>
+      item.startDate <= preparationEndDate(startDate) &&
+      preparationEndDate(item.startDate) >= startDate,
+  );
   if (sameWeek.some((item) => item.status === 'COMPLETED'))
     return 'ALREADY_PREPARED';
   if (sameWeek.some((item) => item.status === 'DRAFT')) return 'IN_PROGRESS';
@@ -462,13 +475,25 @@ export function generatePreparationSnapshot(
   startDate: string,
   stockReferenceDate: string,
   equivalences: readonly TreatmentGenericEquivalence[] = [],
+  recordedIntakes: readonly Pick<IntakeRecord, 'key' | 'status'>[] = [],
 ): PreparationSnapshot {
   const endDate = preparationEndDate(startDate);
   // Valide aussi la date de référence, même lorsque le stock est vide.
   addCivilDays(stockReferenceDate, 0);
   const treatmentsById = new Map(treatments.map((item) => [item.id, item]));
-  const items = generateIntakes(treatments, startDate, endDate).map(
-    (intake) => {
+  const recordedKeys = new Set(
+    recordedIntakes
+      .filter((item) => item.status !== 'UNSET')
+      .map((item) => item.key),
+  );
+  const items = generateIntakes(treatments, startDate, endDate)
+    .filter(
+      (item) =>
+        !recordedKeys.has(
+          intakeRecordKey(item.treatmentId, item.date, item.slot),
+        ),
+    )
+    .map((intake) => {
       const treatment = treatmentsById.get(intake.treatmentId);
       if (!treatment)
         throw new Error('Traitement introuvable pendant la génération.');
@@ -476,8 +501,7 @@ export function generatePreparationSnapshot(
         ...intake,
         pharmaceuticalForm: treatment.pharmaceuticalForm,
       });
-    },
-  );
+    });
 
   const requirementsByCis = new Map<
     string,

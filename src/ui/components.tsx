@@ -292,6 +292,7 @@ export function BottomNavigation({
             >
               <View
                 accessibilityElementsHidden
+                collapsable={false}
                 style={[styles.navIconArea, selected && styles.navIconActive]}
               >
                 <NavigationIcon
@@ -636,9 +637,12 @@ const styles = StyleSheet.create({
   navItemPressed: { opacity: 0.72 },
   navIconArea: {
     alignItems: 'center',
-    borderRadius: radii.pill,
+    // Garder le même fond natif arrondi lorsque seule sa couleur change.
+    backgroundColor: 'transparent',
+    borderRadius: radii.md,
     height: 28,
     justifyContent: 'center',
+    overflow: 'hidden',
     width: 52,
   },
   navIconActive: { backgroundColor: colors.brandSoft },

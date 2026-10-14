@@ -13,7 +13,7 @@ import type {
 } from '@/domain/preparations/preparation';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
 import type { SavedPreparationProgress } from '@/infrastructure/preparations/preparation-repository';
-import { AppCard, Banner } from '@/ui';
+import { AppCard, Banner, colors, radii, spacing, typography } from '@/ui';
 
 import { SLOT_LABELS } from './labels';
 import { styles } from './styles';
@@ -128,12 +128,46 @@ export function MedicationStep({
         </Banner>
       ) : null}
       <Text style={styles.casesTitle}>Cases concernées</Text>
-      {cases.map((item, index) => (
-        <Text key={`${item.date}-${item.slot}-${index}`} style={styles.case}>
-          • {formatFrenchWeekdayAndDate(item.date)} · {SLOT_LABELS[item.slot]} :{' '}
-          {formatHalfUnits(item.quantityHalfUnits)}
-        </Text>
-      ))}
+      <Text style={typography.micro}>
+        Pour ce médicament uniquement. « Remplie » suit les prélèvements
+        confirmés, répartis dans l’ordre chronologique.
+      </Text>
+      {cases.map((item, index) => {
+        const deposited = fillingGuide
+          .flatMap((step) => step.segments)
+          .filter((segment) => segment.item === item)
+          .reduce((sum, segment) => sum + segment.quantityHalfUnits, 0);
+        const remaining = item.quantityHalfUnits - deposited;
+        const filled = remaining === 0;
+        const status = filled
+          ? '✓ Remplie'
+          : deposited > 0
+            ? '→ À compléter'
+            : '→ À remplir';
+        const quantity = filled
+          ? `${formatHalfUnits(item.quantityHalfUnits)} déposée(s)`
+          : `${formatHalfUnits(remaining)} à déposer${deposited > 0 ? ` · ${formatHalfUnits(deposited)} déjà déposée(s)` : ''}`;
+        const label = `${formatFrenchWeekdayAndDate(item.date)} · ${SLOT_LABELS[item.slot]}`;
+        return (
+          <View
+            accessible
+            accessibilityLabel={`${label} : ${status}. ${quantity}.`}
+            key={`${item.date}-${item.slot}-${index}`}
+            style={{
+              padding: spacing.md,
+              gap: spacing.sm,
+              borderRadius: radii.sm,
+              borderWidth: filled ? 1 : 2,
+              borderColor: filled ? colors.border : colors.brand,
+              backgroundColor: filled ? colors.surface : colors.brandSoft,
+            }}
+          >
+            <Text style={typography.itemTitle}>{status}</Text>
+            <Text style={typography.detail}>{label}</Text>
+            <Text style={typography.detail}>{quantity}</Text>
+          </View>
+        );
+      })}
     </AppCard>
   );
 }
