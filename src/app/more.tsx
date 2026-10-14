@@ -142,6 +142,19 @@ export default function MoreScreen() {
       <MenuGroup entries={TRACKING} counts={counts} title="Suivi" />
       <MenuGroup entries={APPLICATION} counts={counts} title="Application" />
 
+      <Section label="Aide et contact">
+        <DenseList>
+          <DenseRow
+            first
+            chevron
+            href="/settings/contact"
+            title="Faire un retour"
+            detail="Problème ou suggestion, par e-mail"
+            accessibilityLabel="Faire un retour. Problème ou suggestion, par e-mail"
+          />
+        </DenseList>
+      </Section>
+
       <Banner
         icon={<ShieldIcon color={colors.brandPressed} size={18} />}
         level="ok"

@@ -50,6 +50,8 @@ describe('écran Plus', () => {
     expect(rendered).toContain('Rappels');
     expect(rendered).toContain('Confidentialité et verrou');
     expect(rendered).toContain('Sauvegardes');
+    expect(rendered).toContain('Aide et contact');
+    expect(rendered).toContain('Faire un retour');
   });
 
   it('rappelle que les données restent locales', () => {
