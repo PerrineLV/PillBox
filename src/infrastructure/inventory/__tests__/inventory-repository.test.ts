@@ -15,6 +15,7 @@ import {
 
 import {
   addMedicationBox,
+  adjustMedicationBox,
   deleteUnusedMedicationBox,
   getMedicationBoxRemovalAction,
   listMedicationBoxes,
@@ -82,6 +83,58 @@ const manualDraft = {
   origin: 'MANUAL',
   scanRaw: null,
 } as const;
+
+describe('ajustement du stock final', () => {
+  it('conserve les demi-unités et ne crée qu’un mouvement pour une valeur répétée', async () => {
+    const { raw, database } = await createDatabase();
+    try {
+      const id = await addMedicationBox(database, manualDraft);
+      for (const quantity of [90, 90, 2.5, 0]) {
+        await adjustMedicationBox(
+          database,
+          id,
+          quantity,
+          'MANUAL_ADJUSTMENT',
+          'Comptage',
+        );
+      }
+      expect((await listMedicationBoxes(database))[0].remainingQuantity).toBe(
+        0,
+      );
+      const movements = (await listStockMovements(database, id)).filter(
+        (m) => m.type === 'MANUAL_ADJUSTMENT',
+      );
+      expect(movements).toHaveLength(3);
+      expect(movements.map((m) => [m.quantityDelta, m.quantityAfter])).toEqual(
+        expect.arrayContaining([
+          [60, 90],
+          [-87.5, 2.5],
+          [-2.5, 0],
+        ]),
+      );
+      for (const quantity of [
+        -1,
+        0.25,
+        NaN,
+        Infinity,
+        Number.MAX_SAFE_INTEGER,
+      ]) {
+        await expect(
+          adjustMedicationBox(
+            database,
+            id,
+            quantity,
+            'MANUAL_ADJUSTMENT',
+            'Comptage',
+          ),
+        ).rejects.toThrow();
+      }
+      expect(await listStockMovements(database, id)).toHaveLength(4);
+    } finally {
+      raw.close();
+    }
+  });
+});
 
 describe('ajout d’une boîte au stock local', () => {
   it('conserve une boîte Compl’Alim sans CIP, avec son lot et sa provenance', async () => {

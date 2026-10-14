@@ -1,4 +1,5 @@
 import type { SQLiteDatabase, SQLiteRunResult } from 'expo-sqlite';
+import { assertStockQuantity } from '@/domain/inventory/stock-quantity';
 
 import {
   assertValidBoxDraft,
@@ -208,9 +209,7 @@ export async function adjustMedicationBox(
   type: Exclude<StockMovementType, 'BOX_ADDED'>,
   explanation: string,
 ): Promise<void> {
-  if (!Number.isInteger(quantityAfter) || quantityAfter < 0) {
-    throw new Error('La quantité restante doit être un entier positif ou nul.');
-  }
+  assertStockQuantity(quantityAfter);
   if (type !== 'MANUAL_ADJUSTMENT' && type !== 'CORRECTION') {
     throw new Error('Le type de mouvement est invalide.');
   }
@@ -222,6 +221,7 @@ export async function adjustMedicationBox(
       remaining_quantity: number;
     }>('SELECT remaining_quantity FROM medication_boxes WHERE id = ?', boxId);
     if (current === null) throw new Error('Boîte introuvable.');
+    if (current.remaining_quantity === quantityAfter) return;
     const result = await transaction.runAsync(
       `UPDATE medication_boxes SET remaining_quantity = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND remaining_quantity = ?`,

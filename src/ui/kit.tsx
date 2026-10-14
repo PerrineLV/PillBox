@@ -583,6 +583,7 @@ export function Stepper({
   format,
   label,
   disabled = false,
+  input,
 }: Readonly<{
   value: number;
   onChange(value: number): void;
@@ -592,6 +593,8 @@ export function Stepper({
   format?: (value: number) => string;
   label: string;
   disabled?: boolean;
+  /** Saisie contrôlée : le texte incomplet reste affiché jusqu’à validation. */
+  input?: { value: string; onChangeText(text: string): void };
 }>) {
   const decrease = () => onChange(Math.max(min, round(value - step)));
   const increase = () =>
@@ -604,19 +607,35 @@ export function Stepper({
     <View style={styles.stepper}>
       <StepperButton
         accessibilityLabel={`Diminuer ${label}`}
-        disabled={disabled || value <= min}
+        disabled={disabled || !Number.isFinite(value) || value <= min}
         onPress={decrease}
         symbol="−"
       />
-      <Text
-        accessibilityLabel={`${label} : ${format ? format(value) : value}`}
-        style={styles.stepperValue}
-      >
-        {format ? format(value) : value}
-      </Text>
+      {input ? (
+        <TextInput
+          accessibilityLabel={label}
+          editable={!disabled}
+          keyboardType="decimal-pad"
+          onChangeText={input.onChangeText}
+          selectTextOnFocus
+          style={[styles.stepperValue, styles.stepperInput]}
+          value={input.value}
+        />
+      ) : (
+        <Text
+          accessibilityLabel={`${label} : ${format ? format(value) : value}`}
+          style={styles.stepperValue}
+        >
+          {format ? format(value) : value}
+        </Text>
+      )}
       <StepperButton
         accessibilityLabel={`Augmenter ${label}`}
-        disabled={disabled || (max !== undefined && value >= max)}
+        disabled={
+          disabled ||
+          !Number.isFinite(value) ||
+          (max !== undefined && value >= max)
+        }
         onPress={increase}
         symbol="+"
       />
@@ -625,6 +644,7 @@ export function Stepper({
 }
 
 function round(value: number): number {
+  if (Math.abs(value * 100) > Number.MAX_SAFE_INTEGER) return value;
   return Math.round(value * 100) / 100;
 }
 
@@ -1109,6 +1129,15 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     minWidth: 48,
     textAlign: 'center',
+  },
+  stepperInput: {
+    flex: 1,
+    minHeight: sizes.minTouch,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    color: colors.text,
+    backgroundColor: colors.surface,
   },
   toggleRow: {
     alignItems: 'center',
