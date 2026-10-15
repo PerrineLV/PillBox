@@ -1,6 +1,10 @@
 import Database from 'better-sqlite3';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import {
+  materializeIntakeSnapshots,
+  takeOutsidePillboxIntake,
+} from '@/infrastructure/intakes/intake-repository';
 import { usableQuantity } from '@/domain/inventory/inventory';
 import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 import {
@@ -17,6 +21,7 @@ import {
   addMedicationBox,
   adjustMedicationBox,
   deleteUnusedMedicationBox,
+  discardExpiredMedicationBox,
   getMedicationBoxRemovalAction,
   listMedicationBoxes,
   listStockMovements,
@@ -363,4 +368,217 @@ describe('suppression d’une boîte du stock', () => {
     );
     raw.close();
   });
+});
+
+describe('déstockage pour péremption', () => {
+  it.each([30, 12, 2.5, 0])(
+    'retire le restant %s une seule fois en conservant la boîte et les mouvements',
+    async (remaining) => {
+      const { raw, database } = await createDatabase();
+      try {
+        const id = await addMedicationBox(database, manualDraft);
+        await adjustMedicationBox(
+          database,
+          id,
+          remaining,
+          'MANUAL_ADJUSTMENT',
+          'Comptage',
+        );
+        const before = await listStockMovements(database, id);
+        await discardExpiredMedicationBox(
+          database,
+          id,
+          remaining,
+          '2028-01-01',
+        );
+        await discardExpiredMedicationBox(
+          database,
+          id,
+          remaining,
+          '2028-01-01',
+        );
+        expect((await listMedicationBoxes(database))[0]).toMatchObject({
+          id,
+          remainingQuantity: 0,
+          initialQuantity: 30,
+          lot: manualDraft.lot,
+          expirationDate: manualDraft.expirationDate,
+        });
+        const after = await listStockMovements(database, id);
+        expect(after).toHaveLength(before.length + (remaining > 0 ? 1 : 0));
+        expect(after.slice(remaining > 0 ? 1 : 0)).toEqual(before);
+        if (remaining > 0)
+          expect(after[0]).toMatchObject({
+            type: 'MANUAL_ADJUSTMENT',
+            quantityDelta: -remaining,
+            quantityAfter: 0,
+            explanation: 'Déstockage de la quantité restante pour péremption',
+          });
+      } finally {
+        raw.close();
+      }
+    },
+  );
+
+  it.each(['2027-12-30', '2027-12-31'])(
+    'refuse une boîte non périmée au %s',
+    async (today) => {
+      const { raw, database } = await createDatabase();
+      try {
+        const id = await addMedicationBox(database, manualDraft);
+        await expect(
+          discardExpiredMedicationBox(database, id, 30, today),
+        ).rejects.toThrow('pas périmée');
+        expect((await listMedicationBoxes(database))[0].remainingQuantity).toBe(
+          30,
+        );
+        expect(await listStockMovements(database, id)).toHaveLength(1);
+      } finally {
+        raw.close();
+      }
+    },
+  );
+
+  it('refuse une boîte absente ou un restant modifié depuis la confirmation', async () => {
+    const { raw, database } = await createDatabase();
+    try {
+      await expect(
+        discardExpiredMedicationBox(database, 999, 30, '2028-01-01'),
+      ).rejects.toThrow('introuvable');
+      const id = await addMedicationBox(database, manualDraft);
+      await adjustMedicationBox(
+        database,
+        id,
+        2.5,
+        'MANUAL_ADJUSTMENT',
+        'Comptage',
+      );
+      await expect(
+        discardExpiredMedicationBox(database, id, 30, '2028-01-01'),
+      ).rejects.toThrow('stock a changé');
+      expect((await listMedicationBoxes(database))[0].remainingQuantity).toBe(
+        2.5,
+      );
+      expect(await listStockMovements(database, id)).toHaveLength(2);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('annule le retrait si le mouvement ne peut pas être écrit', async () => {
+    const { raw, database } = await createDatabase();
+    try {
+      const id = await addMedicationBox(database, manualDraft);
+      raw.exec(`CREATE TRIGGER fail_discard BEFORE INSERT ON stock_movements
+        BEGIN SELECT RAISE(ABORT, 'écriture impossible'); END`);
+      await expect(
+        discardExpiredMedicationBox(database, id, 30, '2028-01-01'),
+      ).rejects.toMatchObject({ message: 'écriture impossible' });
+      expect((await listMedicationBoxes(database))[0].remainingQuantity).toBe(
+        30,
+      );
+      expect(await listStockMovements(database, id)).toHaveLength(1);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it.each([true, false])(
+    'préserve les usages et bloque une préparation déstockée (déjà validée : %s)',
+    async (completed) => {
+      const { raw, database } = await createDatabase();
+      try {
+        const id = await addMedicationBox(database, manualDraft);
+        const preparationId = await createPreparation(
+          database,
+          weekSnapshot('2027-12-30'),
+        );
+        await savePreparationProgress(database, preparationId, {
+          specialtyCis: manualDraft.specialtyCis,
+          boxId: id,
+          quantityHalfUnits: 7,
+          verification: 'MANUAL',
+          scanRaw: null,
+          nonFefoAcknowledged: false,
+          matchedCis: null,
+          matchedSpecialtyName: null,
+        });
+        if (completed)
+          await completePreparation(database, preparationId, '2027-12-30');
+        const usagesBefore = raw
+          .prepare('SELECT * FROM preparation_box_usages')
+          .all();
+        const progressBefore = raw
+          .prepare('SELECT * FROM preparation_progress')
+          .all();
+        const movementsBefore = await listStockMovements(database, id);
+        await discardExpiredMedicationBox(
+          database,
+          id,
+          completed ? 26.5 : 30,
+          '2028-01-01',
+        );
+        expect(
+          raw.prepare('SELECT * FROM preparation_box_usages').all(),
+        ).toEqual(usagesBefore);
+        expect(raw.prepare('SELECT * FROM preparation_progress').all()).toEqual(
+          progressBefore,
+        );
+        expect((await listStockMovements(database, id)).slice(1)).toEqual(
+          movementsBefore,
+        );
+        if (!completed) {
+          await expect(
+            completePreparation(database, preparationId, '2028-01-01'),
+          ).rejects.toThrow();
+          expect(
+            (await listMedicationBoxes(database))[0].remainingQuantity,
+          ).toBe(0);
+          expect(await listStockMovements(database, id)).toHaveLength(2);
+        }
+      } finally {
+        raw.close();
+      }
+    },
+  );
+});
+
+it('conserve la prise hors pilulier et son mouvement après déstockage du restant', async () => {
+  const { raw, database } = await createDatabase();
+  try {
+    raw
+      .prepare(
+        `INSERT INTO treatments (id, specialty_cis, specialty_name, included_in_pillbox)
+      VALUES (1, ?, 'Alpha', 0)`,
+      )
+      .run(manualDraft.specialtyCis);
+    raw.exec(`INSERT INTO treatment_phases
+      (id, treatment_id, position, start_date, frequency_type)
+      VALUES (1, 1, 0, '2027-12-30', 'daily');
+      INSERT INTO treatment_phase_dosages (phase_id, slot, quantity_half_units)
+      VALUES (1, 'morning', 1);`);
+    const id = await addMedicationBox(database, manualDraft);
+    const intake = {
+      key: '1:2027-12-30:morning',
+      treatmentId: 1,
+      date: '2027-12-30',
+      slot: 'morning' as const,
+      specialtyCis: manualDraft.specialtyCis,
+      specialtyName: 'Alpha',
+      pharmaceuticalForm: 'comprimé',
+      quantityHalfUnits: 1,
+    };
+    await materializeIntakeSnapshots(database, [intake]);
+    await takeOutsidePillboxIntake(database, intake.key, id, '2027-12-30');
+    const records = raw.prepare('SELECT * FROM intake_records').all();
+    const movements = await listStockMovements(database, id);
+    await discardExpiredMedicationBox(database, id, 29.5, '2028-01-01');
+    expect(raw.prepare('SELECT * FROM intake_records').all()).toEqual(records);
+    expect((await listStockMovements(database, id)).slice(1)).toEqual(
+      movements,
+    );
+    expect((await listMedicationBoxes(database))[0].remainingQuantity).toBe(0);
+  } finally {
+    raw.close();
+  }
 });
