@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react';
+import { Text } from 'react-native';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 
 import { useUpdateNoticeState } from '@/components/updates/update-notice-provider';
+import { openFeedbackMail } from '@/infrastructure/contact/feedback-mail';
+import { DenseRow } from '@/ui';
 import MoreScreen from '../app/more';
 
 jest.mock('@/components/updates/update-notice-provider', () => ({
@@ -20,15 +23,28 @@ jest.mock('@/infrastructure/prescriptions/prescription-repository', () => ({
 jest.mock('@/infrastructure/preparations/preparation-repository', () => ({
   listPreparationHistory: jest.fn(async () => []),
 }));
+jest.mock('@/infrastructure/contact/feedback-mail', () => ({
+  openFeedbackMail: jest.fn(async () => 'opened'),
+}));
 
 const mockedUseUpdateNotice = jest.mocked(useUpdateNoticeState);
 
-function render(): string {
+function mount(): ReactTestRenderer {
   let renderer: ReactTestRenderer | null = null;
   act(() => {
     renderer = create(<MoreScreen />);
   });
-  return JSON.stringify(renderer!.toJSON());
+  return renderer!;
+}
+
+function render(): string {
+  return JSON.stringify(mount().toJSON());
+}
+
+function contactRow(renderer: ReactTestRenderer, title: string) {
+  return renderer.root
+    .findAllByType(DenseRow)
+    .find((row) => row.props.title === title)!;
 }
 
 describe('écran Plus', () => {
@@ -51,7 +67,45 @@ describe('écran Plus', () => {
     expect(rendered).toContain('Confidentialité et verrou');
     expect(rendered).toContain('Sauvegardes');
     expect(rendered).toContain('Aide et contact');
-    expect(rendered).toContain('Faire un retour');
+    expect(rendered).toContain('Signaler un problème');
+    expect(rendered).toContain('Proposer une idée');
+  });
+
+  it('ouvre directement la messagerie avec le type choisi', async () => {
+    jest.mocked(openFeedbackMail).mockClear().mockResolvedValue('opened');
+    const renderer = mount();
+    await act(async () => {
+      contactRow(renderer, 'Signaler un problème').props.onPress();
+      contactRow(renderer, 'Signaler un problème').props.onPress();
+    });
+    expect(openFeedbackMail).toHaveBeenCalledTimes(1);
+    expect(openFeedbackMail).toHaveBeenCalledWith('problem');
+    await act(async () => {
+      contactRow(renderer, 'Proposer une idée').props.onPress();
+    });
+    expect(openFeedbackMail).toHaveBeenLastCalledWith('suggestion');
+    const rendered = JSON.stringify(renderer.toJSON());
+    expect(rendered).not.toContain('Message envoyé');
+    expect(rendered).not.toContain('Impossible d’ouvrir');
+  });
+
+  it('rend l’adresse copiable si aucune messagerie ne s’ouvre', async () => {
+    jest.mocked(openFeedbackMail).mockResolvedValue('unavailable');
+    const renderer = mount();
+    const selectable = renderer.root
+      .findAllByType(Text)
+      .filter((node) => node.props.selectable);
+    expect(selectable.map((node) => node.props.children)).toEqual([
+      'pillbox.app@protonmail.com',
+    ]);
+    await act(async () => {
+      contactRow(renderer, 'Proposer une idée').props.onPress();
+    });
+    expect(JSON.stringify(renderer.toJSON())).toContain('Impossible d’ouvrir');
+  });
+
+  it('rappelle de ne pas transmettre de données de santé', () => {
+    expect(render()).toContain('N’incluez pas de données de santé');
   });
 
   it('rappelle que les données restent locales', () => {
