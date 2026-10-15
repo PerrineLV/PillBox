@@ -26,6 +26,7 @@ import type { Treatment } from '@/domain/treatments/treatment';
 import {
   adjustMedicationBox,
   deleteUnusedMedicationBox,
+  discardExpiredMedicationBox,
   getMedicationBox,
   getMedicationBoxRemovalAction,
   listStockMovements,
@@ -35,6 +36,7 @@ import { listAllGenericEquivalenceConfirmations } from '@/infrastructure/treatme
 import { listTreatments } from '@/infrastructure/treatments/treatment-repository';
 import {
   AppCard,
+  AppModal,
   AppField,
   AppScreen,
   Banner,
@@ -82,6 +84,8 @@ export default function BoxDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [removalAction, setRemovalAction] =
     useState<MedicationBoxRemovalAction | null>(null);
+  const [discardVisible, setDiscardVisible] = useState(false);
+  const [discardError, setDiscardError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteConfirmationVisible, setDeleteConfirmationVisible] =
@@ -146,6 +150,27 @@ export default function BoxDetailScreen() {
       setError(
         reason instanceof Error ? reason.message : 'Ajustement impossible.',
       );
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  const discard = async () => {
+    if (!box || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setDiscardError(null);
+    try {
+      await discardExpiredMedicationBox(database, id, box.remainingQuantity);
+      await load();
+      setDiscardVisible(false);
+      showToast('Boîte périmée déstockée. Historique conservé.', 'success');
+    } catch (reason: unknown) {
+      setDiscardError(
+        reason instanceof Error ? reason.message : 'Déstockage impossible.',
+      );
+      await load().catch(() => undefined);
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -319,10 +344,21 @@ export default function BoxDetailScreen() {
       </Section>
 
       <Section label="Retirer cette boîte du stock">
+        {expired && box.remainingQuantity > 0 ? (
+          <PillButton
+            disabled={saving || deleting}
+            label="Déstocker la boîte périmée"
+            onPress={() => {
+              setDiscardError(null);
+              setDiscardVisible(true);
+            }}
+            tone="destructive"
+          />
+        ) : null}
         {deleteError ? <Message tone="error">{deleteError}</Message> : null}
         {removalAction === 'DELETE' ? (
           <PillButton
-            disabled={deleting}
+            disabled={deleting || saving}
             height={46}
             label="Supprimer cette boîte"
             onPress={() => setDeleteConfirmationVisible(true)}
@@ -334,6 +370,23 @@ export default function BoxDetailScreen() {
           </Banner>
         ) : null}
       </Section>
+
+      <AppModal
+        visible={discardVisible}
+        title="Déstocker cette boîte périmée ?"
+        primaryLabel="Confirmer le déstockage"
+        destructive
+        busy={saving}
+        onCancel={() => {
+          if (!savingRef.current) setDiscardVisible(false);
+        }}
+        onPrimary={() => void discard()}
+      >
+        <Text style={typography.detail}>
+          {`Boîte #${box.id} de ${box.specialtyName}, lot ${box.lot ?? 'non renseigné'} : retirer les ${box.remainingQuantity} unité(s) restantes pour péremption. La boîte et son historique seront conservés.`}
+        </Text>
+        {discardError ? <Message tone="error">{discardError}</Message> : null}
+      </AppModal>
 
       <BoxDeletionConfirmation
         box={box}

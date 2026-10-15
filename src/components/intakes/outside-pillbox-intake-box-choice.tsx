@@ -59,7 +59,10 @@ export function OutsidePillboxIntakeBoxChoice({
           ...equivalences.map((equivalence) => equivalence.cis),
         ]);
         const eligible = allBoxes
-          .filter((box) => acceptedCis.has(box.specialtyCis))
+          .filter(
+            (box) =>
+              acceptedCis.has(box.specialtyCis) && box.remainingQuantity > 0,
+          )
           .sort(
             (left, right) =>
               left.expirationDate.localeCompare(right.expirationDate) ||
@@ -174,7 +177,7 @@ export function OutsidePillboxIntakeBoxChoice({
           })}
         </DenseList>
       ) : null}
-      {selectedBoxId === null ? (
+      {selectedBoxId === null && boxes && boxes.length > 0 ? (
         <Banner level="warning">
           Choisissez une boîte avant de confirmer.
         </Banner>

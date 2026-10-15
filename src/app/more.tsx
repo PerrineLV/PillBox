@@ -1,12 +1,14 @@
 import { useFocusEffect, type Href } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 
 import { UpdateNoticeCard } from '@/components/updates/update-notice-card';
 import { useUpdateNoticeState } from '@/components/updates/update-notice-provider';
+import { CONTACT_EMAIL, type FeedbackType } from '@/domain/contact/feedback';
 import { todayIso } from '@/domain/inventory/inventory';
 import { INTAKE_SLOTS } from '@/domain/treatments/treatment';
+import { openFeedbackMail } from '@/infrastructure/contact/feedback-mail';
 import { listPreparationHistory } from '@/infrastructure/preparations/preparation-repository';
 import { listPrescriptions } from '@/infrastructure/prescriptions/prescription-repository';
 import { installedAppVersion } from '@/infrastructure/updates/installed-version';
@@ -18,6 +20,7 @@ import {
   DenseList,
   DenseRow,
   LockIcon,
+  Message,
   Section,
   ShieldIcon,
   TabHeader,
@@ -142,18 +145,7 @@ export default function MoreScreen() {
       <MenuGroup entries={TRACKING} counts={counts} title="Suivi" />
       <MenuGroup entries={APPLICATION} counts={counts} title="Application" />
 
-      <Section label="Aide et contact">
-        <DenseList>
-          <DenseRow
-            first
-            chevron
-            href="/settings/contact"
-            title="Faire un retour"
-            detail="Problème ou suggestion, par e-mail"
-            accessibilityLabel="Faire un retour. Problème ou suggestion, par e-mail"
-          />
-        </DenseList>
-      </Section>
+      <ContactSection />
 
       <Banner
         icon={<ShieldIcon color={colors.brandPressed} size={18} />}
@@ -209,6 +201,69 @@ function MenuIcon({ icon }: Readonly<{ icon: MenuEntry['icon'] }>) {
   if (icon === 'backup') return <ArrowIcon color={color} direction="up" />;
   if (icon === 'check') return <CapsuleIcon color={color} />;
   return <BoxIcon color={color} />;
+}
+
+const CONTACT_ENTRIES: readonly Readonly<{
+  type: FeedbackType;
+  title: string;
+}>[] = [
+  { type: 'problem', title: 'Signaler un problème' },
+  { type: 'suggestion', title: 'Proposer une idée' },
+];
+
+/**
+ * Ouvre directement la messagerie : la personne rédige, relit et envoie
+ * elle-même. PillBox ne transmet rien et ne confirme jamais l'envoi.
+ */
+function ContactSection() {
+  const openingRef = useRef(false);
+  const [unavailable, setUnavailable] = useState(false);
+
+  async function contact(type: FeedbackType) {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    try {
+      setUnavailable((await openFeedbackMail(type)) === 'unavailable');
+    } finally {
+      openingRef.current = false;
+    }
+  }
+
+  return (
+    <Section label="Aide et contact">
+      <DenseList>
+        {CONTACT_ENTRIES.map((entry, index) => (
+          <DenseRow
+            accessibilityLabel={`${entry.title}. Ouvre votre messagerie`}
+            chevron
+            detail="Ouvre votre messagerie"
+            first={index === 0}
+            key={entry.type}
+            onPress={() => void contact(entry.type)}
+            title={entry.title}
+          />
+        ))}
+      </DenseList>
+      <Text style={typography.detail}>
+        Ce canal concerne l’application et ne fournit pas de conseil médical.
+        N’incluez pas de données de santé. L’envoi communique votre adresse
+        e-mail au destinataire.
+      </Text>
+      <Text
+        accessibilityLabel={`Adresse de contact : ${CONTACT_EMAIL}`}
+        selectable
+        style={typography.detail}
+      >
+        {CONTACT_EMAIL}
+      </Text>
+      {unavailable ? (
+        <Message tone="error">
+          Impossible d’ouvrir une messagerie. Faites un appui long sur l’adresse
+          ci-dessus pour la copier.
+        </Message>
+      ) : null}
+    </Section>
+  );
 }
 
 /** Version réellement installée, utile pour vérifier une mise à jour. */

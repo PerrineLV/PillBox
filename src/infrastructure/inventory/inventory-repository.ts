@@ -3,6 +3,8 @@ import { assertStockQuantity } from '@/domain/inventory/stock-quantity';
 
 import {
   assertValidBoxDraft,
+  isExpired,
+  todayIso,
   MEDICATION_BOX_ORIGINS,
   STOCK_MOVEMENT_TYPES,
   type MedicationBox,
@@ -241,6 +243,54 @@ export async function adjustMedicationBox(
       quantityAfter - current.remaining_quantity,
       quantityAfter,
       explanation.trim(),
+    );
+  });
+}
+
+/** Retire uniquement le restant périmé, sans effacer la boîte ni ses usages. */
+export async function discardExpiredMedicationBox(
+  database: SQLiteDatabase,
+  boxId: number,
+  expectedRemainingQuantity: number,
+  today = todayIso(),
+): Promise<void> {
+  assertStockQuantity(expectedRemainingQuantity);
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const box = await transaction.getFirstAsync<{
+      expiration_date: string;
+      remaining_quantity: number;
+    }>(
+      'SELECT expiration_date, remaining_quantity FROM medication_boxes WHERE id = ?',
+      boxId,
+    );
+    if (box === null) throw new Error('Boîte introuvable.');
+    if (!isExpired(box.expiration_date, today)) {
+      throw new Error('Cette boîte n’est pas périmée.');
+    }
+    // Répéter une opération déjà réussie ne doit pas créer de mouvement.
+    if (box.remaining_quantity === 0) return;
+    assertStockQuantity(box.remaining_quantity);
+    if (box.remaining_quantity !== expectedRemainingQuantity) {
+      throw new Error(
+        'Le stock a changé. Vérifiez la quantité puis confirmez à nouveau.',
+      );
+    }
+    const result = await transaction.runAsync(
+      `UPDATE medication_boxes SET remaining_quantity = 0, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND remaining_quantity = ?`,
+      boxId,
+      box.remaining_quantity,
+    );
+    if (result.changes !== 1) {
+      throw new Error('Le stock a changé. Rechargez la boîte puis réessayez.');
+    }
+    await transaction.runAsync(
+      `INSERT INTO stock_movements
+       (box_id, type, quantity_delta, quantity_after, explanation)
+       VALUES (?, 'MANUAL_ADJUSTMENT', ?, 0, ?)`,
+      boxId,
+      -box.remaining_quantity,
+      'Déstockage de la quantité restante pour péremption',
     );
   });
 }

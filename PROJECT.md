@@ -70,7 +70,7 @@ Référentiel issu de la Base de données publique des médicaments. Distinguer 
 
 # Retours volontaires sur l’application
 
-Depuis Plus, rubrique Aide et contact, « Faire un retour » ouvre un formulaire local avec un type facultatif et un message obligatoire. « Continuer par e-mail » prépare le message dans la messagerie vers pillbox.app@protonmail.com ; la personne relit et envoie elle-même. Aucun envoi automatique ni backend, diagnostic, pièce jointe ou donnée métier n’est ajouté. Le formulaire rappelle de ne pas inclure de données de santé et que l’e-mail révèle l’adresse de l’expéditeur. PillBox ne confirme pas l’envoi. Le texte reste en mémoire tant que l’écran reste ouvert, y compris au retour de la messagerie ; il n’est pas enregistré dans SQLite. L’adresse et le message peuvent être copiés par sélection native explicite, notamment si aucune messagerie ne s’ouvre. La rédaction fonctionne hors ligne ; l’envoi relève de la messagerie. Le partage du journal des erreurs conserve son parcours distinct.
+Depuis Plus, rubrique Aide et contact, « Signaler un problème » et « Proposer une idée » ouvrent directement la messagerie vers pillbox.app@protonmail.com avec un objet prérempli et un message vide ; la personne rédige, relit et envoie elle-même. Il n’y a pas de formulaire dans l’application. Aucun envoi automatique ni backend, diagnostic, pièce jointe ou donnée métier n’est ajouté. La rubrique rappelle de ne pas inclure de données de santé et que l’e-mail révèle l’adresse de l’expéditeur. PillBox ne confirme pas l’envoi. L’adresse est affichée et copiable par sélection native explicite, notamment si aucune messagerie ne s’ouvre. Le partage du journal des erreurs conserve son parcours distinct.
 
 # Hors scope MVP
 

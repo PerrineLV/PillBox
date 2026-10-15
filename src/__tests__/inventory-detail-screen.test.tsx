@@ -1,8 +1,14 @@
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { TextInput } from 'react-native';
-import { PillButton } from '@/ui';
+import { AppModal, PillButton } from '@/ui';
+import type { MedicationBox } from '@/domain/inventory/inventory';
 import BoxDetailScreen from '@/app/inventory/[id]';
-import { adjustMedicationBox } from '@/infrastructure/inventory/inventory-repository';
+import {
+  adjustMedicationBox,
+  discardExpiredMedicationBox,
+  getMedicationBox,
+  getMedicationBoxRemovalAction,
+} from '@/infrastructure/inventory/inventory-repository';
 
 jest.mock('expo-sqlite', () => {
   const database = {};
@@ -29,20 +35,27 @@ jest.mock('@/infrastructure/treatments/generic-equivalence-repository', () => ({
   listAllGenericEquivalenceConfirmations: async () => [],
 }));
 jest.mock('@/infrastructure/inventory/inventory-repository', () => ({
-  getMedicationBox: async () => ({
-    id: 1,
-    specialtyName: 'Test',
-    specialtyCis: '60000001',
-    initialQuantity: 30,
-    remainingQuantity: 12.5,
-    expirationDate: '2027-12-31',
-    origin: 'MANUAL',
-    lot: 'A',
-  }),
+  getMedicationBox: jest.fn(),
+  discardExpiredMedicationBox: jest.fn(async () => undefined),
   listStockMovements: async () => [],
-  getMedicationBoxRemovalAction: async () => 'DELETE',
+  getMedicationBoxRemovalAction: jest.fn(async () => 'DELETE'),
   adjustMedicationBox: jest.fn(async () => undefined),
 }));
+
+const stockBox: MedicationBox = {
+  id: 1,
+  specialtyName: 'Test',
+  specialtyCis: '60000001',
+  initialQuantity: 30,
+  remainingQuantity: 12.5,
+  expirationDate: '2099-12-31',
+  origin: 'MANUAL',
+  lot: 'A',
+  pharmaceuticalForm: 'comprimé',
+  presentationCip13: '3400000000001',
+  presentationLabel: 'Boîte',
+  scanRaw: null,
+};
 
 let renderer: ReactTestRenderer;
 const input = () =>
@@ -68,6 +81,9 @@ const save = () => press('Enregistrer l’ajustement');
 
 beforeEach(async () => {
   jest.clearAllMocks();
+  jest.mocked(getMedicationBox).mockResolvedValue(stockBox);
+  jest.mocked(getMedicationBoxRemovalAction).mockResolvedValue('DELETE');
+  jest.mocked(discardExpiredMedicationBox).mockResolvedValue(undefined);
   await act(async () => {
     renderer = create(<BoxDetailScreen />);
   });
@@ -130,4 +146,106 @@ it('annule sans écriture et restaure le stock réel', () => {
   act(() => press('Annuler la saisie'));
   expect(input().props.value).toBe('12.5');
   expect(adjustMedicationBox).not.toHaveBeenCalled();
+});
+
+const discardLabel = 'Déstocker la boîte périmée';
+const discardModal = () =>
+  renderer.root
+    .findAllByType(AppModal)
+    .find((node) => node.props.primaryLabel === 'Confirmer le déstockage')!;
+async function mountExpired(
+  remainingQuantity = 12.5,
+  expirationDate = '2000-01-01',
+) {
+  jest
+    .mocked(getMedicationBox)
+    .mockResolvedValue({ ...stockBox, remainingQuantity, expirationDate });
+  jest
+    .mocked(getMedicationBoxRemovalAction)
+    .mockResolvedValue('KEEP_USED_IN_PREPARATION');
+  await act(async () => {
+    renderer.unmount();
+  });
+  await act(async () => {
+    renderer = create(<BoxDetailScreen />);
+  });
+}
+
+it('propose le déstockage même pour une boîte utilisée et confirme son lot et son restant', async () => {
+  await mountExpired();
+  await act(async () => press(discardLabel));
+  expect(discardModal().props.visible).toBe(true);
+  const text = JSON.stringify(renderer.toJSON());
+  expect(text).toContain('lot A');
+  expect(text).toContain('12.5 unité(s) restantes');
+  expect(discardExpiredMedicationBox).not.toHaveBeenCalled();
+  await act(async () => discardModal().props.onCancel());
+  expect(discardModal().props.visible).toBe(false);
+  expect(discardExpiredMedicationBox).not.toHaveBeenCalled();
+});
+
+it.each([
+  [0, '2000-01-01'],
+  [12.5, '2099-12-31'],
+])(
+  'masque l’action pour un restant %s et une péremption %s',
+  async (remaining, expiration) => {
+    await mountExpired(remaining, expiration);
+    expect(
+      renderer.root
+        .findAllByType(PillButton)
+        .some((node) => node.props.label === discardLabel),
+    ).toBe(false);
+  },
+);
+
+it('ne déstocke qu’une fois au double appui et recharge le restant après succès', async () => {
+  await mountExpired();
+  await act(async () => press(discardLabel));
+  jest.mocked(getMedicationBox).mockResolvedValue({
+    ...stockBox,
+    remainingQuantity: 0,
+    expirationDate: '2000-01-01',
+  });
+  await act(async () => {
+    const confirm = discardModal().props.onPrimary;
+    confirm();
+    confirm();
+  });
+  expect(discardExpiredMedicationBox).toHaveBeenCalledTimes(1);
+  expect(discardExpiredMedicationBox).toHaveBeenCalledWith(
+    expect.anything(),
+    1,
+    12.5,
+  );
+  expect(input().props.value).toBe('0');
+  expect(discardModal().props.visible).toBe(false);
+  expect(
+    renderer.root
+      .findAllByType(PillButton)
+      .some((node) => node.props.label === discardLabel),
+  ).toBe(false);
+});
+
+it('affiche l’erreur et recharge le restant pour permettre une nouvelle confirmation', async () => {
+  await mountExpired();
+  await act(async () => press(discardLabel));
+  jest
+    .mocked(discardExpiredMedicationBox)
+    .mockRejectedValueOnce(new Error('Le stock a changé.'));
+  jest.mocked(getMedicationBox).mockResolvedValue({
+    ...stockBox,
+    remainingQuantity: 2.5,
+    expirationDate: '2000-01-01',
+  });
+  await act(async () => discardModal().props.onPrimary());
+  expect(discardModal().props.visible).toBe(true);
+  expect(JSON.stringify(renderer.toJSON())).toContain('Le stock a changé.');
+  expect(JSON.stringify(renderer.toJSON())).toContain('2.5 unité(s) restantes');
+  await act(async () => discardModal().props.onPrimary());
+  expect(discardExpiredMedicationBox).toHaveBeenLastCalledWith(
+    expect.anything(),
+    1,
+    2.5,
+  );
 });

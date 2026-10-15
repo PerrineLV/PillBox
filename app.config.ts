@@ -72,6 +72,7 @@ const ADDED_PLUGINS: readonly (string | [string, unknown])[] = [
   'expo-status-bar',
   ['@react-native-community/datetimepicker', DATE_TIME_PICKER_OPTIONS],
   './plugins/withAndroidLightTheme',
+  './plugins/withAndroidArchitectures',
   './plugins/withPillBoxTodayWidget',
 ];
 

@@ -97,6 +97,41 @@ tag `latest` est créé une seule fois puis mis à jour en place (assets remplac
 lien permanent `releases/latest/download/pillbox-latest.apk` ne connaît donc aucune
 interruption entre deux versions.
 
+### Architectures natives et poids de l’APK
+
+Le plugin local `plugins/withAndroidArchitectures.js`, enregistré dans
+`app.config.ts`, fixe `reactNativeArchitectures=arm64-v8a,armeabi-v7a` dans le
+`gradle.properties` généré par le prébuild CI. Aucune dépendance supplémentaire
+n’est nécessaire. L’APK distribué conserve les deux architectures ARM ; les
+bibliothèques x86 et x86_64 sont exclues. Ce réglage s’applique au projet généré,
+y compris aux builds locaux : pour un émulateur x86, il faut explicitement
+surcharger la propriété Gradle lors d’un build de développement.
+
+Cette réduction vise le poids du téléchargement ; elle ne démontre pas la cause
+du blocage intermittent à 100 %. Le flux de mise à jour et la publication restent
+inchangés. Aucun prébuild ni build local n’a été lancé pour le ticket 116.
+
+Mesure de référence du 15 octobre 2026 sur l’APK public de la landing :
+
+- Avant : **146 068 282 octets** (146,1 Mo décimaux), avec les quatre architectures.
+- SHA-256 : `2ff9ad537f084e613cb7055477785e8359a7d2449ae25c46db806abab2d6ccde`.
+- Bibliothèques x86 et x86_64 : **58 688 848 octets** de contenu compressé.
+- Après : **à mesurer sur le prochain APK construit en CI**. La soustraction des
+  bibliothèques donne un ordre de grandeur de 87,4 Mo, pas une mesure de build.
+- `res/ZR.db` : 13 230 080 octets décompressés, identique octet pour octet à
+  `assets/medications/medications.db` (SHA-256 identique). Il s’agit du référentiel
+  médicaments, pas de la base utilisateur. `res/Sd.db` correspond de même à
+  `assets/medications/compl-alim.db`. Ces ressources ne sont pas modifiées.
+
+Après le prochain build CI, consigner la taille réelle et vérifier que seuls
+`lib/arm64-v8a/` et `lib/armeabi-v7a/` sont présents dans l’archive. Les contrôles
+existants de signature et de `versionName` / `versionCode` doivent réussir. La
+validation du ticket reste ouverte jusqu’aux essais répétés sur téléphone :
+téléchargement depuis la bannière et la landing, en Wi-Fi et données mobiles sur
+plusieurs jours, puis installation par-dessus la version existante sans perte de
+données. En cas de blocage, relever l’heure, le navigateur, le réseau, le stockage
+libre et tout message de contrôle de sécurité.
+
 ### Créer la clé de signature
 
 Générer une clé dédiée dans un emplacement privé, hors du dépôt :

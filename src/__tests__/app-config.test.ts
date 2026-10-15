@@ -11,6 +11,12 @@ function buildWith(version: string) {
 }
 
 describe('durcissement de la configuration Android', () => {
+  it('enregistre le plugin des architectures pour le prébuild', () => {
+    expect(buildWith('1.0.0').plugins).toContain(
+      './plugins/withAndroidArchitectures',
+    );
+  });
+
   it('exclut explicitement toutes les données de la sauvegarde Android', () => {
     const config = buildWith('1.0.0');
     expect(config.android?.allowBackup).toBe(false);

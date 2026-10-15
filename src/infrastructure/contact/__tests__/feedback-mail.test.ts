@@ -1,5 +1,5 @@
 import * as MailComposer from 'expo-mail-composer';
-import { CONTACT_EMAIL, prepareFeedback } from '@/domain/contact/feedback';
+import { CONTACT_EMAIL } from '@/domain/contact/feedback';
 import { openFeedbackMail } from '../feedback-mail';
 
 jest.mock('expo-mail-composer', () => ({
@@ -16,32 +16,24 @@ beforeEach(() => {
     .mockResolvedValue({ status: MailComposer.MailComposerStatus.CANCELLED });
 });
 
-it.each(['', '  ', '\n\t'])(
-  'refuse un message vide avant tout appel natif',
-  async (message) => {
-    await expect(openFeedbackMail(message, '')).rejects.toThrow('Saisissez');
-    expect(MailComposer.isAvailableAsync).not.toHaveBeenCalled();
-    expect(MailComposer.composeAsync).not.toHaveBeenCalled();
+it.each([
+  ['problem', 'PillBox — Problème'],
+  ['suggestion', 'PillBox — Suggestion'],
+] as const)(
+  'prépare uniquement le destinataire et l’objet (%s)',
+  async (type, subject) => {
+    await openFeedbackMail(type);
+    expect(MailComposer.composeAsync).toHaveBeenCalledWith({
+      recipients: [CONTACT_EMAIL],
+      subject,
+      isHtml: false,
+    });
   },
 );
 
-it('prépare exclusivement le texte exact et le type choisi', async () => {
-  const message = '  Écran figé & bouton ?\nDeuxième ligne : 50% + # <test>  ';
-  await openFeedbackMail(message, 'problem');
-  expect(MailComposer.composeAsync).toHaveBeenCalledWith({
-    recipients: [CONTACT_EMAIL],
-    subject: 'PillBox — Problème',
-    body: message,
-    isHtml: false,
-  });
-  expect(prepareFeedback('Bonjour', '').subject).toBe(
-    'PillBox — Retour utilisateur',
-  );
-});
-
 it('permet le repli sans composeur', async () => {
   jest.mocked(MailComposer.isAvailableAsync).mockResolvedValue(false);
-  expect(await openFeedbackMail('Bonjour', 'suggestion')).toBe('unavailable');
+  expect(await openFeedbackMail('suggestion')).toBe('unavailable');
   expect(MailComposer.composeAsync).not.toHaveBeenCalled();
 });
 
@@ -56,11 +48,11 @@ it.each(['availability', 'opening'])(
       jest
         .mocked(MailComposer.composeAsync)
         .mockRejectedValueOnce(new Error('indisponible'));
-    expect(await openFeedbackMail('Bonjour', 'other')).toBe('unavailable');
+    expect(await openFeedbackMail('problem')).toBe('unavailable');
   },
 );
 
 it('ne transforme pas l’annulation en confirmation d’envoi', async () => {
-  expect(await openFeedbackMail('Bonjour', '')).toBe('opened');
+  expect(await openFeedbackMail('problem')).toBe('opened');
   expect(MailComposer.composeAsync).toHaveBeenCalledTimes(1);
 });
