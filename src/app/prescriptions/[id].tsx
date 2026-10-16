@@ -3,14 +3,16 @@ import { useSQLiteContext, type SQLiteDatabase } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 
+import { PrescriptionArchiveAction } from '@/components/prescriptions/prescription-archive-action';
+import { usePrescriptionToday } from '@/components/prescriptions/use-prescription-today';
 import {
   PrescriptionForm,
   type PrescriptionFormExistingItem,
 } from '@/components/prescriptions/prescription-form';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
-import { todayIso } from '@/domain/inventory/inventory';
 import {
   isPrescriptionValidityApproaching,
+  prescriptionHistoryLabel,
   type Prescription,
   type PrescriptionItem,
   type PrescriptionStatus,
@@ -58,7 +60,7 @@ export default function PrescriptionDetailScreen() {
   const [items, setItems] = useState<PrescriptionItem[]>([]);
   const [treatments, setTreatments] = useState<Treatment[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const today = todayIso();
+  const today = usePrescriptionToday();
 
   const load = useCallback(async () => {
     if (!Number.isSafeInteger(numericId)) {
@@ -67,7 +69,7 @@ export default function PrescriptionDetailScreen() {
     }
     try {
       const [value, values, allTreatments] = await Promise.all([
-        getPrescription(database, numericId, todayIso()),
+        getPrescription(database, numericId, today),
         listPrescriptionItemsByPrescription(database, numericId),
         listTreatments(database),
       ]);
@@ -84,7 +86,7 @@ export default function PrescriptionDetailScreen() {
         reason instanceof Error ? reason.message : 'Chargement impossible.',
       );
     }
-  }, [database, numericId]);
+  }, [database, numericId, today]);
 
   useFocusEffect(
     useCallback(() => {
@@ -119,7 +121,10 @@ export default function PrescriptionDetailScreen() {
           right={
             prescription ? (
               <SeverityBadge
-                label={STATUS_LABELS[prescription.status]}
+                label={
+                  prescriptionHistoryLabel(prescription, today) ??
+                  STATUS_LABELS[prescription.status]
+                }
                 level={level}
               />
             ) : undefined
@@ -140,6 +145,14 @@ export default function PrescriptionDetailScreen() {
 
       {prescription ? (
         <>
+          <PrescriptionArchiveAction
+            prescription={prescription}
+            onChanged={load}
+          />
+          <Text style={typography.detail}>
+            L’archivage est réversible et ne modifie pas les traitements
+            associés.
+          </Text>
           <AppCard>
             <Text style={typography.sectionLabel}>Validité restante</Text>
             <Text style={styles.validity}>
@@ -147,7 +160,9 @@ export default function PrescriptionDetailScreen() {
                 ? 'Non renseignée'
                 : remaining > 0
                   ? `${remaining} jour${remaining > 1 ? 's' : ''}`
-                  : 'Validité dépassée'}
+                  : prescription.validUntil === today
+                    ? 'Valide jusqu’à aujourd’hui inclus'
+                    : 'Validité dépassée'}
             </Text>
             {remaining !== null ? (
               <ProgressBar

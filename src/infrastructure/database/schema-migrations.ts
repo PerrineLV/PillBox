@@ -1,6 +1,6 @@
 import type { SchemaMigration } from './migration-runner';
 
-export const LATEST_SCHEMA_VERSION = 29;
+export const LATEST_SCHEMA_VERSION = 30;
 
 export const SCHEMA_MIGRATIONS = [
   {
@@ -933,6 +933,16 @@ export const SCHEMA_MIGRATIONS = [
         ALTER TABLE treatments ADD COLUMN product_notes TEXT;
         ALTER TABLE medication_boxes ADD COLUMN product_source TEXT NOT NULL DEFAULT 'BDPM'
           CHECK (product_source IN ('BDPM', 'COMPL_ALIM', 'MANUAL'));
+      `);
+    },
+  },
+  {
+    version: 30,
+    name: 'archivage réversible des ordonnances',
+    async up(transaction) {
+      await transaction.execute(`
+        ALTER TABLE prescriptions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0
+          CHECK (archived IN (0, 1));
       `);
     },
   },

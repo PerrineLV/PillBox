@@ -1,12 +1,14 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { PrescriptionArchiveAction } from '@/components/prescriptions/prescription-archive-action';
+import { usePrescriptionToday } from '@/components/prescriptions/use-prescription-today';
 import { formatLongFrenchCivilDate } from '@/components/treatments/civil-date';
-import { todayIso } from '@/domain/inventory/inventory';
 import {
-  comparePrescriptionsForList,
+  partitionPrescriptions,
+  prescriptionHistoryLabel,
   isPrescriptionValidityApproaching,
   type Prescription,
   type PrescriptionStatus,
@@ -37,16 +39,17 @@ export default function PrescriptionsScreen() {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const today = todayIso();
+  const today = usePrescriptionToday();
+  const [expanded, setExpanded] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
       setLoading(true);
-      listPrescriptions(database, todayIso())
+      listPrescriptions(database, today)
         .then((items) => {
           if (!active) return;
-          setPrescriptions([...items].sort(comparePrescriptionsForList));
+          setPrescriptions(items);
           setError(null);
         })
         .catch((reason: unknown) => {
@@ -63,12 +66,28 @@ export default function PrescriptionsScreen() {
       return () => {
         active = false;
       };
-    }, [database]),
+    }, [database, today]),
   );
 
-  const activeCount = prescriptions.filter(
-    (item) => item.status === 'ACTIVE',
-  ).length;
+  const { active, past } = partitionPrescriptions(prescriptions, today);
+  const activeCount = active.length;
+  const card = (prescription: Prescription) => (
+    <View key={prescription.id} style={{ gap: 8 }}>
+      <PrescriptionCard prescription={prescription} today={today} />
+      <PrescriptionArchiveAction
+        prescription={prescription}
+        onChanged={() =>
+          setPrescriptions((current) =>
+            current.map((item) =>
+              item.id === prescription.id
+                ? { ...item, archived: !prescription.archived }
+                : item,
+            ),
+          )
+        }
+      />
+    </View>
+  );
 
   return (
     <AppScreen
@@ -99,13 +118,40 @@ export default function PrescriptionsScreen() {
           title="Aucune ordonnance enregistrée"
         />
       ) : null}
-      {prescriptions.map((prescription) => (
-        <PrescriptionCard
-          key={prescription.id}
-          prescription={prescription}
-          today={today}
-        />
-      ))}
+      {!loading && !error ? (
+        <>
+          {prescriptions.length > 0 && active.length === 0 ? (
+            <EmptyState
+              title="Aucune ordonnance active"
+              description="Vos ordonnances restent consultables dans la section ci-dessous."
+            />
+          ) : null}
+          {active.map(card)}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded }}
+            onPress={() => setExpanded((value) => !value)}
+            style={styles.historyToggle}
+          >
+            <Text style={typography.sectionLabel}>
+              Ordonnances expirées et archivées ({past.length})
+            </Text>
+            <Text style={typography.detail}>
+              {expanded ? 'Replier' : 'Déplier'}
+            </Text>
+          </Pressable>
+          {expanded ? (
+            past.length === 0 ? (
+              <EmptyState
+                title="Aucune ordonnance expirée ou archivée"
+                description="Les ordonnances expirées ou archivées apparaîtront ici."
+              />
+            ) : (
+              past.map(card)
+            )
+          ) : null}
+        </>
+      ) : null}
     </AppScreen>
   );
 }
@@ -140,7 +186,9 @@ function PrescriptionCard({
           <Text style={styles.remaining}>
             {remaining > 0
               ? `${remaining} jour${remaining > 1 ? 's' : ''} de validité restants`
-              : 'Validité dépassée'}
+              : prescription.validUntil === today
+                ? 'Valide jusqu’à aujourd’hui inclus'
+                : 'Validité dépassée'}
           </Text>
         </>
       ) : null}
@@ -164,6 +212,8 @@ function statusOf(
   prescription: Prescription,
   today: string,
 ): { label: string; level: SeverityLevel } {
+  const historyLabel = prescriptionHistoryLabel(prescription, today);
+  if (historyLabel) return { label: historyLabel, level: 'neutral' };
   if (
     prescription.status === 'ACTIVE' &&
     isPrescriptionValidityApproaching(prescription, today)
@@ -188,9 +238,11 @@ function remainingDays(
 }
 
 const styles = StyleSheet.create({
+  historyToggle: { paddingVertical: 14, gap: 6 },
   head: {
     alignItems: 'center',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 9,
   },
   dot: { borderRadius: radii.pill, height: 8, width: 8 },

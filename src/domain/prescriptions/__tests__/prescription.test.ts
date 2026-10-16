@@ -1,4 +1,6 @@
 import {
+  partitionPrescriptions,
+  prescriptionHistoryLabel,
   comparePrescriptionsForList,
   computePrescriptionStatus,
   computeTheoreticalRenewalDate,
@@ -11,6 +13,7 @@ import {
 function prescription(overrides: Partial<Prescription> = {}): Prescription {
   return {
     id: 1,
+    archived: false,
     label: 'Ordo',
     issueDate: '2026-01-01',
     validUntil: '2026-12-01',
@@ -188,5 +191,40 @@ describe('comparePrescriptionsForList', () => {
       known,
       unknown,
     ]);
+  });
+});
+
+describe('séparation expiration / archivage (ticket 118)', () => {
+  it('inclut le dernier jour, conserve les dates absentes et ne déduit rien du remplacement', () => {
+    const items = [
+      prescription({ validUntil: '2026-10-16' }),
+      prescription({ id: 2, validUntil: null }),
+      prescription({ id: 3, status: 'REPLACED' }),
+    ];
+    expect(partitionPrescriptions(items, '2026-10-16').active).toHaveLength(3);
+    expect(
+      partitionPrescriptions(items, '2026-10-17').past.map((item) => item.id),
+    ).toEqual([1]);
+    expect(items[0].archived).toBe(false);
+  });
+  it('trie les dates de fin décroissantes, dates absentes en dernier et restaure sans changer l’expiration', () => {
+    const items = [
+      prescription({ id: 1, archived: true, validUntil: null }),
+      prescription({ id: 2, validUntil: '2026-09-01' }),
+      prescription({ id: 3, archived: true, validUntil: '2027-01-01' }),
+      prescription({ id: 4, archived: true, validUntil: '2026-10-01' }),
+    ];
+    expect(
+      partitionPrescriptions(items, '2026-10-16').past.map((item) => item.id),
+    ).toEqual([3, 4, 2, 1]);
+    expect(
+      items.map((item) => prescriptionHistoryLabel(item, '2026-10-16')),
+    ).toEqual(['Archivée', 'Expirée', 'Archivée', 'Expirée · Archivée']);
+    const restored = items.map((item) => ({ ...item, archived: false }));
+    expect(
+      partitionPrescriptions(restored, '2026-10-16').past.map(
+        (item) => item.id,
+      ),
+    ).toEqual([4, 2]);
   });
 });

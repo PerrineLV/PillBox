@@ -6,6 +6,7 @@ import { SCHEMA_MIGRATIONS } from '@/infrastructure/database/schema-migrations';
 import { createTreatment } from '@/infrastructure/treatments/treatment-repository';
 
 import {
+  setPrescriptionArchived,
   confirmPrescriptionReplacement,
   createPrescription,
   createPrescriptionItem,
@@ -649,5 +650,73 @@ describe('PrescriptionItem (ticket 45)', () => {
       '2026-06-29',
       '2026-01-29',
     ]);
+  });
+});
+
+describe('archivage réversible (ticket 118)', () => {
+  it('persiste le choix sans modifier les associations, traitements ou statut', async () => {
+    const { raw, database, treatmentId } = await setup();
+    const id = await createPrescription(database, {
+      label: 'Ordonnance',
+      issueDate: '2026-01-01',
+      validUntil: '2026-09-01',
+    });
+    await createPrescriptionItem(
+      database,
+      fractionalItemDraft(treatmentId, id),
+    );
+    const items = await listPrescriptionItems(database);
+    const treatments = raw.prepare('SELECT * FROM treatments').all();
+    await setPrescriptionArchived(database, id, true);
+    await setPrescriptionArchived(database, id, true);
+    // Nouvelle connexion à une copie SQLite : aucun état React ne participe à la persistance.
+    const reopened = new Database(raw.serialize());
+    expect(
+      await getPrescription(adapter(reopened), id, '2026-10-16'),
+    ).toMatchObject({ archived: true, status: 'EXPIRED' });
+    reopened.close();
+    await updatePrescription(database, id, {
+      label: 'Renommée',
+      issueDate: '2026-01-01',
+      validUntil: '2026-09-01',
+    });
+    expect((await getPrescription(database, id, '2026-10-16'))?.archived).toBe(
+      true,
+    );
+    await setPrescriptionArchived(database, id, false);
+    expect(await getPrescription(database, id, '2026-10-16')).toMatchObject({
+      archived: false,
+      status: 'EXPIRED',
+    });
+    expect(await listPrescriptionItems(database)).toEqual(items);
+    expect(raw.prepare('SELECT * FROM treatments').all()).toEqual(treatments);
+    await expect(setPrescriptionArchived(database, 9999, true)).rejects.toThrow(
+      'introuvable',
+    );
+    raw.close();
+  });
+  it('migre les ordonnances existantes sans les archiver ni perdre leurs données', async () => {
+    const raw = new Database(':memory:');
+    const store = {
+      execute: async (sql: string) => {
+        raw.exec(sql);
+      },
+      readAppliedVersions: async () => [],
+      recordAppliedVersion: async () => {},
+    };
+    for (const migration of SCHEMA_MIGRATIONS.filter(
+      (item) => item.version < 30,
+    ))
+      await migration.up(store);
+    raw.exec(
+      "INSERT INTO prescriptions (label, issue_date, valid_until) VALUES ('Ancienne', '2026-01-01', '2026-02-01')",
+    );
+    const before = raw.prepare('SELECT * FROM prescriptions').get();
+    await SCHEMA_MIGRATIONS[SCHEMA_MIGRATIONS.length - 1].up(store);
+    expect(raw.prepare('SELECT * FROM prescriptions').get()).toEqual({
+      ...(before as object),
+      archived: 0,
+    });
+    raw.close();
   });
 });
