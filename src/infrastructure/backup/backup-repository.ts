@@ -231,6 +231,37 @@ const TABLES = [
       'updated_at',
     ],
   },
+  {
+    name: 'prescriptions',
+    columns: [
+      'id',
+      'label',
+      'issue_date',
+      'valid_until',
+      'replaced_by_prescription_id',
+      'archived',
+      'created_at',
+      'updated_at',
+    ],
+  },
+  {
+    name: 'prescription_items',
+    columns: [
+      'id',
+      'prescription_id',
+      'treatment_id',
+      'quantity_kind',
+      'duration_days',
+      'box_count',
+      'dispensing_mode',
+      'periodicity_days',
+      'last_dispensed_at',
+      'theoretical_renewal_date',
+      'tolerance_days',
+      'created_at',
+      'updated_at',
+    ],
+  },
 ] as const satisfies readonly TableDefinition[];
 
 const LEGACY_INTAKE_SLOT_SETTINGS = {
@@ -256,15 +287,22 @@ const COLUMNS_ADDED_IN_16: Readonly<Record<string, string>> = {
   preparation_box_usages: 'verification',
 };
 
-const SCHEMA_15_TABLES: readonly TableDefinition[] = TABLES.map((table) => {
-  const removed = COLUMNS_ADDED_IN_16[table.name];
-  return removed === undefined
-    ? table
-    : {
-        name: table.name,
-        columns: table.columns.filter((column) => column !== removed),
-      };
-});
+// Les exports antérieurs au ticket 118 ne contenaient pas les ordonnances.
+const LEGACY_TABLES = TABLES.filter(
+  (table) =>
+    table.name !== 'prescriptions' && table.name !== 'prescription_items',
+);
+const SCHEMA_15_TABLES: readonly TableDefinition[] = LEGACY_TABLES.map(
+  (table) => {
+    const removed = COLUMNS_ADDED_IN_16[table.name];
+    return removed === undefined
+      ? table
+      : {
+          name: table.name,
+          columns: table.columns.filter((column) => column !== removed),
+        };
+  },
+);
 const SCHEMA_14_TABLES = SCHEMA_15_TABLES.map((table) =>
   table.name === 'intake_reminder_slot_settings'
     ? LEGACY_INTAKE_SLOT_SETTINGS
@@ -295,7 +333,7 @@ function tableDefinitions(schemaVersion: number): readonly TableDefinition[] {
   if (schemaVersion === 13) return SCHEMA_13_TABLES;
   if (schemaVersion === 14) return SCHEMA_14_TABLES;
   if (schemaVersion === 15) return SCHEMA_15_TABLES;
-  return TABLES;
+  return schemaVersion < 30 ? LEGACY_TABLES : TABLES;
 }
 
 export async function createBackup(
@@ -406,6 +444,8 @@ export async function restoreBackup(
   await createSafetyCopy();
   const definitions = tableDefinitions(backup.metadata.schemaVersion);
   await database.withExclusiveTransactionAsync(async (transaction) => {
+    // Un remplacement peut référencer une ordonnance insérée plus tard.
+    await transaction.runAsync('PRAGMA defer_foreign_keys = ON');
     for (const table of [...TABLES].reverse())
       // SQLite ne permet pas de binder un identifiant de table via `?` : seules
       // les valeurs peuvent être paramétrées. `table.name` provient toujours de

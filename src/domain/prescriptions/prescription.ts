@@ -18,9 +18,13 @@ export type Prescription = {
   /** `null` lorsque l'utilisatrice ne connaît pas encore la fin de validité. */
   validUntil: string | null;
   status: PrescriptionStatus;
+  archived: boolean;
 };
 
-export type PrescriptionDraft = Omit<Prescription, 'id' | 'status'>;
+export type PrescriptionDraft = Omit<
+  Prescription,
+  'id' | 'status' | 'archived'
+>;
 
 /**
  * Ordre d'affichage de la liste des ordonnances (ticket 46) : les actives
@@ -274,4 +278,44 @@ function assertCivilDate(value: string, message: string): void {
   const date = new Date(`${value}T00:00:00.000Z`);
   if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value)
     throw new Error(message);
+}
+
+/** Expiration calendaire indépendante du remplacement et de l’archivage. */
+export function isPrescriptionExpired(
+  prescription: Pick<Prescription, 'validUntil'>,
+  today: string,
+): boolean {
+  return prescription.validUntil !== null && prescription.validUntil < today;
+}
+
+export function prescriptionHistoryLabel(
+  prescription: Prescription,
+  today: string,
+): string | null {
+  const expired = isPrescriptionExpired(prescription, today);
+  if (expired && prescription.archived) return 'Expirée · Archivée';
+  if (prescription.archived) return 'Archivée';
+  return expired ? 'Expirée' : null;
+}
+
+export function partitionPrescriptions(
+  prescriptions: readonly Prescription[],
+  today: string,
+) {
+  const active: Prescription[] = [];
+  const past: Prescription[] = [];
+  for (const prescription of prescriptions) {
+    (prescription.archived || isPrescriptionExpired(prescription, today)
+      ? past
+      : active
+    ).push(prescription);
+  }
+  active.sort(comparePrescriptionsForList);
+  past.sort((left, right) => {
+    if (left.validUntil === right.validUntil) return right.id - left.id;
+    if (left.validUntil === null) return 1;
+    if (right.validUntil === null) return -1;
+    return right.validUntil.localeCompare(left.validUntil);
+  });
+  return { active, past };
 }

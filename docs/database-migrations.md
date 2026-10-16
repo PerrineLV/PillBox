@@ -80,3 +80,27 @@ npm run lint
 npm run typecheck
 npm test
 ```
+
+
+## Schéma 30 — archivage des ordonnances (ticket 118)
+
+La migration ajoute `prescriptions.archived` (0 ou 1, 0 par défaut).
+L’expiration est calculée depuis la date locale du jour, indépendamment de
+l’archivage et du remplacement. Aucun traitement ni document associé n’est modifié.
+
+Les exports de schéma 30 incluent désormais `prescriptions` et
+`prescription_items`, avec les états d’archivage et les remplacements confirmés.
+Les anciens exports restent lisibles, mais ne contenaient pas ces deux tables :
+leurs ordonnances absentes ne peuvent pas être reconstituées. Comme pour toute
+restauration, une copie de sécurité de la base courante est créée avant son remplacement.
+
+Vérifications sur téléphone :
+
+- Archiver puis restaurer une ordonnance valide ; refaire après fermeture complète.
+- Restaurer une ordonnance expirée : elle reste dans la section secondaire.
+- Déplier/replier la section, vérifier compteur, ordre des dates et libellés longs
+  avec grande taille de texte et TalkBack ; vérifier aussi le focus clavier.
+- Laisser la liste ouverte à minuit ou revenir après une absence : une date de fin
+  égale à hier devient expirée, sans archivage automatique.
+- Exporter puis restaurer une sauvegarde avec ordonnances archivées et traitements
+  associés ; vérifier leurs détails et le maintien des traitements.

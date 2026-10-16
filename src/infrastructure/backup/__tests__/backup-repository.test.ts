@@ -110,18 +110,22 @@ function withoutSchema16Columns(
     preparation_box_usages: 'verification',
   };
   return Object.fromEntries(
-    Object.entries(tables).map(([name, rows]) => {
-      const column = removed[name];
-      if (column === undefined) return [name, rows];
-      return [
-        name,
-        rows.map((row) =>
-          Object.fromEntries(
-            Object.entries(row).filter(([key]) => key !== column),
+    Object.entries(tables)
+      .filter(
+        ([name]) => name !== 'prescriptions' && name !== 'prescription_items',
+      )
+      .map(([name, rows]) => {
+        const column = removed[name];
+        if (column === undefined) return [name, rows];
+        return [
+          name,
+          rows.map((row) =>
+            Object.fromEntries(
+              Object.entries(row).filter(([key]) => key !== column),
+            ),
           ),
-        ),
-      ];
-    }),
+        ];
+      }),
   );
 }
 
@@ -357,4 +361,65 @@ describe('sauvegarde et restauration personnelles', () => {
     target.raw.close();
     source.raw.close();
   });
+});
+
+it('sauvegarde et restaure les ordonnances archivées, les associations et les remplacements', async () => {
+  const source = await database();
+  seed(source.raw);
+  source.raw.exec(`
+    INSERT INTO prescriptions (id, label, issue_date, valid_until, archived) VALUES
+      (1, 'Ancienne', '2026-01-01', '2026-09-01', 1), (2, 'Récente', '2026-09-01', NULL, 0);
+    UPDATE prescriptions SET replaced_by_prescription_id = 2 WHERE id = 1;
+    INSERT INTO prescription_items (prescription_id, treatment_id, quantity_kind, box_count, dispensing_mode)
+      VALUES (1, 12, 'BOX_COUNT', 1, 'FULL');
+  `);
+  const backup = await createBackup(
+    source.database,
+    '2026-10-16T12:00:00.000Z',
+    digest,
+  );
+  const parsed = await parseAndValidateBackup(JSON.stringify(backup), digest);
+  const target = await database();
+  await restoreBackup(target.database, parsed.backup, async () => {});
+  expect(target.raw.prepare('SELECT * FROM prescriptions').all()).toEqual(
+    source.raw.prepare('SELECT * FROM prescriptions').all(),
+  );
+  expect(target.raw.prepare('SELECT * FROM prescription_items').all()).toEqual(
+    source.raw.prepare('SELECT * FROM prescription_items').all(),
+  );
+  expect(target.raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  source.raw.close();
+  target.raw.close();
+});
+
+it('accepte les anciens exports sans ordonnances et ne conserve pas celles de la base remplacée', async () => {
+  const source = await database();
+  const current = await createBackup(
+    source.database,
+    '2026-10-16T12:00:00.000Z',
+    digest,
+  );
+  const {
+    prescriptions: _prescriptions,
+    prescription_items: _items,
+    ...tables
+  } = current.tables;
+  const contents = {
+    metadata: { ...current.metadata, schemaVersion: 29 },
+    tables,
+  };
+  const legacy: PillBoxBackup = {
+    ...contents,
+    integrity: {
+      algorithm: 'SHA-256',
+      checksum: await digest(stableStringify(contents)),
+    },
+  };
+  const parsed = await parseAndValidateBackup(JSON.stringify(legacy), digest);
+  source.raw.exec(
+    "INSERT INTO prescriptions (label, issue_date, archived) VALUES ('À remplacer', '2026-01-01', 1)",
+  );
+  await restoreBackup(source.database, parsed.backup, async () => {});
+  expect(source.raw.prepare('SELECT * FROM prescriptions').all()).toEqual([]);
+  source.raw.close();
 });

@@ -20,6 +20,7 @@ type PrescriptionRow = {
   issue_date: string;
   valid_until: string | null;
   replaced_by_prescription_id: number | null;
+  archived: number;
 };
 
 type PrescriptionItemRow = {
@@ -37,7 +38,7 @@ type PrescriptionItemRow = {
 };
 
 const PRESCRIPTION_SELECT = `
-  SELECT p.id, p.label, p.issue_date, p.valid_until, p.replaced_by_prescription_id
+  SELECT p.id, p.label, p.issue_date, p.valid_until, p.replaced_by_prescription_id, p.archived
   FROM prescriptions p`;
 
 /**
@@ -129,6 +130,7 @@ type OverlapRow = {
   issue_date: string;
   valid_until: string | null;
   replaced_by_prescription_id: number | null;
+  archived: number;
 };
 
 /**
@@ -148,7 +150,7 @@ export async function listActivePrescriptionsCoveringTreatments(
   if (uniqueIds.length === 0) return [];
   const placeholders = uniqueIds.map(() => '?').join(', ');
   const rows = await database.getAllAsync<OverlapRow>(
-    `SELECT DISTINCT p.id, p.label, p.issue_date, p.valid_until, p.replaced_by_prescription_id
+    `SELECT DISTINCT p.id, p.label, p.issue_date, p.valid_until, p.replaced_by_prescription_id, p.archived
      FROM prescriptions p
      JOIN prescription_items pi ON pi.prescription_id = p.id
      WHERE pi.treatment_id IN (${placeholders})
@@ -158,6 +160,7 @@ export async function listActivePrescriptionsCoveringTreatments(
   );
   return rows
     .map((row): Prescription => ({
+      archived: row.archived === 1,
       id: row.id,
       label: row.label,
       issueDate: row.issue_date,
@@ -315,6 +318,7 @@ function hydratePrescription(
   today: string,
 ): Prescription {
   return {
+    archived: row.archived === 1,
     id: row.id,
     label: row.label,
     issueDate: row.issue_date,
@@ -357,4 +361,18 @@ function isPrescriptionItemDispensingMode(
   value: string,
 ): value is PrescriptionItemDispensingMode {
   return PRESCRIPTION_ITEM_DISPENSING_MODES.some((mode) => mode === value);
+}
+
+/** Ne touche qu’à l’ordonnance, jamais aux traitements ou aux délivrances. */
+export async function setPrescriptionArchived(
+  database: SQLiteDatabase,
+  id: number,
+  archived: boolean,
+): Promise<void> {
+  const result = await database.runAsync(
+    'UPDATE prescriptions SET archived = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    archived ? 1 : 0,
+    id,
+  );
+  if (result.changes !== 1) throw new Error('Ordonnance introuvable.');
 }
