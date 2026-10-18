@@ -90,3 +90,42 @@ export function buildBoxFillingGuide(
     };
   });
 }
+
+/** Quantités du seul médicament en cours, regroupées par case du pilulier. */
+export function buildMedicationFillingCells(
+  items: readonly PreparationItemSnapshot[],
+  contributions: readonly BoxFillingContribution[],
+) {
+  const depositedByItem = new Map<PreparationItemSnapshot, number>();
+  for (const step of buildBoxFillingGuide(items, contributions, [])) {
+    for (const segment of step.segments) {
+      depositedByItem.set(
+        segment.item,
+        (depositedByItem.get(segment.item) ?? 0) + segment.quantityHalfUnits,
+      );
+    }
+  }
+  const cells = new Map<
+    string,
+    {
+      date: string;
+      slot: PreparationItemSnapshot['slot'];
+      remainingHalfUnits: number;
+      depositedHalfUnits: number;
+    }
+  >();
+  for (const item of items) {
+    const key = `${item.date}-${item.slot}`;
+    const cell = cells.get(key) ?? {
+      date: item.date,
+      slot: item.slot,
+      remainingHalfUnits: 0,
+      depositedHalfUnits: 0,
+    };
+    const deposited = depositedByItem.get(item) ?? 0;
+    cell.depositedHalfUnits += deposited;
+    cell.remainingHalfUnits += item.quantityHalfUnits - deposited;
+    cells.set(key, cell);
+  }
+  return [...cells.values()];
+}

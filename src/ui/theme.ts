@@ -233,3 +233,10 @@ export const typography = {
     lineHeight: 16,
   } satisfies TextStyle,
 } as const;
+
+/** Grille informative, sans cibles tactiles : sept jours visibles ensemble. */
+export const preparationGridLayout = {
+  axisWidth: 36,
+  cellHeight: 24,
+  gap: 4,
+} as const;
