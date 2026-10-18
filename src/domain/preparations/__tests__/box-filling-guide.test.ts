@@ -1,5 +1,6 @@
 import {
   buildBoxFillingGuide,
+  buildMedicationFillingCells,
   parseBoxContribution,
 } from '../box-filling-guide';
 import type { MedicationBox } from '@/domain/inventory/inventory';
@@ -117,4 +118,48 @@ it.each([
   ['1e0', null],
 ])('valide la quantité explicitement saisie %s', (value, expected) => {
   expect(parseBoxContribution(String(value), 14)).toBe(expected);
+});
+
+describe('quantités dans les cases du médicament en cours', () => {
+  it('déduit les dépôts partiels dans l’ordre chronologique sans arrondi', () => {
+    const result = buildMedicationFillingCells([...items].reverse(), [
+      { boxId: 1, quantityHalfUnits: 3 },
+    ]);
+    expect(result.find((cell) => cell.date === '2026-08-17')).toMatchObject({
+      remainingHalfUnits: 0,
+      depositedHalfUnits: 2,
+    });
+    expect(result.find((cell) => cell.date === '2026-08-18')).toMatchObject({
+      remainingHalfUnits: 1,
+      depositedHalfUnits: 1,
+    });
+    expect(result.find((cell) => cell.date === '2026-08-19')).toMatchObject({
+      remainingHalfUnits: 2,
+      depositedHalfUnits: 0,
+    });
+  });
+  it('cumule les lignes d’une même case et les contributions de plusieurs boîtes', () => {
+    const result = buildMedicationFillingCells(
+      [items[0], { ...items[0], treatmentId: 2, quantityHalfUnits: 3 }],
+      [
+        { boxId: 1, quantityHalfUnits: 2 },
+        { boxId: 2, quantityHalfUnits: 1 },
+      ],
+    );
+    expect(result).toEqual([
+      {
+        date: '2026-08-17',
+        slot: 'morning',
+        remainingHalfUnits: 2,
+        depositedHalfUnits: 3,
+      },
+    ]);
+  });
+  it('retrouve les quantités du snapshot après retrait d’une contribution', () => {
+    expect(
+      buildMedicationFillingCells(items, []).map(
+        (cell) => cell.remainingHalfUnits,
+      ),
+    ).toEqual([2, 2, 2]);
+  });
 });

@@ -13,7 +13,7 @@ import type {
 } from '@/domain/preparations/preparation';
 import { formatHalfUnits } from '@/domain/treatments/treatment';
 import type { SavedPreparationProgress } from '@/infrastructure/preparations/preparation-repository';
-import { AppCard, Banner, colors, radii, spacing, typography } from '@/ui';
+import { AppCard, Banner, typography } from '@/ui';
 
 import { SLOT_LABELS } from './labels';
 import { styles } from './styles';
@@ -149,23 +149,13 @@ export function MedicationStep({
           : `${formatHalfUnits(remaining)} à déposer${deposited > 0 ? ` · ${formatHalfUnits(deposited)} déjà déposée(s)` : ''}`;
         const label = `${formatFrenchWeekdayAndDate(item.date)} · ${SLOT_LABELS[item.slot]}`;
         return (
-          <View
-            accessible
+          <Text
             accessibilityLabel={`${label} : ${status}. ${quantity}.`}
             key={`${item.date}-${item.slot}-${index}`}
-            style={{
-              padding: spacing.md,
-              gap: spacing.sm,
-              borderRadius: radii.sm,
-              borderWidth: filled ? 1 : 2,
-              borderColor: filled ? colors.border : colors.brand,
-              backgroundColor: filled ? colors.surface : colors.brandSoft,
-            }}
+            style={styles.case}
           >
-            <Text style={typography.itemTitle}>{status}</Text>
-            <Text style={typography.detail}>{label}</Text>
-            <Text style={typography.detail}>{quantity}</Text>
-          </View>
+            {filled ? '✓' : '→'} {label} : {quantity}
+          </Text>
         );
       })}
     </AppCard>
